@@ -37,7 +37,24 @@ jobs:
       - name: Write version of package to file
         run: python -c  "print('3.8', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
-        uses: actions/upload-artifact@v2
+        run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels.zip"
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: idf-python-wheels-3.8-win64
-          path: download/
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./idf-python-wheels.zip
+          asset_name: idf-python-wheels-3.8-win64.zip
+          asset_content_type: application/zip
