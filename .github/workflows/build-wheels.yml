@@ -1,0 +1,43 @@
+name: build-wheels
+
+on:
+  push:
+    tags:
+    - 'v*'
+
+jobs:
+  build-python-wheels:
+    name: Build Python Wheels for Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+      - name: Prepare download folder
+        run: mkdir download
+        shell: pwsh
+      - name: Install build dependencies
+        run: pip install wheel
+      - name: Build wheels for IDF master
+        run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("windows-curses")
+      - name: Test wheels by installation
+        run: .\Test-Wheels.ps1 -Branch "master"
+      - name: Build wheels for IDF release/v4.2
+        run: .\Build-Wheels.ps1  -Branch "release/v4.2" -CompileWheels @("windows-curses")
+      - name: Test wheels by installation
+        run: .\Test-Wheels.ps1 -Branch "release/v4.2"
+      - name: Build wheels for IDF release/v4.1
+        run: .\Build-Wheels.ps1  -Branch "release/v4.1" -CompileWheels @("windows-curses")
+      - name: Test wheels by installation
+        run: .\Test-Wheels.ps1 -Branch "release/v4.1"
+      - name: Write version of package to file
+        run: python -c  "print('3.8', file=open('download/version.txt', 'w'))"
+      - name: Archive artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: idf-python-wheels-3.8-win64
+          path: download/
