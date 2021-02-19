@@ -7,16 +7,25 @@ on:
 
 jobs:
   build-python-wheels:
-    name: Build Python Wheels for Windows
-    runs-on: windows-latest
-
+    name: Build Python Wheels for specific OS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+        - os: macos-latest
+          TARGET: macos
+        - os: ubuntu-latest
+          TARGET: linux-amd64
+        - os: windows-latest
+          TARGET: win64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.8'
+          python-version: '3.9'
       - name: Prepare download folder
         run: mkdir download
         shell: pwsh
@@ -35,7 +44,7 @@ jobs:
       - name: Test wheels by installation
         run: .\Test-Wheels.ps1 -Branch "release/v4.1"
       - name: Write version of package to file
-        run: python -c  "print('3.8', file=open('download/version.txt', 'w'))"
+        run: python -c  "print('3.9', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels.zip"
       - name: Create Release
@@ -56,5 +65,5 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./idf-python-wheels.zip
-          asset_name: idf-python-wheels-3.8-win64.zip
+          asset_name: idf-python-wheels-3.9-${{ matrix.TARGET }}.zip
           asset_content_type: application/zip
