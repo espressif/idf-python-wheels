@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-python-wheels:
-    name: Build Python Wheels for specific OS
+    name: Build Python Wheels for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,25 +27,34 @@ jobs:
         with:
           python-version: '3.9'
       - name: Prepare download folder
-        run: mkdir download
         shell: pwsh
+        run: mkdir download
       - name: Install build dependencies
+        shell: pwsh
         run: pip install wheel
       - name: Build wheels for IDF master
+        shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
+        shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master"
       - name: Build wheels for IDF release/v4.2
+        shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "release/v4.2" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
+        shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "release/v4.2"
       - name: Build wheels for IDF release/v4.1
+        shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "release/v4.1" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
+        shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "release/v4.1"
       - name: Write version of package to file
+        shell: pwsh
         run: python -c  "print('3.9', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
+        shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels.zip"
       - name: Create Release
         id: create_release
