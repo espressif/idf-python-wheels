@@ -34,13 +34,13 @@ jobs:
         run: pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master"
       - name: Build wheels for IDF release/v4.2
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.2" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.2" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "release/v4.2"
