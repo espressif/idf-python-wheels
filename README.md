@@ -7,5 +7,10 @@ The build contains all wheels required by branches:
 * release/v4.1.1
 * master
 
-Built for Python 3.8.7
+## Usage
+
+```
+.\Build-Wheels.ps1 -Branch "master" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses") -Python python3.9
+.\Test-Wheels.ps1 -Branch "master"
+```
 

@@ -1,14 +1,18 @@
+#!/usr/bin/env pwsh
 
 param (
     [string]$Branch="main",
+    [string]$Python="python3",
     [string[]]$CompileWheels=@()
 )
 
+"Using Python: $Python"
 $env:IDF_PATH=(Get-Location).Path
 $RequirementsUrl="https://raw.githubusercontent.com/espressif/esp-idf/${Branch}/requirements.txt"
 $FileBranch = ${Branch}.Replace('/', '_')
 $RequirementsTxt="requirements-${FileBranch}.txt"
 $OnlyBinary = ""
+"Processing: $RequirementsUrl"
 Invoke-WebRequest $RequirementsUrl -OutFile $RequirementsTxt
 
 # Iterate over binaries which should be compiled.
@@ -22,7 +26,7 @@ foreach ($wheelPrefix in $CompileWheels) {
     }
 
     "Processing: $wheel"
-    python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+    &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
     #$cache=pip cache dir
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }
     #ls download
@@ -30,4 +34,5 @@ foreach ($wheelPrefix in $CompileWheels) {
 }
 
 
-python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+&$Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+
