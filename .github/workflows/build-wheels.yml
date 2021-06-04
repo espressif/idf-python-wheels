@@ -29,11 +29,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, arm64, ubuntu-latest, windows-latest]
+        os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
         include:
         - os: macos-latest
           TARGET: macos-x64
-        - os: arm64
+        - os: self-hosted-macos-arm64
           TARGET: macos-arm64
         - os: ubuntu-latest
           TARGET: linux-amd64
@@ -43,6 +43,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
+        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest' }}
         uses: actions/setup-python@v2
         with:
           python-version: '3.9'
