@@ -14,10 +14,16 @@ Architectures specifies in .github/workflows:
 * macos-self-hosted - arm64
 * windows-latest - x64
 
-## Usage
+## Usage for x64 build
 
 ```
-.\Build-Wheels.ps1 -Branch "master" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses") -Python python3.9
+.\Build-Wheels.ps1 -Branch "master" -Arch "" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses") -Python python3.9
 .\Test-Wheels.ps1 -Branch "master"
 ```
 
+## Usage for arm64 build
+
+```
+.\Build-Wheels.ps1 -Branch "master" -Arch "-arm64" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses") -Python python3.9
+.\Test-Wheels.ps1 -Branch "master"
+```

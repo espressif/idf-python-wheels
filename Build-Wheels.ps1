@@ -3,6 +3,7 @@
 param (
     [string]$Branch="main",
     [string]$Python="python3",
+    [string]$Arch="",
     [string[]]$CompileWheels=@()
 )
 
@@ -26,7 +27,11 @@ foreach ($wheelPrefix in $CompileWheels) {
     }
 
     "Processing: $wheel"
-    &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+    if ("$Arch" -eq "") {
+        &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+    } else {
+        arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+    }
     #$cache=pip cache dir
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }
     #ls download

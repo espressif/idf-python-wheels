@@ -2,12 +2,17 @@
 
 param (
     [string]$Branch="main",
-    [string]$Python="python3.9"
+    [string]$Python="python3.9",
+    [string]$Arch=""
 )
 
 $env:IDF_PATH=(Get-Location).Path
 $FileBranch = ${Branch}.Replace('/', '_')
 $RequirementsTxt="requirements-${FileBranch}.txt"
 
-&$Python -m pip install --no-index --find-links download -r $RequirementsTxt
+if ("$Arch" -eq "") {
+    &$Python -m pip install --no-index --find-links download -r $RequirementsTxt
+} else {
+    arch $Arch $Python -m pip install --no-index --find-links download -r $RequirementsTxt
+}
 

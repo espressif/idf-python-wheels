@@ -32,12 +32,16 @@ jobs:
         os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
         include:
         - os: macos-latest
+          ARCH: ''
           TARGET: macos-x64
         - os: self-hosted-macos-arm64
+          ARCH: '-arm64'
           TARGET: macos-arm64
         - os: ubuntu-latest
+          ARCH: ''
           TARGET: linux-amd64
         - os: windows-latest
+          ARCH: ''
           TARGET: win64
     steps:
       - name: Checkout repository
@@ -55,25 +59,25 @@ jobs:
         run: python3 -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "master" -Arch "{{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master"
+        run: .\Test-Wheels.ps1 -Branch "master" -Arch "{{ matrix.ARCH }}"
       - name: Build wheels for IDF release/v4.2.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.2.1" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.2.1" -Arch "{{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.2.1"
+        run: .\Test-Wheels.ps1 -Branch "release/v4.2.1" -Arch "{{ matrix.ARCH }}"
       - name: Build wheels for IDF release/v4.1.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.1.1" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.1.1" -Arch "{{ matrix.ARCH }}" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.1.1"
+        run: .\Test-Wheels.ps1 -Branch "release/v4.1.1" -Arch "{{ matrix.ARCH }}"
       - name: Write version of package to file
         shell: pwsh
-        run: python -c  "print('3.9', file=open('download/version.txt', 'w'))"
+        run: python3 -c  "print('3.9', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels.zip"
