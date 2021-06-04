@@ -39,5 +39,8 @@ foreach ($wheelPrefix in $CompileWheels) {
 }
 
 
-&$Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
-
+if ("$Arch" -eq "") {
+    &$Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+} else {
+    arch $Arch $Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+}
