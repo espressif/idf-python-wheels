@@ -3,9 +3,16 @@
 Build of Windows Python Wheels required by IDF tools.
 
 The build contains all wheels required by branches:
-* release/v4.2
+* release/v4.2.1
 * release/v4.1.1
 * master
+
+
+Architectures specifies in .github/workflows:
+* ubuntu-latest - x64
+* macos-latest - x64
+* macos-self-hosted - arm64
+* windows-latest - x64
 
 ## Usage
 

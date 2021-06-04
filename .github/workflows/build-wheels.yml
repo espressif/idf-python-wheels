@@ -29,10 +29,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, macos-self-hosted, ubuntu-latest, windows-latest]
         include:
         - os: macos-latest
-          TARGET: macos
+          TARGET: macos-x64
+        - os: macos-self-hosted
+          TARGET: macos-arm64
         - os: ubuntu-latest
           TARGET: linux-amd64
         - os: windows-latest
@@ -56,18 +58,18 @@ jobs:
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master"
-      - name: Build wheels for IDF release/v4.2
+      - name: Build wheels for IDF release/v4.2.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.2" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.2.1" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.2"
-      - name: Build wheels for IDF release/v4.1
+        run: .\Test-Wheels.ps1 -Branch "release/v4.2.1"
+      - name: Build wheels for IDF release/v4.1.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.1" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.1.1" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.1"
+        run: .\Test-Wheels.ps1 -Branch "release/v4.1.1"
       - name: Write version of package to file
         shell: pwsh
         run: python -c  "print('3.9', file=open('download/version.txt', 'w'))"
