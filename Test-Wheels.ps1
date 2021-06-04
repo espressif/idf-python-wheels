@@ -2,7 +2,7 @@
 
 param (
     [string]$Branch="main",
-    [string]$Python="python3.9",
+    [string]$Python="python3",
     [string]$Arch=""
 )
 
