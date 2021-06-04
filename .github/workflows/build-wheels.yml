@@ -59,22 +59,22 @@ jobs:
         run: python3 -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "master" -Arch "{{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "{{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"
       - name: Build wheels for IDF release/v4.2.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.2.1" -Arch "{{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.2.1" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.2.1" -Arch "{{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch "release/v4.2.1" -Arch "${{ matrix.ARCH }}"
       - name: Build wheels for IDF release/v4.1.1
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "release/v4.1.1" -Arch "{{ matrix.ARCH }}" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "release/v4.1.1" -Arch "${{ matrix.ARCH }}" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "release/v4.1.1" -Arch "{{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch "release/v4.1.1" -Arch "${{ matrix.ARCH }}"
       - name: Write version of package to file
         shell: pwsh
         run: python3 -c  "print('3.9', file=open('download/version.txt', 'w'))"
