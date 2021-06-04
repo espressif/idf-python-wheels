@@ -52,7 +52,7 @@ jobs:
         run: mkdir download
       - name: Install build dependencies
         shell: pwsh
-        run: pip install wheel
+        run: python3 -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "master" -CompileWheels @("greenlet", "gevent<2.0,>=1.2.2", "cryptography", "windows-curses")
