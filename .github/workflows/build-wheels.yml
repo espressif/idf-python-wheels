@@ -26,7 +26,7 @@ jobs:
   build-python-wheels:
     name: Build Python Wheels for ${{ matrix.os }}
     needs: create_release
-    runs-on: ${{ matrix.os }}
+    runs-on: [macos-self-hosted, '${{ matrix.os }}' ]
     strategy:
       matrix:
         os: [macos-latest, macos-self-hosted, ubuntu-latest, windows-latest]
