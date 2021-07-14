@@ -29,7 +29,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
+        #os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
         include:
         - os: macos-latest
           ARCH: ''
@@ -50,7 +51,7 @@ jobs:
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest' }}
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.8'
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
@@ -69,15 +70,15 @@ jobs:
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "v4.2.1" -Arch "${{ matrix.ARCH }}"
-      - name: Build wheels for IDF v4.1.1
+      - name: Build wheels for IDF v4.3
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "v4.1.1" -Arch "${{ matrix.ARCH }}" -CompileWheels @("windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "v4.3" -Arch "${{ matrix.ARCH }}" -CompileWheels @("windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "v4.1.1" -Arch "${{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch "v4.3" -Arch "${{ matrix.ARCH }}"
       - name: Write version of package to file
         shell: pwsh
-        run: python3 -c  "print('3.9', file=open('download/version.txt', 'w'))"
+        run: python3 -c  "print('3.8', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels.zip"
@@ -89,5 +90,5 @@ jobs:
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
           asset_path: ./idf-python-wheels.zip
-          asset_name: idf-python-wheels-3.9-${{ matrix.TARGET }}.zip
+          asset_name: idf-python-wheels-3.8-${{ matrix.TARGET }}.zip
           asset_content_type: application/zip
