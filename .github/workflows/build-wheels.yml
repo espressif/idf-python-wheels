@@ -30,14 +30,17 @@ jobs:
     strategy:
       matrix:
         #os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest, macos-m1-self-hosted, linux-armv7-self-hosted]
         include:
         - os: macos-latest
           ARCH: ''
           TARGET: macos-x64
-        - os: self-hosted-macos-arm64
+        - os: macos-m1-self-hosted
           ARCH: '-arm64'
           TARGET: macos-arm64
+        - os: linux-armv7-self-hosted
+          ARCH: ''
+          TARGET: linux-armv7
         - os: ubuntu-latest
           ARCH: ''
           TARGET: linux-amd64
@@ -64,12 +67,12 @@ jobs:
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"
-      - name: Build wheels for IDF v4.2.1
+      - name: Build wheels for IDF v4.2.2
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "v4.2.1" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch "v4.2.2" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "v4.2.1" -Arch "${{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch "v4.2.2" -Arch "${{ matrix.ARCH }}"
       - name: Build wheels for IDF v4.3
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "v4.3" -Arch "${{ matrix.ARCH }}" -CompileWheels @("windows-curses")
