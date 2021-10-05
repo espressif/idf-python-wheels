@@ -1,4 +1,4 @@
-name: build-wheels-ubuntu-dispatch
+name: ubuntu-dispatch
 
 on:
   workflow_dispatch

@@ -1,4 +1,4 @@
-name: build-wheels-macos-x64-dispatch
+name: macos-x64-dispatch
 
 on:
   workflow_dispatch

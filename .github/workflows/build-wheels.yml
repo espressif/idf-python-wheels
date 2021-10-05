@@ -1,9 +1,7 @@
 name: build-wheels
 
-# on:
-#   push:
-#     tags:
-#     - 'v*'
+on:
+  workflow_dispatch
 
 jobs:
   create_release:

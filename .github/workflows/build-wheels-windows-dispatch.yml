@@ -1,4 +1,4 @@
-name: build-wheels-windows-dispatch
+name: windows-dispatch
 
 on:
   workflow_dispatch
