@@ -74,7 +74,7 @@ jobs:
         run: python3 -c  "print('3.8', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
-        run: Compress-Archive -Path "download\*" -DestinationPath "idf-python-wheels-3.8-${{ matrix.TARGET }}.zip" 
+        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
       
       - name: Upload Release Asset
         id: upload-release-asset
