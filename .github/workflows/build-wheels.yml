@@ -1,9 +1,9 @@
 name: build-wheels
 
-on:
-  push:
-    tags:
-    - 'v*'
+# on:
+#   push:
+#     tags:
+#     - 'v*'
 
 jobs:
   create_release:
