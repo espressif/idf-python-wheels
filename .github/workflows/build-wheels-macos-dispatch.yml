@@ -45,9 +45,8 @@ jobs:
         include:
         - os: macos-latest
           ARCH: ''
-          TARGET: macos-x64
           ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-3.8-${{ matrix.TARGET }}.zip'
+          ASSET_NAME: 'idf-python-wheels-3.8-macos-x64.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
           LLVM_ROOT_OPTION: ''
     steps:
@@ -84,6 +83,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.ASSET_PATH}}
-          asset_name: ${{ matrix.ASSET_NAME}}
+          asset_path: ${{ matrix.ASSET_PATH }}
+          asset_name: ${{ matrix.ASSET_NAME }}
           asset_content_type: ${{ matrix.ASSET_CONTENT_TYPE }}
