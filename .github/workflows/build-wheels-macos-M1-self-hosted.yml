@@ -47,7 +47,7 @@ jobs:
         - os: macos-m1-self-hosted
           ARCH: '-arm64'
           ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-3.8-macos-arm64.zip'
+          ASSET_NAME: 'idf-python-wheels-3.8-aarch64-apple-darwin.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
           LLVM_ROOT_OPTION: ''
     steps:
