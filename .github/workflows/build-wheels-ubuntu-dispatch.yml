@@ -46,7 +46,7 @@ jobs:
         - os: ubuntu-18.04
           ARCH: ''
           ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-3.8-linux-x64.zip'
+          ASSET_NAME: 'idf-python-wheels-3.8-x86_64-unknown-linux-gnu.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
           LLVM_ROOT_OPTION: ''
     steps:
