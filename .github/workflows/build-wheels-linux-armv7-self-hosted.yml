@@ -1,7 +1,7 @@
 name: armv7-dispatch
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
     inputs:
       python_version:
         description: 'Python Version'
