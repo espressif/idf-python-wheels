@@ -62,6 +62,7 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: '3.8'
+      - name: Set up Python locally
         if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
         uses: "gabrielfalcao/pyenv-action@v7"
         with:
