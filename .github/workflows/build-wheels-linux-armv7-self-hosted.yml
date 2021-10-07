@@ -2,6 +2,11 @@ name: armv7-dispatch
 
 on:
   workflow_dispatch
+    inputs:
+      python_version:
+        description: 'Python Version'
+        required: true
+        default: 'v3.8.10'
 
 jobs:
   get_release:
@@ -46,7 +51,7 @@ jobs:
         - os: linux-armv7-self-hosted
           ARCH: ''
           ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-3.8-linux-armv7.zip'
+          ASSET_NAME: 'idf-python-wheels-${{ github.event.inputs.python_version }}-linux-armv7.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
           LLVM_ROOT_OPTION: ''
     steps:
@@ -57,6 +62,12 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: '3.8'
+        if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
+        uses: "gabrielfalcao/pyenv-action@v7"
+        with:
+          default: ${{ github.event.inputs.python_version }}
+      - name: Create virualenv for python ${{ github.event.inputs.python_version }}
+        run: pyenv local ${{ github.event.inputs.python_version }} && python3 -mvenv .venv${{ github.event.inputs.python_version }}
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
@@ -71,7 +82,7 @@ jobs:
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"   
       - name: Write version of package to file
         shell: pwsh
-        run: python3 -c  "print('3.8', file=open('download/version.txt', 'w'))"
+        run: python3 -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
