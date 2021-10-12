@@ -6,7 +6,7 @@ on:
       python_version:
         description: 'Python Version'
         required: true
-        default: '3.8'
+        default: '3.8.10'
 
 jobs:
   get_release:
