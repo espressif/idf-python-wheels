@@ -70,7 +70,7 @@ jobs:
       - name: Checkout pyenv
         uses: actions/checkout@v2
         with:
-          repository: 'https://github.com/pyenv/pyenv.git'
+          repository: 'pyenv/pyenv'
           path: "~/.pyenv"
           ref: '${{ github.event.inputs.pyenv_version }}'
 
