@@ -35,6 +35,8 @@ jobs:
     name: Build Python Wheels for ${{ matrix.os }}
     needs: [get_release]
     runs-on: ${{ matrix.os }}
+    env:
+      PYENV_VERSION: v2.1.0
     strategy:
       matrix:
         #os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
@@ -64,17 +66,24 @@ jobs:
           python-version: '3.8'
       - name: Set up Python locally
         if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
-        uses: "gabrielfalcao/pyenv-action@v8"
-        with:
-          default: ${{ github.event.inputs.python_version }}
-      - name: Create virualenv for python ${{ github.event.inputs.python_version }}
-        run: pyenv local ${{ github.event.inputs.python_version }} && python3 -mvenv .venv${{ github.event.inputs.python_version }}
+        run: |
+          rm -rf ~/.pyenv
+          git clone https://github.com/pyenv/pyenv.git -b $PYENV_VERSION ~/.pyenv
+          export PYENV_ROOT=~/.pyenv
+          export PATH=$PYENV_ROOT/bin:$PATH
+          pyenv install ${{ github.event.inputs.python_version }}
+      - name: Install dependencies
+        run: |
+          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m venv test_venv
+          source test_venv/bin/activate
+          pip install -U pip
+          pip install -r requirements.txt
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
       - name: Install build dependencies
         shell: pwsh
-        run: python3 -m pip install wheel
+        run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
@@ -83,7 +92,7 @@ jobs:
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"   
       - name: Write version of package to file
         shell: pwsh
-        run: python3 -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
+        run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
