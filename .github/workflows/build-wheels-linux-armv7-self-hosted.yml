@@ -97,7 +97,7 @@ jobs:
           PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple" 
         shell: pwsh
         run: |
-          export PATH=$$HOME/.cargo/bin:$PATH
+          export PATH=$HOME/.cargo/bin:$PATH
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
           .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
       - name: Test wheels by installation
