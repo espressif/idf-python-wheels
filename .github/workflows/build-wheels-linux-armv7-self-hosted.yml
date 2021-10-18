@@ -88,7 +88,7 @@ jobs:
         run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install wheel
       - name: Build wheels for IDF master
         env: 
-          PIP_EXTRA_INDEX_URL="https://www.piwheels.org/simple" 
+          PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple" 
         shell: pwsh
         run: 
           .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
