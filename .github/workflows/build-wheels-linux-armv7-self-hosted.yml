@@ -83,8 +83,9 @@ jobs:
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
       - name: Install Rust
         shell: bash
-        run: which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && source $HOME/.cargo/env
-        run: rustc --version
+        run: |
+          which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && source $HOME/.cargo/env
+          rustc --version
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
