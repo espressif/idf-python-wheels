@@ -79,7 +79,8 @@ jobs:
         run: |
           export PYENV_ROOT=~/.pyenv
           export PATH=$PYENV_ROOT/bin:$PATH
-          pyenv install -s ${{ github.event.inputs.python_version }} 
+          pyenv install -s ${{ github.event.inputs.python_version }}
+          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
       - name: Install Rust
         shell: bash
         run: which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y  
