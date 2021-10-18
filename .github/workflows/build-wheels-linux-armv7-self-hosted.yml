@@ -80,12 +80,12 @@ jobs:
           export PYENV_ROOT=~/.pyenv
           export PATH=$PYENV_ROOT/bin:$PATH
           pyenv install -s ${{ github.event.inputs.python_version }}
-          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
       - name: Install Rust
         shell: bash
         run: |
           which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && source $HOME/.cargo/env
-          rustc --version
+        env:
+          RUST_PATH: "$HOME/.cargo/bin"
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
@@ -96,7 +96,10 @@ jobs:
         env: 
           PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple" 
         shell: pwsh
-        run: .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
+        run: |
+          export PATH=$$HOME/.cargo/bin:$PATH
+          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
+          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }} -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python""   
