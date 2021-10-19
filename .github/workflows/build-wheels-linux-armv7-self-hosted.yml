@@ -84,6 +84,7 @@ jobs:
         shell: bash
         run: |
           if ( which rustc ); then rustc --version; else curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && export PATH=$PATH:~/.cargo/bin; fi
+          echo $PATH
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
@@ -96,6 +97,7 @@ jobs:
         shell: pwsh
         run: |
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install --upgrade pip
+          echo $PATH
           .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
       - name: Test wheels by installation
         shell: pwsh
