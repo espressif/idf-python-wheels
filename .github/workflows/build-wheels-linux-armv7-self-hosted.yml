@@ -102,7 +102,7 @@ jobs:
           .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }} -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python""   
+        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python""   
       - name: Write version of package to file
         shell: pwsh
         run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
