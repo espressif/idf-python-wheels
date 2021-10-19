@@ -96,7 +96,6 @@ jobs:
           PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple" 
         shell: pwsh
         run: |
-          rustc --version
           $env:PATH+=":/home/pi/.cargo/bin"
           rustc --version
           $env:PATH
