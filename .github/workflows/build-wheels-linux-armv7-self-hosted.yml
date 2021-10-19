@@ -83,7 +83,7 @@ jobs:
       - name: Install Rust
         shell: bash
         run: |
-        if ( which rustc ); then rustc --version; else curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && export PATH=$PATH:~/.cargo/bin
+          if ( which rustc ); then rustc --version; else curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && export PATH=$PATH:~/.cargo/bin; fi
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
