@@ -83,8 +83,7 @@ jobs:
       - name: Install Rust
         shell: bash
         run: |
-          if ( which rustc ); then rustc --version; else curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y && export PATH=$PATH:~/.cargo/bin; fi
-          echo $PATH
+          which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
@@ -97,9 +96,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH+=":/home/pi/.cargo/bin"
-          rustc --version
-          $env:PATH
-          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
+          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"   
