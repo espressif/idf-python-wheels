@@ -5,6 +5,5 @@ name = "pypi"
 
 [packages]
 boto3 = "*"
-re = "*"
 
 [dev-packages]

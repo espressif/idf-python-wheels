@@ -103,10 +103,6 @@ jobs:
       - name: Write version of package to file
         shell: pwsh
         run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
-      - name: Install python deps
-        run: |
-          pip install pipenv
-          pipenv install
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TEST_AWS_ACCESS_KEY_ID }}
@@ -116,7 +112,8 @@ jobs:
         shell: bash
         run: |
           ./Upload-Wheels.sh ${{ secrets.TEST_DL_BUCKET }}
-          pipenv run create_index_pages.py ${{ secrets.TEST_DL_BUCKET }}
+          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install boto3
+           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python create_index_pages.py ${{ secrets.TEST_DL_BUCKET }}
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
