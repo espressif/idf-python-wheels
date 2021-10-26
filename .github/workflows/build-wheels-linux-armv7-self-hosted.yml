@@ -109,9 +109,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TEST_AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.TEST_AWS_DEFAULT_REGION }}
           AWS_BUCKET: ${{ secrets.TEST_DL_BUCKET }}
-        shell: bash
         run: |
-          .\Upload-Wheels.sh ${{ secrets.TEST_DL_BUCKET }}
+          ./Upload-Wheels.sh ${{ secrets.TEST_DL_BUCKET }}
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install boto3
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python create_index_pages.py ${{ secrets.TEST_DL_BUCKET }}
       - name: Archive artifact
