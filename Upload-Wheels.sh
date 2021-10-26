@@ -1,5 +1,3 @@
-#! /bin/bash
-
 cd download
 
 for wfile in *.whl
