@@ -49,7 +49,7 @@ async fn create_indexes(bucket: &Bucket, dl_prefix: &String) -> Result<(), Box<d
 
     let result_list = bucket.list(dl_prefix.to_string(), None).await?;
     let mut packages = MultiMap::new();
-    let pb = ProgressBar::new((2*result_list.len()).try_into().unwrap());
+    let pb = ProgressBar::new(2 * result_list.len() as u64);
     for file in result_list {
         for item in file.contents {
             if !item.key.contains(".whl") {
@@ -67,7 +67,7 @@ async fn create_indexes(bucket: &Bucket, dl_prefix: &String) -> Result<(), Box<d
     let mut index = String::new();
     index.push_str(header);
 
-    let pb = ProgressBar::new((packages.len()).try_into().unwrap());
+    let pb = ProgressBar::new((packages.len()) as u64);
 
     for name in packages.keys() {
         index.push_str(&format!("\n<a href=\"/{prefix}/{item}/\">{item}/</a>", prefix=dl_prefix, item=name));
