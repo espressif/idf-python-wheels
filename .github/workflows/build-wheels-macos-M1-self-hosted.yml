@@ -67,23 +67,6 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: '3.8'
-      - name: Checkout pyenv
-        uses: actions/checkout@v2
-        with:
-          repository: 'pyenv/pyenv'
-          path: "~/.pyenv"
-          ref: '${{ github.event.inputs.pyenv_version }}'
-
-      - name: Set up Python locally
-        if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
-        run: |
-          brew update
-          arch -x86_64 brew install pyenv openssl readline sqlite3 xz zlib
-          export PYENV_ROOT="$HOME/.pyenv"
-          export PATH="$PYENV_ROOT/bin:$PATH"
-          eval "$(pyenv init --path)"
-          eval "$(pyenv init -)"
-          pyenv install -s ${{ github.event.inputs.python_version }}
       - name: Prepare download folder
         shell: pwsh
         run: |
@@ -91,21 +74,21 @@ jobs:
           (Get-Item .).FullName
       - name: Install build dependencies
         shell: pwsh
-        run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install wheel
+        run: |
+          which python3
+          python3 -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
         run: |
           $env:PATH+=":/home/.cargo/env"
-          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
+          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python" 
+        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" 
       - name: Write version of package to file
         shell: pwsh
-        run:  ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
-      - name: Archive artifact
-        shell: pwsh
-        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
+        run:  python3  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
+     
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TEST_AWS_ACCESS_KEY_ID }}
