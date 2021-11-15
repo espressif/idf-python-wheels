@@ -12,7 +12,7 @@ tokio = { version = "1.13.0", features = ["full"] }
 #openssl = { version = "0.10", features = ["vendored"] }
 #aws-sdk-rust = "0.1.40"
 #rust-s3 = {version =  "0.27", git = "https://github.com/JurajSadel/rust-s3.git", branch = "add_ap-east-1_region" }
-rust-s3 = { path = "C:/Users/JurajSadel/rust-s3/s3" }
+rust-s3 = { git = "https://github.com/durch/rust-s3.git", branch="develop" }
 #rust-s3 = "0.27"
 structopt = { version = "0.3", default-features = false }
 regex = "1"
