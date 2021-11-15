@@ -78,7 +78,7 @@ jobs:
         if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
         run: |
           brew update
-          brew install pyenv openssl readline sqlite3 xz zlib
+          arch -x86_64 brew install pyenv openssl readline sqlite3 xz zlib
           export PYENV_ROOT="$HOME/.pyenv"
           export PATH="$PYENV_ROOT/bin:$PATH"
           eval "$(pyenv init --path)"
