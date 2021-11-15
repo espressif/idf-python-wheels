@@ -87,7 +87,7 @@ jobs:
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" 
       - name: Write version of package to file
         shell: pwsh
-        run:  python3  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
+        run:  python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
      
       - name: Upload Release Asset To test s3
         env:
