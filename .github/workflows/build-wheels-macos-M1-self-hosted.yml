@@ -75,8 +75,8 @@ jobs:
       - name: Install build dependencies
         shell: pwsh
         run: |
-          which python3
-          python3 -m pip install wheel
+          which /usr/bin/python3
+          /usr/bin/python3 -m pip install wheel
       - name: Build wheels for IDF master
         shell: pwsh
         run: |
@@ -87,7 +87,7 @@ jobs:
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" 
       - name: Write version of package to file
         shell: pwsh
-        run:  python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
+        run: /usr/bin/python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
      
       - name: Upload Release Asset To test s3
         env:
