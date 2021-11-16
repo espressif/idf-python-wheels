@@ -81,10 +81,10 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH+=":/home/.cargo/env"
-          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml")
+          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "/usr/bin/python3"
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" 
+        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "/usr/bin/python3"
       - name: Write version of package to file
         shell: pwsh
         run: /usr/bin/python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
