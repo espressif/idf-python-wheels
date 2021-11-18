@@ -81,7 +81,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH+=":/home/.cargo/env"
-          /usr/bin/python3 -m pip install --upgrade pip
+          export CPPFLAGS=-I/usr/local/opt/openssl/include
+          export LDFLAGS=-L/usr/local/opt/openssl/lib
           .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "/usr/bin/python3"
       - name: Test wheels by installation
         shell: pwsh
