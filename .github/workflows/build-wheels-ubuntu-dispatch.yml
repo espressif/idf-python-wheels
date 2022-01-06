@@ -7,6 +7,10 @@ on:
         description: 'Python Version'
         required: true
         default: '3.9'
+      IDF_branch:
+        description: 'Wheels will be built for this branch'
+        required: false
+        default: 'master'
 
 jobs:
   get_release:
