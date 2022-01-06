@@ -76,10 +76,10 @@ jobs:
         run: python3 --version  
       - name: Build wheels for IDF master
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"   
+        run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
