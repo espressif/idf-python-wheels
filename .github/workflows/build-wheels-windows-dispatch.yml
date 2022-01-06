@@ -1,7 +1,12 @@
 name: windows-dispatch
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: 'Python Version'
+        required: true
+        default: '3.9'
 
 jobs:
   get_release:
@@ -32,21 +37,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        #os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
-        #os: [macos-latest, ubuntu-18.04 ]
-        #os: [macos-latest, ubuntu-18.04, windows-latest]
-        # os: [ubuntu-18.04]
         os: [windows-latest]
-        # os: [macos-latest]
-        # os: [ [self-hosted, Windows, X64] ]
-        # os: [ [self-hosted, macOS, M1] ]
-        #os: [ windows-self-hosted, macos-m1-self-hosted ]
-        # os: [ windows-self-hosted ]
         include:
         - os: windows-latest
           ARCH: ''
           ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-3.8-x86_64-pc-windows-msvc.zip'
+          ASSET_NAME: 'idf-python-wheels-${{ github.event.inputs.python_version }}-x86_64-pc-windows-msvc.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
           LLVM_ROOT_OPTION: ''
     steps:
@@ -56,26 +52,33 @@ jobs:
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest' }}
         uses: actions/setup-python@v2
         with:
-          python-version: '3.8'
+          python-version: ${{ github.event.inputs.python_version }}
+      - name: Install stable Rust with clippy and rustfmt
+        uses: actions-rs/toolchain@v1
+        with:
+         profile: default
+         toolchain: stable
+         components: rustfmt, clippy
+      - name: Rust version
+        run: rustc --version
       - name: Prepare download folder
         shell: pwsh
         run: mkdir download
       - name: Install build dependencies
         shell: pwsh
         run: python3 -m pip install wheel
+      - name: Get python3 version
+        shell: pwsh
+        run: python3 --version  
       - name: Build wheels for IDF master
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}"   
-      - name: Write version of package to file
-        shell: pwsh
-        run: python3 -c  "print('3.8', file=open('download/version.txt', 'w'))"
       - name: Archive artifact
         shell: pwsh
         run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
-      
       - name: Upload Release Asset
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
@@ -86,3 +89,12 @@ jobs:
           asset_path: ${{ matrix.ASSET_PATH }}
           asset_name: ${{ matrix.ASSET_NAME }}
           asset_content_type: ${{ matrix.ASSET_CONTENT_TYPE }}
+      - name: Upload Release Asset To test s3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+          PREFIX: 'pypi'
+        run: 
+          cargo run --manifest-path=upload-wheels/Cargo.toml
