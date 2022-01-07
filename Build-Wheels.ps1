@@ -26,6 +26,10 @@ foreach ($wheelPrefix in $CompileWheels) {
         $wheel = $wheelPrefix
     }
 
+    if ($wheel.startswith('windows-curses')) {
+        $wheel = "windows-curses"
+    }
+
     "Processing: $wheel"
     if ("$Arch" -eq "") {
         &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
