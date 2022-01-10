@@ -1,18 +1,26 @@
 # ESP idf-python-wheels
 
-Build of Windows Python Wheels required by IDF tools.
+The goal of this project is to automate build and upload process of required Python Wheels by IDF tools using GitHub Actions. We are able to build wheels for multiple OSes and architectures with multiple versions of Python.  
 
-The build contains all wheels required by branches:
-* release/v4.2.1
-* release/v4.1.1
-* master
-
-
-Architectures specifies in .github/workflows:
+Supported architectures:
 * ubuntu-latest - x64
 * macos-latest - x64
 * macos-self-hosted - arm64
 * windows-latest - x64
+* linux-armv7-self-hosted - arm32
+* linux-aarch64-self-hosted - arm64
+
+Each architecture has it's own workflow in .github/workflows except aarch64 Linux - not ready as GitHub runner yet. 
+
+For each architecture the user can select Python version to built wheels. On self-hosted runners can handle multiple versions of Python with pyenv. 
+
+The build contains all wheels required by branches:
+* release/v4.3
+* release/v4.4
+* master
+
+User can set `IDF_branch` input parameter to add wheels for another branch.
+
 
 ## Usage for x64 build
 
