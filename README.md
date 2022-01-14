@@ -19,7 +19,11 @@ The build contains all wheels required by branches:
 * release/v4.4
 * master
 
-User can set `IDF_branch` input parameter to add wheels for another branch.
+## Configuration
+- user can set `IDF_branch` input parameter to add wheels for another branch.
+- currently, it is possible to run a workflow for the whole requirenments.txt
+- to add new architecture, set up GitHub runner, and create new GitHub Action
+- workflows need to be started manually
 
 
 ## Usage for x64 build
