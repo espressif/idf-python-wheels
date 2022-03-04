@@ -62,16 +62,12 @@ jobs:
         run: |
           rm -rf ~/.pyenv
           git clone https://github.com/pyenv/pyenv.git ~/.pyenv
-          echo 'export PYENV_ROOT="~/.pyenv"' >> ~/.zprofile
-          echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zprofile
-          echo 'eval "$(pyenv init --path)"' >> ~/.zprofile
-          echo 'eval "$(pyenv init -)"' >> ~/.zshrc
-          exec "$SHELL"
+          export PYENV_ROOT=~/.pyenv
+          export PATH=$PYENV_ROOT/bin:$PATH
           pyenv --version
-      - name: Install python ${{ github.event.inputs.python_version }}
-        run: |
           pyenv install --skip-existing ${{ github.event.inputs.python_version }}
           ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python --version
+
       # - name: Prepare download folder
       #   run: mkdir download
       # - name: Install build dependencies
