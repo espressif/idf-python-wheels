@@ -62,61 +62,64 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-      - name: Set up Python
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-18.04' || matrix.os == 'windows-latest' }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.8'
-      - name: Prepare download folder
-        shell: pwsh
+      - name: Set up pyenv
         run: |
-          mkdir download
-          (Get-Item .).FullName
-      - name: Install build dependencies
-        shell: pwsh
+          git clone https://github.com/pyenv/pyenv.git ~/.pyenv
+          echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zprofile
+          echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zprofile
+          echo 'eval "$(pyenv init --path)"' >> ~/.zprofile
+          echo 'eval "$(pyenv init -)"' >> ~/.zshrc
+          exec "$SHELL"
+          pyenv --version
+      - name: Install python ${{ github.event.inputs.python_version }}
         run: |
-          which /usr/bin/python3
-          /usr/bin/python3 -m pip install wheel
-      - name: Export CPP and LD flags
-        run: |
-          export CPPFLAGS=-I/usr/local/opt/openssl/include
-          export LDFLAGS=-L/usr/local/opt/openssl/lib
-          echo $CPPFLAGS
-          echo $LDFLAGS
-      - name: Build wheels for IDF master
-        shell: pwsh
-        run: |
-          $env:PATH+=":/home/.cargo/env"
-          echo $CPPFLAGS
-          echo $LDFLAGS
-          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "/usr/bin/python3"
-      - name: Test wheels by installation
-        shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "/usr/bin/python3"
-      - name: Write version of package to file
-        shell: pwsh
-        run: /usr/bin/python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
+          pyenv install --skip-existing ${{ github.event.inputs.python_version }}
+          ~/.pyenv/versions/${{matrix.python-version}}/bin/python --version
+      # - name: Prepare download folder
+      #   run: mkdir download
+      # - name: Install build dependencies
+      #   run: |
+      #     /usr/bin/python3 -m pip install wheel
+      # - name: Export CPP and LD flags
+      #   run: |
+      #     export CPPFLAGS=-I/usr/local/opt/openssl/include
+      #     export LDFLAGS=-L/usr/local/opt/openssl/lib
+      #     echo $CPPFLAGS
+      #     echo $LDFLAGS
+      # - name: Build wheels for IDF master
+      #   shell: pwsh
+      #   run: |
+      #     $env:PATH+=":/home/.cargo/env"
+      #     echo $CPPFLAGS
+      #     echo $LDFLAGS
+      #     .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "/usr/bin/python3"
+      # - name: Test wheels by installation
+      #   shell: pwsh
+      #   run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "/usr/bin/python3"
+      # - name: Write version of package to file
+      #   shell: pwsh
+      #   run: /usr/bin/python3 -c "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
      
-      - name: Upload Release Asset To test s3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
-          PREFIX: 'pypi'
-        run: 
-          cargo run --manifest-path=upload-wheels/Cargo.toml
-      - name: Archive artifact
-        shell: pwsh
-        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
+      # - name: Upload Release Asset To test s3
+      #   env:
+      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      #     AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+      #     PREFIX: 'pypi'
+      #   run: 
+      #     cargo run --manifest-path=upload-wheels/Cargo.toml
+      # - name: Archive artifact
+      #   shell: pwsh
+      #   run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
       
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.get_release.outputs.upload_url }}
-          asset_path: ${{ matrix.ASSET_PATH }}
-          asset_name: ${{ matrix.ASSET_NAME }}
-          asset_content_type: ${{ matrix.ASSET_CONTENT_TYPE }}
+      # - name: Upload Release Asset
+      #   id: upload-release-asset
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ needs.get_release.outputs.upload_url }}
+      #     asset_path: ${{ matrix.ASSET_PATH }}
+      #     asset_name: ${{ matrix.ASSET_NAME }}
+      #     asset_content_type: ${{ matrix.ASSET_CONTENT_TYPE }}
