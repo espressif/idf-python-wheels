@@ -11,10 +11,16 @@ on:
         description: 'Wheels will be built for this branch'
         required: false
         default: 'master'
+      ALLOW_UPLOAD_RELEASE:
+        description: Boolean for uploading release
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   get_release:
     name: Get release
+    if: ${{ github.event.ALLOW_UPLOAD_RELEASE }}
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.get_upload_url.outputs.url }}
@@ -36,15 +42,14 @@ jobs:
         response:  ${{ steps.get_latest_release.outputs.data }}
 
   build-python-wheels:
-    name: Build Python Wheels for ${{ matrix.os }}
-    needs: [get_release]
-    runs-on: ${{ matrix.os }}
+    name: Build Python Wheels for windows-latest
+    #needs: [get_release]
+    runs-on: windows-latest
     strategy:
       matrix:
-        os: [windows-latest]
+        #os: [windows-latest]
         include:
-        - os: windows-latest
-          ARCH: ''
+        - ARCH: ''
           ASSET_PATH: './idf-python-wheels.zip'
           ASSET_NAME: 'idf-python-wheels-${{ github.event.inputs.python_version }}-x86_64-pc-windows-msvc.zip'
           ASSET_CONTENT_TYPE: 'application/zip'
@@ -53,7 +58,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest' }}
         uses: actions/setup-python@v2
         with:
           python-version: ${{ github.event.inputs.python_version }}
@@ -73,17 +77,19 @@ jobs:
         run: python3 -m pip install wheel
       - name: Get python3 version
         shell: pwsh
-        run: python3 --version  
-      - name: Build wheels for IDF master
+        run: python3 --version
+      - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}"
       - name: Archive artifact
+        if: ${{ github.event.ALLOW_UPLOAD_RELEASE }}
         shell: pwsh
-        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
+        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}"
       - name: Upload Release Asset
+        if: ${{ github.event.ALLOW_UPLOAD_RELEASE }}
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
@@ -100,5 +106,6 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_BUCKET: ${{ secrets.DL_BUCKET }}
           PREFIX: 'pypi'
-        run: 
+        run: |
+          cargo update --manifest-path=upload-wheels/Cargo.toml
           cargo run --manifest-path=upload-wheels/Cargo.toml

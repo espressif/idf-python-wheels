@@ -13,47 +13,13 @@ on:
         default: 'master'
 
 jobs:
-  get_release:
-    name: Get release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.get_upload_url.outputs.url }}
-    steps:
-    - uses: octokit/request-action@v2.x
-      id: get_latest_release
-      with:
-        route: GET /repos/{owner}/{repo}/releases/latest
-        owner: espressif
-        repo: idf-python-wheels
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: get upload url
-      id: get_upload_url
-      run: |
-        url=$(echo "$response" | jq -r '.upload_url')
-        echo "::set-output name=url::$url"
-      env:
-        response:  ${{ steps.get_latest_release.outputs.data }}
-
   build-python-wheels:
-    name: Build Python Wheels for ${{ matrix.os }}
-    needs: [get_release]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest]
-        include:
-        - os: macos-latest
-          ARCH: ''
-          ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-${{ github.event.inputs.python_version }}-x86_64-apple-darwin'
-          ASSET_CONTENT_TYPE: 'application/zip'
-          LLVM_ROOT_OPTION: ''
+    name: Build Python Wheels for macos-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest' }}
         uses: actions/setup-python@v2
         with:
           python-version: ${{ github.event.inputs.python_version }}
@@ -66,15 +32,12 @@ jobs:
       - name: Rust version
         run: rustc --version
       - name: Prepare download folder
-        shell: pwsh
         run: mkdir download
       - name: Install build dependencies
-        shell: pwsh
         run: python3 -m pip install wheel
       - name: Get python3 version
-        shell: pwsh
-        run: python3 --version  
-      - name: Build wheels for IDF master
+        run: python3 --version
+      - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
@@ -87,5 +50,6 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_BUCKET: ${{ secrets.DL_BUCKET }}
           PREFIX: 'pypi'
-        run: 
+        run: |
+          cargo update --manifest-path=upload-wheels/Cargo.toml
           cargo run --manifest-path=upload-wheels/Cargo.toml
