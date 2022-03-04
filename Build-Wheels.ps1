@@ -9,7 +9,19 @@ param (
 
 "Using Python: $Python"
 $env:IDF_PATH=(Get-Location).Path
-$RequirementsUrl="https://raw.githubusercontent.com/espressif/esp-idf/${Branch}/requirements.txt"
+
+$BranchNum = ($Branch -replace "\D+[^0-9][^0-9]" , '')
+
+if ($BranchNum -eq "") {
+    $BranchNum = "5.0" # master
+}
+
+if ($BranchNum -ge "5.0") {
+    $RequirementsUrl="https://dl.espressif.com/dl/esp-idf/espidf.constraints.v${BranchNum}.txt"
+} else {
+    $RequirementsUrl="https://raw.githubusercontent.com/espressif/esp-idf/${Branch}/requirements.txt"
+}
+
 $FileBranch = ${Branch}.Replace('/', '_')
 $RequirementsTxt="requirements-${FileBranch}.txt"
 $OnlyBinary = ""
