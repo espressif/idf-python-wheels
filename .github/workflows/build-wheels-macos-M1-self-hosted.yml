@@ -7,10 +7,6 @@ on:
         description: 'Python Version'
         required: true
         default: '3.9.0'
-      pyenv_version:
-        description: "pyenv Version"
-        required: true
-        default: v2.1.0
 
 jobs:
   get_release:
@@ -65,7 +61,7 @@ jobs:
       - name: Set up pyenv
         run: |
           git clone https://github.com/pyenv/pyenv.git ~/.pyenv
-          echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zprofile
+          echo 'export PYENV_ROOT="~/.pyenv"' >> ~/.zprofile
           echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zprofile
           echo 'eval "$(pyenv init --path)"' >> ~/.zprofile
           echo 'eval "$(pyenv init -)"' >> ~/.zshrc
@@ -74,7 +70,7 @@ jobs:
       - name: Install python ${{ github.event.inputs.python_version }}
         run: |
           pyenv install --skip-existing ${{ github.event.inputs.python_version }}
-          ~/.pyenv/versions/${{matrix.python-version}}/bin/python --version
+          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python --version
       # - name: Prepare download folder
       #   run: mkdir download
       # - name: Install build dependencies
