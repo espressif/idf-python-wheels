@@ -40,6 +40,8 @@ jobs:
           eval "$(pyenv init --path)"
           pyenv --version
           arch -arm64 pyenv install --skip-existing ${{ github.event.inputs.python_version }}
+          export CPPFLAGS= -I/Users/githubrunner/brew/opt/openssl/include
+          export LDFLAGS=  -L/Users/githubrunner/brew/opt/openssl/lib
       - name: Rust version
         run: rustc --version
       - name: Prepare download folder
