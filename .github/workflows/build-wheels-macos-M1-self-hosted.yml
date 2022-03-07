@@ -52,7 +52,10 @@ jobs:
         run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python --version
       - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
         shell: pwsh
-        run: .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
+        run: |
+          $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
+          $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
+          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
                                 -Arch "${{ matrix.ARCH }}"
                                 -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
                                 -Python ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python
