@@ -7,6 +7,10 @@ on:
         description: 'Python Version'
         required: true
         default: '3.9.0'
+      IDF_branch:
+        description: 'Wheels will be built for this branch'
+        required: false
+        default: 'master'
 jobs:
   build-python-wheels:
     name: Build Python Wheels for ${{ matrix.os }}
