@@ -3,129 +3,56 @@ name: armv7-dispatch
 on:
   workflow_dispatch:
     inputs:
-      python_version:
-        description: 'Python Version'
-        required: true
-        default: '3.8.10'
-      pyenv_version:
-        description: "pyenv Version"
-        required: true
-        default: v2.1.0
+      IDF_branch:
+        description: 'Wheels will be built for this branch'
+        required: false
+        default: 'master'
 
 jobs:
-  get_release:
-    name: Get release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.get_upload_url.outputs.url }}
-    steps:
-    - uses: octokit/request-action@v2.x
-      id: get_latest_release
-      with:
-        route: GET /repos/{owner}/{repo}/releases/latest
-        owner: espressif
-        repo: idf-python-wheels
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: get upload url
-      id: get_upload_url
-      run: |
-        url=$(echo "$response" | jq -r '.upload_url')
-        echo "::set-output name=url::$url"
-      env:
-        response:  ${{ steps.get_latest_release.outputs.data }}
-
   build-python-wheels:
-    name: Build Python Wheels for ${{ matrix.os }}
-    needs: [get_release]
-    runs-on: ${{ matrix.os }}
+    name: Build Python Wheels for linux-armv7
+    runs-on: linux-armv7-self-hosted
     strategy:
       matrix:
-        #os: [macos-latest, self-hosted-macos-arm64, ubuntu-latest, windows-latest]
-        #os: [macos-latest, ubuntu-18.04 ]
-        #os: [macos-latest, ubuntu-18.04, windows-latest]
-        os: [linux-armv7-self-hosted]
-        # os: [windows-latest]
-        # os: [macos-latest]
-        # os: [ [self-hosted, Windows, X64] ]
-        # os: [ [self-hosted, macOS, M1] ]
-        #os: [ windows-self-hosted, macos-m1-self-hosted ]
-        # os: [ windows-self-hosted ]
-        include:
-        - os: linux-armv7-self-hosted
-          ARCH: ''
-          ASSET_PATH: './idf-python-wheels.zip'
-          ASSET_NAME: 'idf-python-wheels-${{ github.event.inputs.python_version }}-linux-armv7.zip'
-          ASSET_CONTENT_TYPE: 'application/zip'
-          LLVM_ROOT_OPTION: ''
+        python-version: ['3.7, 3.8, 3.9, 3.10']
+    container:
+      image: python:${{ matrix.python-version }}-bullseye
+      options: --privileged
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-      - name: Set up Python
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-18.04' || matrix.os == 'windows-latest' }}
-        uses: actions/setup-python@v2
+      - name: Install stable Rust with clippy and rustfmt
+        uses: actions-rs/toolchain@v1
         with:
-          python-version: '3.8'
-
-      - name: Checkout pyenv
-        uses: actions/checkout@v2
-        with:
-          repository: 'pyenv/pyenv'
-          path: "~/.pyenv"
-          ref: '${{ github.event.inputs.pyenv_version }}'
-
-      - name: Set up Python locally
-        if: ${{ matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'macos-m1-self-hosted' }}
-        run: |
-          export PYENV_ROOT=~/.pyenv
-          export PATH=$PYENV_ROOT/bin:$PATH
-          pyenv install -s ${{ github.event.inputs.python_version }}
-      - name: Install Rust
-        shell: bash
-        run: |
-          which rustc || curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y
+         profile: default
+         toolchain: stable
+         components: rustfmt, clippy
+      - name: Rust version
+        run: rustc --version
       - name: Prepare download folder
-        shell: pwsh
         run: mkdir download
       - name: Install build dependencies
-        shell: pwsh
-        run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install wheel
+        run: python3 -m pip install wheel
       - name: Build wheels for IDF master
-        env: 
-          PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple" 
+        env:
+          PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple"
         shell: pwsh
         run: |
           $env:PATH+=":/home/pi/.cargo/bin"
-          .\Build-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses", "pyyaml") -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"
+          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch "master" -Arch "${{ matrix.ARCH }}" -Python "~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python"   
-      - name: Write version of package to file
-        shell: pwsh
-        run: ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -c  "print('${{ github.event.inputs.python_version }}', file=open('download/version.txt', 'w'))"
-      - name: Aws version
-        run: aws --version
+        run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
       - name: Upload Release Asset To test s3
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.TEST_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.TEST_AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.TEST_AWS_DEFAULT_REGION }}
-          AWS_BUCKET: ${{ secrets.TEST_DL_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+          PREFIX: 'pypi'
+        shell: bash
         run: |
-          ./Upload-Wheels.sh ${{ secrets.TEST_DL_BUCKET }}
-          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python -m pip install boto3
-          ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python create_index_pages.py ${{ secrets.TEST_DL_BUCKET }}
-      - name: Archive artifact
-        shell: pwsh
-        run: Compress-Archive -Path "download\*" -DestinationPath "${{ matrix.ASSET_PATH }}" 
-      
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.get_release.outputs.upload_url }}
-          asset_path: ${{ matrix.ASSET_PATH }}
-          asset_name: ${{ matrix.ASSET_NAME }}
-          asset_content_type: ${{ matrix.ASSET_CONTENT_TYPE }}
+          chmod +x Upload-Wheels.sh
+          pip3 install boto3
+          ./Upload-Wheels.sh $AWS_BUCKET
+          python3 create_index_pages.py $AWS_BUCKET
