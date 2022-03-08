@@ -60,9 +60,9 @@ jobs:
       - name: Test wheels by installation
         shell: pwsh
         run: |
-        $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
-        $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
-        .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -Python ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python
+          $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
+          $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
+          .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -Python ~/.pyenv/versions/${{ github.event.inputs.python_version }}/bin/python
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
