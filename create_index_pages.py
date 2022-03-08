@@ -1,5 +1,3 @@
-#! /usr/bin/env python3
-
 import sys
 import os
 import re
@@ -31,8 +29,7 @@ s3 = boto3.client('s3')
 paginator = s3.get_paginator('list_objects_v2')
 
 response_iterator = paginator.paginate(
-    Bucket=DL_BUCKET 
-    #,Prefix="pypi/"
+    Bucket=DL_BUCKET
 )
 
 
@@ -49,7 +46,6 @@ for response in response_iterator:
             packages[name] = []
 
         packages[name].append(Path(package['Key']).name)
-        
 
 index = []
 index.append(HTML_HEADER)
@@ -63,7 +59,7 @@ for name, filenames in packages.items():
     index = []
     index.append(HTML_HEADER)
     for fn in filenames:
-        index.append(f'<a href="/pypi/{name}/{fn}">{fn}</a>')
+        index.append(f'<a href="/pypi/{name}/{fn}">{fn}</a><br/>')
     index.append(HTML_FOOTER)
 
     s3.upload_fileobj(BytesIO("\n".join(index).encode('utf-8')), DL_BUCKET, f'pypi/{name}/index.html', ExtraArgs={'ACL': 'public-read', 'ContentType':'text/html'})
