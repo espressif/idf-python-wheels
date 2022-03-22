@@ -60,3 +60,6 @@ if ("$Arch" -eq "") {
 } else {
     arch $Arch $Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
 }
+
+pip3 install wheel
+$Python -m pip wheel --wheel-dir download -r $RequirementsTxt
