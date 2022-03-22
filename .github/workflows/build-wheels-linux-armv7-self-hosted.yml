@@ -14,32 +14,27 @@ jobs:
     runs-on: linux-armv7-self-hosted
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10']
+        python-version: ['3.7.10', '3.8.12', '3.9.9', '3.10.2']
     container:
-      image: python:${{ matrix.python-version }}-bullseye
+      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
       options: --privileged
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-      - name: Install stable Rust with clippy and rustfmt
-        uses: actions-rs/toolchain@v1
-        with:
-         profile: default
-         toolchain: stable
-         components: rustfmt, clippy
-      - name: Rust version
-        run: rustc --version
       - name: Prepare download folder
         run: mkdir download
       - name: Install build dependencies
-        run: python3 -m pip install wheel
+        run: |
+          pyenv global ${{ matrix.python-version }}
+          python -m pip install wheel
+          pip3 install wheel
       - name: Build wheels for IDF master
         env:
           PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple"
         shell: pwsh
         run: |
-          $env:PATH+=":/home/pi/.cargo/bin"
-          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
+          python -m pip install --upgrade pip
+          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
@@ -53,6 +48,5 @@ jobs:
         shell: bash
         run: |
           chmod +x Upload-Wheels.sh
-          pip3 install boto3
           ./Upload-Wheels.sh $AWS_BUCKET
           python3 create_index_pages.py $AWS_BUCKET
