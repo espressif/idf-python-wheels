@@ -62,4 +62,4 @@ if ("$Arch" -eq "") {
 }
 
 pip3 install wheel
-$Python -m pip wheel --wheel-dir download -r $RequirementsTxt
+&$Python -m pip wheel --wheel-dir download -r $RequirementsTxt
