@@ -3,10 +3,6 @@ name: macos-x64-dispatch
 on:
   workflow_dispatch:
     inputs:
-      python_version:
-        description: 'Python Version'
-        required: true
-        default: '3.9'
       IDF_branch:
         description: 'Wheels will be built for this branch'
         required: false
@@ -16,13 +12,17 @@ jobs:
   build-python-wheels:
     name: Build Python Wheels for macos-latest
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.7.10', '3.8.12', '3.9.9', '3.10.2']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: ${{ github.event.inputs.python_version }}
+          python-version: ${{ matrix.python-version }}
       - name: Install stable Rust with clippy and rustfmt
         uses: actions-rs/toolchain@v1
         with:
@@ -39,7 +39,7 @@ jobs:
         run: python3 --version
       - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography")
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}"
