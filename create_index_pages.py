@@ -22,26 +22,28 @@ HTML_FOOTER = '''
 '''
 
 #DL_BUCKET = os.environ['DL_BUCKET']
-DL_BUCKET =  sys.argv[1]
+DL_BUCKET = sys.argv[1]
 
 s3 = boto3.client('s3')
 
 paginator = s3.get_paginator('list_objects_v2')
 
 response_iterator = paginator.paginate(
-    Bucket=DL_BUCKET
+    Bucket=DL_BUCKET,
+    Prefix="pypi/"
 )
 
 
 packages = {}
 for response in response_iterator:
     for package in response['Contents']:
-        res = re.search(r"(?<=\/)[a-zA-Z_\d]+(?=\-)", format(package['Key']))
+        # res = re.search(r"(?<=\/)[a-zA-Z_\d]+(?=\-)", format(package['Key']))
+        res = re.search(r"\/(.*)\/", format(package['Key']))
         #continue when package == index.html
         if not res:
             continue
 
-        name = res.group(0).lower()
+        name = res.group(1).lower()
         if name not in packages:
             packages[name] = []
 
