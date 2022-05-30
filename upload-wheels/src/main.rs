@@ -16,14 +16,13 @@ async fn upload_wheels(bucket: &Bucket, dl_prefix: &String) -> Result<(), Box<dy
 
     while let Some(entry) = files_in_dir.next_entry().await? {
         let name = entry.file_name().into_string().unwrap();
-        if !name.contains(".whl") {
+        if !name.contains(".whl") && !name.contains(".tar") {
             continue;
         }
 
         let re = Regex::new(r"^(.*?)-").unwrap(); //([a-zA-Z_\d]+)?\-.+
         let file = tokio::fs::read(entry.path()).await?;
         let prefix = re.captures(&name).unwrap().get(1).unwrap().as_str().to_lowercase();
-
         bucket.put_object_with_content_type( dl_prefix.to_owned() + "/" + &prefix + "/" + &name, &file, "binary/octet-stream").await?;
         pb.inc(1);
     }
@@ -52,7 +51,7 @@ async fn create_indexes(bucket: &Bucket, dl_prefix: &String) -> Result<(), Box<d
     let pb = ProgressBar::new(2 * result_list.len() as u64);
     for file in result_list {
         for item in file.contents {
-            if !item.key.contains(".whl") {
+            if !item.key.contains(".whl") && !item.key.contains(".tar") {
                 continue;
             }
             let re = Regex::new(r"([a-zA-Z_\d]+)\-.+").unwrap();
@@ -70,7 +69,7 @@ async fn create_indexes(bucket: &Bucket, dl_prefix: &String) -> Result<(), Box<d
     let pb = ProgressBar::new((packages.len()) as u64);
 
     for name in packages.keys() {
-        index.push_str(&format!("\n<a href=\"/{prefix}/{item}/\">{item}/</a>", prefix=dl_prefix, item=name));
+        index.push_str(&format!("\n<a href=\"/{prefix}/{item}/\">{item}/</a><br>", prefix=dl_prefix, item=name));
         pb.inc(1);
     }
     index.push_str(&footer);
@@ -109,20 +108,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_ne!(aws_access_key, "");
     assert_ne!(aws_secret_key, "");
     //assert_ne!(AWS_DEFAULT_REGION, "");
-    
+
     let credentials = Credentials::new(
         Some(&aws_access_key[..]),
         Some(&aws_secret_key[..]),
      None, None, None)?;
 
     let mut bucket = Bucket::new(
-        &dl_bucket[..], 
-        aws_region, 
+        &dl_bucket[..],
+        aws_region,
         credentials)?;
     bucket.add_header("x-amz-acl", "public-read");
-    
+
     upload_wheels(&bucket, &prefix).await?;
     create_indexes(&bucket, &prefix).await?;
-    
+
     Ok(())
 }
