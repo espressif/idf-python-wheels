@@ -11,7 +11,7 @@ on:
 jobs:
   build-python-wheels:
     name: Build Python Wheels for linux-armv7
-    runs-on: linux-armv7-self-hosted
+    runs-on: [self-hosted, linux, ARM]
     strategy:
       fail-fast: false
       matrix:
