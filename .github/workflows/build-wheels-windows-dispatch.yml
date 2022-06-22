@@ -59,3 +59,5 @@ jobs:
           pip3 install boto3
           ./Upload-Wheels.sh $AWS_BUCKET
           python3 create_index_pages.py $AWS_BUCKET
+      - name: Drop AWS cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
