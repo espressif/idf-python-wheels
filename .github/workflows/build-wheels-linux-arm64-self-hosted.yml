@@ -1,0 +1,57 @@
+name: linux-arm64-dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      IDF_branch:
+        description: 'Wheels will be built for this branch'
+        required: false
+        default: 'master'
+
+jobs:
+  build-python-wheels:
+    name: Build Python Wheels for linux-armv7
+    runs-on: [self-hosted, linux, ARM64]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.7.10', '3.8.12', '3.9.9', '3.10.2']
+    container:
+      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
+      options: --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Prepare download folder
+        run: mkdir download
+      - name: Install build dependencies
+        run: |
+          pyenv global ${{ matrix.python-version }}
+          python -m pip install wheel
+          pip3 install wheel
+      - name: Build wheels for IDF master
+        env:
+          PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple"
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          $env:PATH+=":/root/.cargo/bin"
+          rustc --version
+          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography")
+      - name: Copy cached wheels
+        run: cp -u `pip cache list --format=abspath` download
+      - name: Test wheels by installation
+        shell: pwsh
+        run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
+      - name: Upload Release Asset To test s3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+          PREFIX: 'pypi'
+        shell: bash
+        run: |
+          chmod +x Upload-Wheels.sh
+          ./Upload-Wheels.sh $AWS_BUCKET
+          python3 create_index_pages.py $AWS_BUCKET
