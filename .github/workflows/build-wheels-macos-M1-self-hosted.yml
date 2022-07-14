@@ -38,7 +38,10 @@ jobs:
           export LDFLAGS=-L/Users/githubrunner/brew/opt/openssl/lib
           ~/.pyenv/versions/${{ matrix.python-version }}/bin/python -m pip install --upgrade pip
       - name: Rust version
-        run: rustc --version
+        run: |
+          rustc --version
+          rustup default
+          rustup update
       - name: Prepare download folder
         run: mkdir download
       - name: Install build dependencies
