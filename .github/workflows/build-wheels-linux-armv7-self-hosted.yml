@@ -28,6 +28,8 @@ jobs:
         run: mkdir download
       - name: Install build dependencies
         run: |
+          apt update
+          apt-get install libtiff5 libjpeg-dev libopenjp2-7 -y
           pyenv global ${{ matrix.python-version }}
           python -m pip install wheel
           pip3 install wheel
