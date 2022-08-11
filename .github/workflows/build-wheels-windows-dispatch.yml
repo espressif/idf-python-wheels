@@ -1,6 +1,8 @@
 name: windows-dispatch
 
 on:
+  schedule:
+     - cron: '0 0 * * 0,3'
   workflow_dispatch:
     inputs:
       IDF_branch:
@@ -40,12 +42,21 @@ jobs:
       - name: Get python3 version
         shell: pwsh
         run: python3 --version
-      - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
+      - name: Get branch name
+        shell: bash
+        run: |
+          echo INPUT=${{ github.event.inputs.IDF_branch }}
+          if [[ $INPUT == "" ]]; then
+            echo "IDF_branch=main" >> $GITHUB_ENV
+          else
+            echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
+          fi
+      - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
+        run: .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "windows-curses")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "${{ matrix.ARCH }}"
+        run: .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}"
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

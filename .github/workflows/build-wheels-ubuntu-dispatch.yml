@@ -1,6 +1,8 @@
 name: ubuntu-dispatch
 
 on:
+  schedule:
+     - cron: '0 0 * * 0,3'
   workflow_dispatch:
     inputs:
       IDF_branch:
@@ -37,12 +39,20 @@ jobs:
         run: python3 -m pip install wheel
       - name: Get python3 version
         run: python3 --version
-      - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
+      - name: Get branch name
+        run: |
+          echo INPUT=${{ github.event.inputs.IDF_branch }}
+          if [[ $INPUT == "" ]]; then
+            echo "IDF_branch=main" >> $GITHUB_ENV
+          else
+            echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
+          fi
+      - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
-        run: .\Build-Wheels.ps1  -Branch ${{ github.event.inputs.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography")
+        run: .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography")
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }}
+        run: .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }}
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

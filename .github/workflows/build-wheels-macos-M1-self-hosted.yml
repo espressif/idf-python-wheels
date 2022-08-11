@@ -1,6 +1,8 @@
 name: macos-M1-dispatch
 
 on:
+  schedule:
+     - cron: '0 0 * * 0,3'
   workflow_dispatch:
     inputs:
       IDF_branch:
@@ -48,19 +50,27 @@ jobs:
         run: ~/.pyenv/versions/${{ matrix.python-version }}/bin/python -m pip install wheel
       - name: Get python3 version
         run: ~/.pyenv/versions/${{ matrix.python-version }}/bin/python --version
-      - name: Build wheels for IDF-${{ github.event.inputs.IDF_branch }}
+      - name: Get branch name
+        run: |
+          INPUT=${{ github.event.inputs.IDF_branch }}
+          if [[ $INPUT == "" ]]; then
+            echo "IDF_branch=main" >> $GITHUB_ENV
+          else
+            echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
+          fi
+      - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
         run: |
           $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
           arch -arm64 pip3 install wheel
-          .\Build-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
       - name: Test wheels by installation
         shell: pwsh
         run: |
           $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
-          .\Test-Wheels.ps1 -Branch ${{ github.event.inputs.IDF_branch }} -Arch "-arm64" -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
