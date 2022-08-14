@@ -35,7 +35,7 @@ jobs:
           pip3 install wheel
       - name: Get branch name
         run: |
-          echo INPUT=${{ github.event.inputs.IDF_branch }}
+          INPUT=${{ github.event.inputs.IDF_branch }}
           if [[ $INPUT == "" ]]; then
             echo "IDF_branch=main" >> $GITHUB_ENV
           else
