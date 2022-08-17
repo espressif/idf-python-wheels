@@ -34,7 +34,7 @@ jobs:
       - name: Get branch name
         run: |
           INPUT=${{ github.event.inputs.IDF_branch }}
-          if [[ $INPUT == "" ]]; then
+          if [ -z "$INPUT" ]; then
             echo "IDF_branch=main" >> $GITHUB_ENV
           else
             echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
