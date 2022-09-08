@@ -37,8 +37,8 @@ jobs:
         run: mkdir download
       - name: Install build dependencies
         run: |
-          apt update
-          apt-get install cmake libdbus-1-dev -y
+          sudo apt update
+          sudo apt-get install cmake libdbus-1-dev -y
       - name: Install build dependencies
         run: python3 -m pip install wheel
       - name: Get python3 version
