@@ -31,7 +31,7 @@ jobs:
       - name: Install build dependencies
         run: |
           apt update
-          apt-get install libtiff5 libjpeg-dev libopenjp2-7 -y
+          apt-get install libtiff5 libjpeg-dev libopenjp2-7 cmake libdbus-1-dev -y
           pyenv global ${{ matrix.python-version }}
           python -m pip install wheel
           pip3 install wheel
