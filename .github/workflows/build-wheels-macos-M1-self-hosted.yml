@@ -59,7 +59,9 @@ jobs:
             echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
           fi
       - name: Install packages
-        run: brew install pkg-config libffi libxcb
+        run: |
+          export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
+          brew install pkg-config libffi libxcb
       - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
         run: |
