@@ -61,7 +61,7 @@ jobs:
       - name: Install packages
         run: |
           export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
-          brew install pkg-config libffi libxcb
+          arch -arm64 brew install libxcb
       - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
         run: |
