@@ -68,7 +68,7 @@ jobs:
           $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
           arch -arm64 pip3 install wheel
-          .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
       - name: Test wheels by installation
         shell: pwsh
         run: |
