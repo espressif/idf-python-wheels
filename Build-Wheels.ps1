@@ -10,7 +10,7 @@ param (
 "Using Python: $Python"
 $env:IDF_PATH=(Get-Location).Path
 
-$BranchNum = ($Branch -replace "\D+[^0-9][^0-9]" , '')
+ $BranchNum = ($Branch -replace "\D+[^0-9][^0-9]" , '')
 
 if ($BranchNum -eq "") {
     $BranchNum = "5.1" # master
