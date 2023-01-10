@@ -51,6 +51,10 @@ jobs:
       - name: Build wheels for IDF ${{ env.IDF_branch }} branch
         shell: pwsh
         run: .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11")
+      - name: Copy cached wheels
+        run: |
+          brew install coreutils
+          rsync -u `pip cache list --format=abspath` download
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}"

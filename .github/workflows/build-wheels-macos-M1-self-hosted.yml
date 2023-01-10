@@ -69,6 +69,10 @@ jobs:
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
           arch -arm64 pip3 install wheel
           .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+      - name: Copy cached wheels
+        run: |
+          brew install coreutils
+          rsync -u `pip cache list --format=abspath` download
       - name: Test wheels by installation
         shell: pwsh
         run: |
