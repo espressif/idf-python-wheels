@@ -54,7 +54,7 @@ jobs:
       - name: Copy cached wheels
         run: |
           brew install coreutils
-          rsync -u `pip cache list --format=abspath` download
+          rsync -u `python3 -m pip cache list --format=abspath` download
       - name: Test wheels by installation
         shell: pwsh
         run: .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}"
