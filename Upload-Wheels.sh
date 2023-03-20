@@ -1,3 +1,7 @@
+#! /bin/bash
+
+cd download
+
 for wfile in *.whl
           do
             IFS=- read file_name  var1 <<< $wfile
