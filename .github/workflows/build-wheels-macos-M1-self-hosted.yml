@@ -86,6 +86,8 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_BUCKET: ${{ secrets.DL_BUCKET }}
           PREFIX: 'pypi'
+        shell: bash
         run: |
-          cargo update --manifest-path=upload-wheels/Cargo.toml
-          cargo run --manifest-path=upload-wheels/Cargo.toml
+          chmod +x Upload-Wheels.sh
+          ./Upload-Wheels.sh $AWS_BUCKET
+          python3 create_index_pages.py $AWS_BUCKET
