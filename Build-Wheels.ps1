@@ -4,7 +4,8 @@ param (
     [string]$Branch="main",
     [string]$Python="python3",
     [string]$Arch="",
-    [string[]]$CompileWheels=@()
+    [string[]]$CompileWheels=@(),
+    [switch]$NoReq=$false
 )
 
 "Using Python: $Python"
@@ -57,6 +58,10 @@ foreach ($wheelPrefix in $CompileWheels) {
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }
     #ls download
     $OnlyBinary += " --only-binary $wheel"
+}
+
+if ($NoReq) {
+    exit
 }
 
 $OnlyBinarySplitted = $OnlyBinary.Split(' ') | where {$_}
