@@ -6,9 +6,38 @@ on:
   workflow_dispatch:
     inputs:
       IDF_branch:
-        description: 'Wheels will be built for this branch'
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+        type: string
         required: false
         default: 'master'
+      packages:
+        description: >
+          Generate wheels for given packages separated by space.
+          Requirement specifiers can be used.
+          For example esptool~=4.5 esp-coredump~=1.2
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      IDF_branch:
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+        type: string
+        required: false
+        default: 'master'
+      packages:
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+          Generate wheels for given packages separated by space.
+          Requirement specifiers can be used.
+          For example esptool~=4.5 esp-coredump~=1.2
+        type: string
+        required: false
+
 jobs:
   build-python-wheels:
     name: Build Python Wheels for macos-M1
@@ -18,6 +47,14 @@ jobs:
       matrix:
         python-version: ['3.8.12', '3.9.4', '3.10.2']
     steps:
+      - name: Prepare package list
+        if: ${{ inputs.packages }}
+        run: |
+          echo "input packages: ${{ inputs.packages }}"
+          PACKAGES=$(echo "${{ inputs.packages }}" |
+                     sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/\([^[:space:]]\{1,\}\)/"\1"/g;s/[[:space:]]\{1,\}/,/g')
+          echo "packages=$PACKAGES" >> $GITHUB_ENV
+          echo "output packages: $PACKAGES"
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Cache Python
@@ -68,7 +105,11 @@ jobs:
           $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
           arch -arm64 pip3 install wheel
-          .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          if ( "${{ inputs.packages }}" ) {
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -NoReq -CompileWheels @(${{ env.packages }})
+          } else {
+            .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11") -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          }
       - name: Copy cached wheels
         run: |
           arch -arm64 brew install coreutils
@@ -78,7 +119,11 @@ jobs:
         run: |
           $env:CPPFLAGS="-I/Users/githubrunner/brew/opt/openssl/include"
           $env:LDFLAGS="-L/Users/githubrunner/brew/opt/openssl/lib"
-          .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          if ( "${{ inputs.packages }}" ) {
+            .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python -TestWheels @(${{ env.packages }})
+          } else {
+            .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -Arch "-arm64" -Python ~/.pyenv/versions/${{ matrix.python-version }}/bin/python
+          }
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

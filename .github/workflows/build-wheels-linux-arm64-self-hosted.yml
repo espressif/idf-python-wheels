@@ -6,9 +6,37 @@ on:
   workflow_dispatch:
     inputs:
       IDF_branch:
-        description: 'Wheels will be built for this branch'
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+        type: string
         required: false
         default: 'master'
+      packages:
+        description: >
+          Generate wheels for given packages separated by space.
+          Requirement specifiers can be used.
+          For example esptool~=4.5 esp-coredump~=1.2
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      IDF_branch:
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+        type: string
+        required: false
+        default: 'master'
+      packages:
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+          Generate wheels for given packages separated by space.
+          Requirement specifiers can be used.
+          For example esptool~=4.5 esp-coredump~=1.2
+        type: string
+        required: false
 
 jobs:
   build-python-wheels:
@@ -22,6 +50,14 @@ jobs:
       image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
       options: --privileged
     steps:
+      - name: Prepare package list
+        if: ${{ inputs.packages }}
+        run: |
+          echo "input packages: ${{ inputs.packages }}"
+          PACKAGES=$(echo "${{ inputs.packages }}" |
+                     sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/\([^[:space:]]\{1,\}\)/"\1"/g;s/[[:space:]]\{1,\}/,/g')
+          echo "packages=$PACKAGES" >> $GITHUB_ENV
+          echo "output packages: $PACKAGES"
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Prepare download folder
@@ -47,12 +83,21 @@ jobs:
           python -m pip install --upgrade pip
           $env:PATH+=":/root/.cargo/bin"
           rustc --version
-          .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11")
+          if ( "${{ inputs.packages }}" ) {
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -NoReq -CompileWheels @(${{ env.packages }})
+          } else {
+            .\Build-Wheels.ps1 -Branch ${{ env.IDF_branch }} -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11")
+          }
       - name: Copy cached wheels
         run: cp -u `pip cache list --format=abspath` download
       - name: Test wheels by installation
         shell: pwsh
-        run: .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }}
+        run: |
+          if ( "${{ inputs.packages }}" ) {
+            .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }} -TestWheels @(${{ env.packages }})
+          } else {
+            .\Test-Wheels.ps1 -Branch ${{ env.IDF_branch }}
+          }
       - name: Upload Release Asset To test s3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
