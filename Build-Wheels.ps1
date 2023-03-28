@@ -4,7 +4,8 @@ param (
     [string]$Branch="main",
     [string]$Python="python3",
     [string]$Arch="",
-    [string[]]$CompileWheels=@()
+    [string[]]$CompileWheels=@(),
+    [switch]$NoReq=$false
 )
 
 "Using Python: $Python"
@@ -43,22 +44,31 @@ foreach ($wheelPrefix in $CompileWheels) {
     }
 
     "Processing: $wheel"
+    # Split by default splits on each space, so empty args are passed as
+    # requirements to pip-wheel, which complains with
+    # ERROR: Invalid requirement: ''
+    # "   ".Split() vs. "   ".split() | where {$_}
+    $OnlyBinarySplitted = $OnlyBinary.Split(' ') | where {$_}
     if ("$Arch" -eq "") {
-        &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+        &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinarySplitted $wheel
     } else {
-        arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $OnlyBinary.Split(' ') $wheel
+        arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $OnlyBinarySplitted $wheel
     }
     #$cache=pip cache dir
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }
     #ls download
-    $OnlyBinary += " --only-binary $wheel "
+    $OnlyBinary += " --only-binary $wheel"
 }
 
+if ($NoReq) {
+    exit
+}
 
+$OnlyBinarySplitted = $OnlyBinary.Split(' ') | where {$_}
 if ("$Arch" -eq "") {
-    &$Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+    &$Python -m pip download $OnlyBinarySplitted --find-links download --dest download -r $RequirementsTxt
 } else {
-    arch $Arch $Python -m pip download $OnlyBinary.Split(' ') --find-links download --dest download -r $RequirementsTxt
+    arch $Arch $Python -m pip download $OnlyBinarySplitted --find-links download --dest download -r $RequirementsTxt
 }
 
 &$Python -m pip wheel --wheel-dir download --find-links download -r $RequirementsTxt

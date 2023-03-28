@@ -1,0 +1,101 @@
+name: ad-hoc-wheels
+on:
+  workflow_dispatch:
+    inputs:
+      IDF_branch:
+        description: >
+          Wheels will be built for this branch. This will
+          be ignored if specific packages are listed bellow.
+        type: string
+        required: false
+        default: 'master'
+      packages:
+        description: >
+          Generate wheels for given packages separated by space.
+          Requirement specifiers can be used.
+          For example esptool~=4.5 esp-coredump~=1.2
+        type: string
+        required: false
+
+      # Unfortunately gitlab doesn't support something like checkbox,
+      # so it's emulated with boolean.
+      os_ubuntu_latest:
+        description: Build on ubuntu-latest(x86_64)
+        type: boolean
+        required: false
+        default: true
+      os_windows_latest:
+        description: Build on windows-latest(x86_64)
+        type: boolean
+        required: false
+        default: true
+      os_macos_latest:
+        description: Build on macos-latest(x86_64)
+        type: boolean
+        required: false
+        default: true
+      os_macos_arm64:
+        description: Build on macos M1(aarch64)
+        type: boolean
+        required: false
+        default: true
+      os_linux_armv7:
+        description: Build on linux armv7(aarch32)
+        type: boolean
+        required: false
+        default: true
+      os_linux_arm64:
+        description: Build on linux arm64(aarch64)
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  ubuntu-latest:
+    name: linux x86_64
+    if: ${{ inputs.os_ubuntu_latest }}
+    uses: ./.github/workflows/build-wheels-ubuntu-dispatch.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
+  windows-latest:
+    name: windows x86_64
+    if: ${{ inputs.os_windows_latest }}
+    uses: ./.github/workflows/build-wheels-windows-dispatch.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
+  macos-latest:
+    name: macos x86_64
+    if: ${{ inputs.os_macos_latest }}
+    uses: ./.github/workflows/build-wheels-macos-dispatch.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
+  macos-m1:
+    name: macos aarch64
+    if: ${{ inputs.os_macos_arm64 }}
+    uses: ./.github/workflows/build-wheels-macos-M1-self-hosted.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
+  linux-armv7:
+    name: linux aarch32
+    if: ${{ inputs.os_linux_armv7 }}
+    uses: ./.github/workflows/build-wheels-linux-armv7-self-hosted.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
+  linux-arm64:
+    name: linux aarch64
+    if: ${{ inputs.os_linux_arm64 }}
+    uses: ./.github/workflows/build-wheels-linux-arm64-self-hosted.yml
+    with:
+      IDF_branch: ${{ inputs.IDF_branch }}
+      packages: ${{ inputs.packages }}
+    secrets: inherit
