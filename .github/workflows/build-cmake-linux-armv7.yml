@@ -9,12 +9,13 @@ on:
           For example 3.23.1
         type: string
         required: true
-        default: 'master'
 
 jobs:
   build-cmake:
     name: Build cmake for linux-armv7
-    runs-on: linux-armv7-self-hosted
+    runs-on:
+      - self-hosted
+      - ARM
     container:
       image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
       options: --privileged
