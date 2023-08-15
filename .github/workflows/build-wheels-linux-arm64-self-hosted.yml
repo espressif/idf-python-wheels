@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7.10', '3.8.12', '3.9.9', '3.10.2']
+        python-version: ['3.8.17', '3.9.17', '3.10.12', '3.11.4']
     container:
       image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
       options: --privileged
