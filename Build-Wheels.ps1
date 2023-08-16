@@ -4,6 +4,7 @@ param (
     [string]$Branch="main",
     [string]$Python="python3",
     [string]$Arch="",
+    [string[]]$BuildEnv=@(),
     [string[]]$CompileWheels=@(),
     [switch]$NoReq=$false
 )
@@ -29,6 +30,23 @@ $OnlyBinary = ""
 "Processing: $RequirementsUrl"
 Invoke-WebRequest $RequirementsUrl -OutFile $RequirementsTxt
 
+# If specific build environment is requested then build isolation must be disable in order to use the build environment.
+# It might be necessary to clean or separate this build environment in the future.
+if ($BuildEnv.count -eq 0) {
+    $ExtraPipArgs = ""
+} else {
+    $ExtraPipArgs = "--no-build-isolation"
+}
+
+# Install packages requested for the build environment
+foreach ($build_req in $BuildEnv) {
+    if ("$Arch" -eq "") {
+        &$Python -m pip install $build_req
+    } else {
+        arch $Arch $Python -m pip install $build_req
+    }
+}
+
 # Iterate over binaries which should be compiled.
 # The build of next binary will receive list of previously build of binaries to avoid download
 foreach ($wheelPrefix in $CompileWheels) {
@@ -50,9 +68,9 @@ foreach ($wheelPrefix in $CompileWheels) {
     # "   ".Split() vs. "   ".split() | where {$_}
     $OnlyBinarySplitted = $OnlyBinary.Split(' ') | where {$_}
     if ("$Arch" -eq "") {
-        &$Python -m pip wheel --find-links download --wheel-dir download $OnlyBinarySplitted $wheel
+        &$Python -m pip wheel --find-links download --wheel-dir download $ExtraPipArgs $OnlyBinarySplitted $wheel
     } else {
-        arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $OnlyBinarySplitted $wheel
+        arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $ExtraPipArgs $OnlyBinarySplitted $wheel
     }
     #$cache=pip cache dir
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }

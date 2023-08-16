@@ -90,7 +90,10 @@ jobs:
           if ( "${{ inputs.packages }}" ) {
             .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}" -NoReq -CompileWheels @(${{ env.packages }})
           } else {
-            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}" -CompileWheels @("greenlet==1.0.0", "gevent==1.5.0", "cryptography", "python-pkcs11")
+            # Cython==3.0.0 breaks the build of gevent. The build environment from https://github.com/gevent/gevent/blob/1.5.0/pyproject.toml
+            # must be patched with "cython<3"
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -BuildEnv @("setuptools", "wheel", "cython<3", "cffi") -CompileWheels @("gevent==1.5.0")
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -CompileWheels @("cryptography", "python-pkcs11")
           }
       - name: Copy cached wheels
         run: |
