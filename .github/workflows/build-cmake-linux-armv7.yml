@@ -17,7 +17,7 @@ jobs:
       - self-hosted
       - ARM
     container:
-      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
+      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v2
       options: --privileged
     steps:
       - name: Checkout repository

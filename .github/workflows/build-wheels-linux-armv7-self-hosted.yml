@@ -47,7 +47,7 @@ jobs:
       matrix:
         python-version: ['3.8.17', '3.9.17', '3.10.12', '3.11.4']
     container:
-      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v1
+      image: ghcr.io/espressif/github-esp-dockerfiles/pyenv_rust_powershell:v2
       options: --privileged
     steps:
       - name: Prepare package list
