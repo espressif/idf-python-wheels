@@ -32,9 +32,7 @@ Invoke-WebRequest $RequirementsUrl -OutFile $RequirementsTxt
 
 # If specific build environment is requested then build isolation must be disable in order to use the build environment.
 # It might be necessary to clean or separate this build environment in the future.
-if ($BuildEnv.count -eq 0) {
-    $ExtraPipArgs = ""
-} else {
+if ($BuildEnv.count -ne 0) {
     $ExtraPipArgs = "--no-build-isolation"
 }
 
@@ -72,6 +70,9 @@ foreach ($wheelPrefix in $CompileWheels) {
     } else {
         arch $Arch $Python -m pip wheel --find-links download --wheel-dir download $ExtraPipArgs $OnlyBinarySplitted $wheel
     }
+    if ($LASTEXITCODE -ne 0) {
+	exit 1
+    }
     #$cache=pip cache dir
     #Get-ChildItem -Path $cache "{$wheel}*.whl" -Recurse | % {Copy-Item -Path $_.FullName -Destination download -Container }
     #ls download
@@ -88,5 +89,11 @@ if ("$Arch" -eq "") {
 } else {
     arch $Arch $Python -m pip download $OnlyBinarySplitted --find-links download --dest download -r $RequirementsTxt
 }
+if ($LASTEXITCODE -ne 0) {
+    exit 1
+}
 
 &$Python -m pip wheel --wheel-dir download --find-links download -r $RequirementsTxt
+if ($LASTEXITCODE -ne 0) {
+    exit 1
+}
