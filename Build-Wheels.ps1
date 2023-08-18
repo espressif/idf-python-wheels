@@ -32,9 +32,7 @@ Invoke-WebRequest $RequirementsUrl -OutFile $RequirementsTxt
 
 # If specific build environment is requested then build isolation must be disable in order to use the build environment.
 # It might be necessary to clean or separate this build environment in the future.
-if ($BuildEnv.count -eq 0) {
-    $ExtraPipArgs = ""
-} else {
+if ($BuildEnv.count -ne 0) {
     $ExtraPipArgs = "--no-build-isolation"
 }
 
