@@ -55,13 +55,14 @@ jobs:
                      sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/\([^[:space:]]\{1,\}\)/"\1"/g;s/[[:space:]]\{1,\}/,/g')
           echo "packages=$PACKAGES" >> $GITHUB_ENV
           echo "output packages: $PACKAGES"
+      - name: Identify
+        run: uname -a
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
-          check-latest: true
       - name: Install stable Rust with clippy and rustfmt
         uses: actions-rs/toolchain@v1
         with:
@@ -121,6 +122,7 @@ jobs:
           pip3 install boto3
           python3 create_index_pages.py $AWS_BUCKET
       - name: Drop AWS cache
+        id: invalidate-index-cache
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

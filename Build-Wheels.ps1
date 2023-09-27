@@ -30,6 +30,17 @@ $OnlyBinary = ""
 "Processing: $RequirementsUrl"
 Invoke-WebRequest $RequirementsUrl -OutFile $RequirementsTxt
 
+# dbus-python (https://github.com/posborne/dbus-python/tree/master) is deprecated
+# we could migrate it to python-dbus-next (https://github.com/altdesktop/python-dbus-next)
+# on Python 3.11 it is not possible for some platform to even install dbus-python
+# and because of constraint file taken instead of requirements file there is condition: dbus-python<1.3; python_version > "3.10"
+# that means dbus-python seems to be build only for Python 3.11
+# workaround for the dbus-python requirement for all platforms (install only for linux which should be working):
+$Content = [System.IO.File]::ReadAllLines($RequirementsTxt)
+$string = 'dbus-python<1.3; python_version > "3.10"'
+$Content = $Content -replace $string,'dbus-python<1.3; python_version >"3.10" and sys_platform == "linux"'
+$Content | Set-Content -Path $RequirementsTxt
+
 # If specific build environment is requested then build isolation must be disable in order to use the build environment.
 # It might be necessary to clean or separate this build environment in the future.
 if ($BuildEnv.count -ne 0) {

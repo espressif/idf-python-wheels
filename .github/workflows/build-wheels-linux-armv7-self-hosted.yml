@@ -67,10 +67,13 @@ jobs:
       - name: Install build dependencies
         run: |
           apt update
+          apt-get install rustc -y
           apt-get install libtiff5 libjpeg-dev libopenjp2-7 cmake libdbus-1-dev -y
           pyenv global ${{ matrix.python-version }}
           python -m pip install wheel
           pip3 install wheel
+          apt-get install -y --no-install-recommends python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev
+          apt-get install -y --no-install-recommends dbus-tests
       - name: Get branch name
         run: |
           INPUT=${{ github.event.inputs.IDF_branch }}
