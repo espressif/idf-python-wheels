@@ -76,8 +76,8 @@ jobs:
         run: |
           sudo apt update
           sudo apt-get install cmake libdbus-1-dev -y
-      - name: Install build dependencies
-        run: python3 -m pip install wheel
+          python3 -m pip install wheel
+          sudo apt install git virtualenv build-essential python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev
       - name: Get python3 version
         run: python3 --version
       - name: Get branch name

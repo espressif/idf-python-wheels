@@ -67,6 +67,11 @@ jobs:
           pyenv global ${{ matrix.python-version }}
           python -m pip install wheel
           pip3 install wheel
+          python -m pip install --upgrade pip
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential
+          apt-get install -y --no-install-recommends python3-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev
+          apt-get install -y --no-install-recommends dbus-tests
       - name: Get branch name
         run: |
           INPUT=${{ github.event.inputs.IDF_branch }}
@@ -80,7 +85,6 @@ jobs:
           PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple"
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
           $env:PATH+=":/root/.cargo/bin"
           rustc --version
           if ( "${{ inputs.packages }}" ) {
@@ -88,7 +92,8 @@ jobs:
           } else {
             # Cython==3.0.0 breaks the build of gevent. The build environment from https://github.com/gevent/gevent/blob/1.5.0/pyproject.toml
             # must be patched with "cython<3"
-            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -BuildEnv @("setuptools", "wheel", "cython<3", "cffi") -CompileWheels @("gevent==1.5.0")
+            # gevent is not possible to build in version 1.5.0 on Python 3.11 for ARM64
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -BuildEnv @("setuptools", "wheel", "cython<3", "cffi") -CompileWheels @("gevent==1.5.0; python_version < '3.11'")
             .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -CompileWheels @("cryptography", "python-pkcs11")
           }
       - name: Copy cached wheels

@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8.17', '3.9.17', '3.10.12', '3.11.4']
+        python-version: ['3.8.10', '3.9.13', '3.10.2', '3.11.4']
     steps:
       - name: Prepare package list
         shell: bash
@@ -62,7 +62,6 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: ${{ matrix.python-version }}
-          check-latest: true
       - name: Install stable Rust with clippy and rustfmt
         uses: actions-rs/toolchain@v1
         with:
@@ -90,15 +89,20 @@ jobs:
             echo IDF_branch=${{ github.event.inputs.IDF_branch }} >> $GITHUB_ENV
           fi
       - name: Build wheels for IDF ${{ env.IDF_branch }} branch
+        env:
+          PIP_EXTRA_INDEX_URL: "https://www.piwheels.org/simple"
         shell: pwsh
         run: |
+          python -m pip install --upgrade pip
           if ( "${{ inputs.packages }}" ) {
             .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -Arch "${{ matrix.ARCH }}" -NoReq -CompileWheels @(${{ env.packages }})
           } else {
             # Cython==3.0.0 breaks the build of gevent. The build environment from https://github.com/gevent/gevent/blob/1.5.0/pyproject.toml
             # must be patched with "cython<3"
             .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -BuildEnv @("setuptools", "wheel", "cython<3", "cffi") -CompileWheels @("gevent==1.5.0")
-            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -CompileWheels @("cryptography", "windows-curses", "python-pkcs11")
+
+            # python-pkcs11 can't be build on Python 3.10 and above (3.10.2 works) https://github.com/danni/python-pkcs11/issues/159
+            .\Build-Wheels.ps1  -Branch ${{ env.IDF_branch }} -CompileWheels @("cryptography", "windows-curses", "python-pkcs11;python_version<'3.11'")
           }
       - name: Test wheels by installation
         shell: pwsh
