@@ -106,7 +106,7 @@ jobs:
           echo "Adding Homebrew to PATH"
           export PATH="/opt/homebrew/bin:$PATH"
           echo "Current PATH: $PATH"
-    
+
           echo "Updating Homebrew and installing dependencies"
           brew update
           export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
@@ -148,6 +148,9 @@ jobs:
           PREFIX: 'pypi'
         shell: bash
         run: |
+          # AWS is not in PATH and has to be added, for new version maybe we should use GH action
+          # for example https://github.com/jakejarvis/s3-sync-action
+          export PATH=$PATH:/opt/homebrew/bin/
           chmod +x Upload-Wheels.sh
           ./Upload-Wheels.sh $AWS_BUCKET
           pip3 install boto3
@@ -158,4 +161,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
+        run: |
+          # AWS is not in PATH and has to be added, for new version maybe we should use GH action
+          # for example https://github.com/jakejarvis/s3-sync-action
+          export PATH=$PATH:/opt/homebrew/bin/
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
