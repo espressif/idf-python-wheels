@@ -1,0 +1,36 @@
+name: windows-dispatch
+
+# TODO schedule for workflow and delete pull_request/push on final merge request
+on:
+  workflow_dispatch:
+
+env:
+  MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
+  MIN_IDF_MINOR_VERSION: ${{ vars.MIN_IDF_MINOR_VERSION }}
+
+jobs:
+  build-python-wheels:
+    name: Build Python Wheels for windows-latest
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8.10']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get Python version
+        run: python --version
+
+      - name: Install build dependencis
+        run: pip install -r .\build_requirements.txt
+
+      - name: Build wheels for IDF
+        run: python .\build_wheels.py
