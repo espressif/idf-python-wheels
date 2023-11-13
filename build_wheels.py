@@ -138,7 +138,7 @@ def _download_branch_constraints(constraint_file_url: str, branch, idf_constrain
     return []
 
 
-def _add_into_requirements(requirements_txt: List[str]) -> set[Union[Requirement, str]]:
+def _add_into_requirements(requirements_txt: List[str]) -> set:
     """Create set of requirements from downloaded lines of requirements
         - set is used to prevent duplicates
     """
@@ -155,7 +155,7 @@ def _add_into_requirements(requirements_txt: List[str]) -> set[Union[Requirement
     return requirements_set
 
 
-def assemble_requirements(idf_branches: List[str], idf_constraints: List[str]) -> set[Union[Requirement, str]]:
+def assemble_requirements(idf_branches: List[str], idf_constraints: List[str]) -> set:
     """Assemble IDF requirements into set to prevent duplicates"""
     requirements_txt: List[str] = []
 
@@ -175,7 +175,7 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str]) -
     return _add_into_requirements(requirements_txt)
 
 
-def print_requirements(requirements_set: set[Union[Requirement, str]]):
+def print_requirements(requirements_set: set):
     """Prints assembled list of requirements"""
     print('\n---------- REQUIREMENTS ----------')
     for req in requirements_set:
