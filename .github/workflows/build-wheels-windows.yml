@@ -11,15 +11,16 @@ env:
 jobs:
   build-python-wheels:
     name: Build Python Wheels for windows-latest
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8.10']
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ['3.8']
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v3
@@ -27,10 +28,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Get Python version
-        run: python --version
+        run: |
+          python --version
+          python -m pip install --upgrade pip
 
       - name: Install build dependencis
-        run: pip install -r .\build_requirements.txt
+        run: pip install -r build_requirements.txt
 
       - name: Build wheels for IDF
-        run: python .\build_wheels.py
+        run: python build_wheels.py

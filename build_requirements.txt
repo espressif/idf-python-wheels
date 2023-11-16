@@ -2,3 +2,5 @@
 # ----- build script -----
 requests
 packaging
+PyYAML
+colorama

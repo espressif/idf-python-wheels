@@ -1,0 +1,11 @@
+# List of Python packages to exclude from automatically assembled requirements
+#"From assembled <main requirements> exclude <package_name> with <version> on <platform>".
+
+# exclude_list template
+#- package_name: '<name_of_package>'
+#    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
+#    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
+
+# dbus-python can not be build on Windows
+- package_name: 'dbus-python'
+  platform: ['win32']
