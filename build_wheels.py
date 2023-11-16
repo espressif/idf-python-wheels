@@ -324,23 +324,22 @@ def build_wheels(requirements: set):
         # --only-binary requirement wheel build
         if non_classic_requirement and non_classic_requirement[0].replace('--only-binary ', '') in requirement.name:
             only_bin = non_classic_requirement[0].replace('--only-binary', '').strip()
-            var = subprocess.run(
+            out = subprocess.run(
                 ['python', '-m', 'pip', 'wheel', f'{requirement}', '--find-links', f'{dir}',
                  '--wheel-dir', f'{dir}', '--only-binary', f'{only_bin}'],
                  stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
-            print(f'Ret_code: {str(var.returncode)}, std_err: {str(var.stderr)}, std_out: {str(var.stdout)}')
-
+            print(out.stdout, out.stderr)
             non_classic_requirement.remove(non_classic_requirement[0])
             continue
 
         # requirement wheel build
-        var = subprocess.run(
+        out = subprocess.run(
             ['python', '-m', 'pip', 'wheel', f'{requirement}', '--find-links', f'{dir}',
              '--wheel-dir', f'{dir}'],
              stdout=subprocess.PIPE, stderr=subprocess.PIPE
              )
-        print(f'Ret_code: {str(var.returncode)}, std_err: {str(var.stderr)}, std_out: {str(var.stdout)}')
+        print(out.stdout, out.stderr)
 
 
 def main():
@@ -365,8 +364,10 @@ def main():
         print(req)
     print(Fore.BLUE + '---------- END OF ADDITIONAL REQUIREMENTS ----------' + Style.RESET_ALL)
 
+    print(Fore.BLUE + '---------- BUILD WHEELS ----------' + Style.RESET_ALL)
     build_wheels(excluded_requirements)
 
+    print(Fore.BLUE + '---------- BUILD ADDITIONAL WHEELS ----------' + Style.RESET_ALL)
     build_wheels(include_list)
 
 

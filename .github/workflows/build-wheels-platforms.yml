@@ -1,7 +1,9 @@
-name: windows-dispatch
+name: platforms-dispatches
 
 # TODO schedule for workflow and delete pull_request/push on final merge request
 on:
+  pull_request:
+  push:
   workflow_dispatch:
 
 env:
@@ -15,6 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # TODO
+        # macos-M1 (macos-m1-self-hosted) has no 3.8 PYthon available
+        # linux-armv7-self-hosted: version `GLIBCXX_3.4.26' not found (required by /opt/actions-runner/externals/node20/bin/node)
         os: [windows-latest, ubuntu-latest, macos-latest]
         python-version: ['3.8']
 
