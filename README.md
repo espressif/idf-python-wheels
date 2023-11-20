@@ -50,7 +50,8 @@ This YAML file is converted to Requirement from packaging.requirements because p
 The opposite logic of exclude_list is handled by the function itself, which means it is supposed to be easy to use for developers, this is also the reason YAML format is used.
 
 For every `package_name` there are options:
-* `version` - supports all logic operators defined by PEP508 for versions (<, >, !=, etc.)
+* `version`
+    - supports all logic operators defined by PEP508 for versions (<, >, !=, etc.)
 * `platform`
 
 which could be a string or a list of strings.
