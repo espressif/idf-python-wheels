@@ -5,6 +5,3 @@
 #- package_name: '<name_of_package>'
 #    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
 #    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
-
-- package_name: 'cython'
-  version: '<3'

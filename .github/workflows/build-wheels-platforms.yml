@@ -1,8 +1,8 @@
 name: platforms-dispatches
 
-# TODO schedule for workflow and delete pull_request/push on final merge request
 on:
-  pull_request:
+  schedule:
+    - cron: '0 0 * * 0,3'
   workflow_dispatch:
 
 env:
@@ -17,23 +17,35 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          #- windows-latest
-          #- ubuntu-latest
-          #- macos-latest
-          #- linux-armv7-self-hosted
-          - macos-latest-xlarge        # MacOS M1 GitHub beta runner - paid $0.16
-          #- BrnoRPI-GH004             # linux ARM64
-        #include:
-          #- os: linux-armv7-self-hosted
-          #  CONTAINER: python:3.8-bullseye
-          #- os: BrnoRPI-GH004
-          #  CONTAINER: python:3.8-bullseye
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+          - linux-armv7-self-hosted
+          - macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
+          - BrnoRPI-GH004             # linux ARM64
+        include:
+          - os: linux-armv7-self-hosted
+            CONTAINER: python:3.8-bullseye
+          - os: BrnoRPI-GH004
+            CONTAINER: python:3.8-bullseye
         python-version: ['3.8']
 
     # Use python container on ARM
-    #container: ${{ matrix.CONTAINER }}
+    container: ${{ matrix.CONTAINER }}
 
     steps:
+      - name: OS info
+        if: matrix.os != 'windows-latest'
+        run: |
+          echo "Operating System: ${{ runner.os }}"
+          echo "Architecture: $(uname -m)"
+      - name: OS info
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "Operating System: ${{ runner.os }}"
+          echo "Architecture: $env:PROCESSOR_ARCHITECTURE"
+
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -84,8 +96,10 @@ jobs:
 
           # MacOS M1 additional dependencies
           if [ "${{ matrix.os }}" == "macos-latest-xlarge" ]; then
-            #arch -arm64 brew install coreutils
-            #arch -arm64 python -m pip install --no-binary gdbgui==0.13.2.0 gdbgui==0.13.2.0
+            # Probably temporary fix for gdbgui==0.13.2.0 on MacOS M1 -> gevent==1.5.0 can't be build
+            # The newest version of gevent with M1 support is installed and forced to be used for gdbgui
+            # When requirement wheels are build gdbgui==0.13.2.0 is already built
+
             arch -arm64 python -m pip install 'cython<3'
             arch -arm64 python -m pip install 'cffi'
             arch -arm64 python -m pip install 'gevent'
@@ -97,6 +111,9 @@ jobs:
         if: matrix.os == 'linux-armv7-self-hosted'
         run: |
           apt-get update
+
+          # AWS
+          apt-get install -y -q --no-install-recommends awscli
 
           # cryptography needs Rust
           curl https://sh.rustup.rs -sSf | bash -s -- --default-toolchain stable -y
@@ -116,11 +133,15 @@ jobs:
         run: |
           apt-get update
 
+          # AWS
+          apt-get install -y -q --no-install-recommends awscli
+
           # PyGObject needs build dependecies https://pygobject.readthedocs.io/en/latest/getting_started.html
           apt-get install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev -y
 
 
       - name: Build wheels for IDF
+        if: matrix.os != 'windows-latest'
         run: |
           # Rust directory needs to be included for Linux ARM7
           if [ "${{ matrix.os }}" == "linux-armv7-self-hosted" ]; then
@@ -129,28 +150,30 @@ jobs:
 
           python build_wheels.py
 
+      - name: Build wheels for IDF - Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          python build_wheels.py
 
 
+      - name: Upload Release Asset To test S3 bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+          PREFIX: 'pypi'
+        shell: bash
+        run: |
+          chmod +x Upload-Wheels.sh
+          ./Upload-Wheels.sh $AWS_BUCKET
+          python create_index_pages.py $AWS_BUCKET
 
 
-      # - name: Upload Release Asset To test S3 bucket
-      #   env:
-      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-      #     AWS_BUCKET: ${{ secrets.DL_BUCKET }}
-      #     PREFIX: 'pypi'
-      #   shell: bash
-      #   run: |
-      #     chmod +x Upload-Wheels.sh
-      #     ./Upload-Wheels.sh $AWS_BUCKET
-      #     pip3 install boto3
-      #     python3 create_index_pages.py $AWS_BUCKET
-
-      # - name: Drop AWS cache
-      #   id: invalidate-index-cache
-      #   env:
-      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-      #   run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
+      - name: Drop AWS cache
+        id: invalidate-index-cache
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
