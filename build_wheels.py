@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from typing import List
 from typing import Optional
 from typing import Union
@@ -34,13 +35,20 @@ print(f'ENV variables: IDF v{MIN_IDF_MAJOR_VERSION}.{MIN_IDF_MINOR_VERSION}'
       )
 
 
+def print_color(text:str, color:str = Fore.BLUE):
+    """Print colored text specified by color argument based on colorama
+        - default color BLUE
+    """
+    print(f'{color}', f'{text}', Style.RESET_ALL)
+
+
 def check_response(response: requests.Response, warning: str, exit_on_wrong: bool = False) -> bool:
     """Print warning or exit the script when response code is not correct"""
     if response.status_code == 200:
         return True
     if exit_on_wrong:
         raise SystemExit(f'{warning}\n{response.text}')
-    print(warning, '\n')
+    print_color(f'{warning}\n', Fore.LIGHTRED_EX)
     return False
 
 
@@ -121,7 +129,7 @@ def get_constraints_versions(idf_branches: List[str]) -> List[str]:
 # --- Download all requirements from all the branches requirements and constraints files --- #
 def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> List[str]:
     """Download requirements files for all groups specified in IDF requirements.JSON"""
-    print(Fore.BLUE + f'---------- ESP-IDF BRANCH {branch} ----------' + Style.RESET_ALL)
+    print_color(f'---------- ESP-IDF BRANCH {branch} ----------')
     requirements_txt: List[str] = []
 
     for feature in idf_requirements_json['features']:
@@ -181,9 +189,7 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
         # TXT file from all downloaded requirements and constraints files
         # useful for debugging or to see the comments for requirements
         with open('requirements.txt', 'w') as f:
-            for line in requirements_txt:
-                f.write(line)
-                f.write('\n')
+            f.write('\n'.join(requirements_txt))
 
     return _add_into_requirements(requirements_txt)
 
@@ -194,11 +200,11 @@ def _change_specifier_logic(specifier: str) -> str:
         - e.g. "<3" will be ">3"
     """
     new_spec = specifier
-    replacements = {'<': '>',
-                    '>': '<',
-                    '!': '=',
-                    '==': '!='}
-    for old, new in replacements.items():
+    replacements = (('<', '>'),
+                    ('>', '<'),
+                    ('!', '='),
+                    ('==', '!='))
+    for old, new in replacements:
         if old in specifier and '===' not in specifier:
             new_spec = specifier.replace(old, new)
     return new_spec
@@ -217,57 +223,88 @@ def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
         return requirements_set
 
     for package in yaml_list:
-        requirement_txt = f"{package['package_name']}"
+        requirement_str_list = [f"{package['package_name']}"]
 
         if 'version' in package:
             if not isinstance(package['version'], list):
-                requirement_txt += _change_specifier_logic(package['version']) if exclude else package['version']
+                requirement_str_list.append(
+                    _change_specifier_logic(package['version']) if exclude else package['version']
+                    )
 
-            if isinstance(package['version'], list):
+            else:
                 version_list = (
                     [f'{_change_specifier_logic(ver)}' if exclude else f'{ver}' for ver in package['version']]
                     )
 
-                requirement_txt += ','.join(version_list)
+                requirement_str_list.append(','.join(version_list))
 
 
         if 'platform' in package and 'version' not in package:
             if not isinstance(package['platform'], list):
-                requirement_txt += (
+                requirement_str_list.append((
                     f"; sys_platform != '{package['platform']}'" if exclude
                     else f"; sys_platform == '{package['platform']}'"
-                    )
+                    ))
 
-            if isinstance(package['platform'], list):
+            else:
                 platform_list = (
                     [f"sys_platform != '{plf}'" if exclude
                      else f"sys_platform == '{plf}'" for plf in package['platform']]
                     )
 
-                requirement_txt += '; ' + ' or '.join(platform_list)
+                requirement_str_list.append('; ' + ' or '.join(platform_list))
 
 
         if 'platform' in package and 'version' in package:
-            requirement_old = f"{package['package_name']}"
+            requirement_old_str_list = [f"{package['package_name']}"]
 
             if not isinstance(package['platform'], list):
-                requirement_txt += f"; sys_platform == '{package['platform']}'"
-                if exclude:
-                    requirement_old += f"; sys_platform != '{package['platform']}'"
-                    requirements_set.add(Requirement(requirement_old))
+                requirement_str_list.append(f"; sys_platform == '{package['platform']}'")
 
-            if isinstance(package['platform'], list):
+                if exclude:
+                    requirement_old_str_list.append(f"; sys_platform != '{package['platform']}'")
+                    requirements_set.add(Requirement(''.join(requirement_old_str_list)))
+
+            else:
                 platform_list = [f"sys_platform == '{plf}'" for plf in package['platform']]
-                requirement_txt += '; ' + ' or '.join(platform_list)
+                requirement_str_list.append('; ' + ' or '.join(platform_list))
 
                 if exclude:
                     platform_list_old =  [f"sys_platform != '{plf}'" for plf in package['platform']]
-                    requirement_old += '; ' + ' or '.join(platform_list_old)
-                    requirements_set.add(Requirement(requirement_old))
+                    requirement_old_str_list.append('; ' + ' or '.join(platform_list_old))
+                    requirements_set.add(Requirement(''.join(requirement_old_str_list)))
 
 
-        requirements_set.add(Requirement(requirement_txt))
+        requirements_set.add(Requirement(''.join(requirement_str_list)))
     return requirements_set
+
+
+def _merge_requirements(requirement:Requirement, req_to_exclude:Requirement) -> Requirement:
+    if requirement.specifier and req_to_exclude.specifier:
+        new_specifier = requirement.specifier & req_to_exclude.specifier
+    elif requirement.specifier and not req_to_exclude.specifier:
+        new_specifier = requirement.specifier
+    elif not requirement.specifier and req_to_exclude.specifier:
+        new_specifier = req_to_exclude.specifier
+    else:
+        new_specifier = ''
+
+    if requirement.marker and req_to_exclude.marker:
+        new_markers = f'({requirement.marker}) and ({req_to_exclude.marker})'
+    elif requirement.marker and not req_to_exclude.marker:
+        new_markers = requirement.marker
+    elif not requirement.marker and req_to_exclude.marker:
+        new_markers = req_to_exclude.marker
+    else:
+        new_markers = ''
+
+
+    if new_markers:
+        new_requirement = Requirement(f'{requirement.name}{new_specifier}; {new_markers}')
+    else:
+        new_requirement = Requirement(f'{requirement.name}{new_specifier}')
+
+    return new_requirement
 
 
 def exclude_from_requirements(assembled_requirements:set, exclude_list: set, print_requirements: bool = True) -> set:
@@ -277,107 +314,95 @@ def exclude_from_requirements(assembled_requirements:set, exclude_list: set, pri
     new_assembled_requirements = set()
     not_in_exclude = []
     if print_requirements:
-        print(Fore.BLUE + '---------- REQUIREMENTS ----------')
+        print_color('---------- REQUIREMENTS ----------')
 
     for requirement in assembled_requirements:
         printed = False
-        for req in exclude_list:
-            if req.name not in requirement.name:
+        for req_to_exclude in exclude_list:
+            if req_to_exclude.name not in requirement.name:
                 not_in_exclude.append(True)
-
-            if req.name in requirement.name:
-
-                if not req.specifier and not req.marker:
+            else:
+                if not req_to_exclude.specifier and not req_to_exclude.marker:
+                    # Delete requirement
                     if print_requirements:
-                        print(Fore.RED + f'-- {requirement}')
+                        print_color(f'-- {requirement}', Fore.RED)
                     continue
 
-                if requirement.specifier and req.specifier:
-                    new_specifier = requirement.specifier & req.specifier
-                elif requirement.specifier and not req.specifier:
-                    new_specifier = requirement.specifier
-                elif not requirement.specifier and req.specifier:
-                    new_specifier = req.specifier
-                else:
-                    new_specifier = ''
-
-                if requirement.marker and req.marker:
-                    new_markers = f'({requirement.marker}) and ({req.marker})'
-                elif requirement.marker and not req.marker:
-                    new_markers = requirement.marker
-                elif not requirement.marker and req.marker:
-                    new_markers = req.marker
-                else:
-                    new_markers = ''
-
-
-                if new_markers:
-                    new_requirement = Requirement(f'{requirement.name}{new_specifier}; {new_markers}')
-                else:
-                    new_requirement = Requirement(f'{requirement.name}{new_specifier}')
-
+                # Merge requirement and requirement_from_exclude list
+                new_requirement = _merge_requirements(requirement, req_to_exclude)
                 new_assembled_requirements.add(new_requirement)
 
                 if print_requirements:
                     if not printed:
-                        print(Fore.RED + f'-- {requirement}')
+                        print_color(f'-- {requirement}', Fore.RED)
                         printed = True
-                    print(Fore.GREEN + f'++ {new_requirement}')
+                    print_color(f'++ {new_requirement}', Fore.GREEN)
 
-
+        # Add back unchanged requirement
         if len(not_in_exclude) == len(exclude_list):
             if print_requirements:
-                print(Style.RESET_ALL + str(requirement))
+                print(str(requirement))
             new_assembled_requirements.add(requirement)
 
         not_in_exclude.clear()
 
     if print_requirements:
-        print(Fore.BLUE + '---------- END OF REQUIREMENTS ----------' + Style.RESET_ALL)
+        print_color('---------- END OF REQUIREMENTS ----------')
 
     return new_assembled_requirements
 
 
 # --- Build wheels ---
-failed_wheels = 0
-succeeded_wheels = 0
-
-def build_wheels(requirements: set):
-    """Build Python wheels"""
-    global failed_wheels, succeeded_wheels
+def build_wheels(requirements: set) -> dict:
+    """Build Python wheels
+        - 'failed' - failed wheels counter
+        - 'succeeded' - succeeded wheels counter
+    """
+    failed_wheels = 0
+    succeeded_wheels = 0
 
     dir = f'{os.path.curdir}{(os.sep)}downloaded_wheels'
     for requirement in requirements:
-        # --only-binary requirement wheel build
-        if non_classic_requirement and non_classic_requirement[0].replace('--only-binary ', '') in requirement.name:
-            only_bin = non_classic_requirement[0].replace('--only-binary', '').strip()
-            out = subprocess.run(
-                ['python', '-m', 'pip', 'wheel', f'{requirement}',
-                 '--find-links', f'{dir}', '--wheel-dir', f'{dir}', '--only-binary', f'{only_bin}'],
-                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
-                )
-            print(out.stdout, out.stderr)
-            non_classic_requirement.remove(non_classic_requirement[0])
-            continue
+        # non classic requirement wheel build
+        if non_classic_requirement:
+            pattern = re.compile(r'(--[^ ]*)(.*)')
+            match = pattern.search(non_classic_requirement[0])
+            if match:
+                argument = match.group(1).strip()
+                arg_param = match.group(2).strip()
+            if arg_param in requirement.name:
+                out = subprocess.run(
+                    [f'{sys.executable}', '-m', 'pip', 'wheel', f'{requirement}',
+                    '--find-links', f'{dir}', '--wheel-dir', f'{dir}',
+                    f'{argument}', f'{arg_param}'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    )
+                print(out.stdout.decode('utf-8'))
+                if out.stderr:
+                    print_color(out.stderr.decode('utf-8'), Fore.RED)
+                non_classic_requirement.remove(non_classic_requirement[0])
+                continue
 
         # requirement wheel build
         out = subprocess.run(
-            ['python', '-m', 'pip', 'wheel', f'{requirement}',
+            [f'{sys.executable}', '-m', 'pip', 'wheel', f'{requirement}',
              '--find-links', f'{dir}', '--wheel-dir', f'{dir}'],
              stdout=subprocess.PIPE, stderr=subprocess.PIPE
              )
 
         print(out.stdout.decode('utf-8'))
         if out.stderr:
-            print(Fore.RED + out.stderr.decode('utf-8') + Style.RESET_ALL)
+            print_color(out.stderr.decode('utf-8'), Fore.RED)
 
         if out.returncode != 0:
             failed_wheels += 1
         else:
             succeeded_wheels += 1
 
+    return {'failed': failed_wheels, 'succeeded': succeeded_wheels}
 
-def main():
+
+def main() -> int:
     """Builds Python wheels for ESP-IDF dependencies for master and release branches
     grater or equal to specified"""
 
@@ -394,22 +419,29 @@ def main():
     excluded_requirements = exclude_from_requirements(requirements, exclude_list)
 
     include_list = yaml_to_requirement('include_list.yaml')
-    print(Fore.BLUE + '---------- ADDITIONAL REQUIREMENTS ----------' + Style.RESET_ALL)
+    print_color('---------- ADDITIONAL REQUIREMENTS ----------')
     for req in include_list:
         print(req)
-    print(Fore.BLUE + '---------- END OF ADDITIONAL REQUIREMENTS ----------' + Style.RESET_ALL)
+    print_color('---------- END OF ADDITIONAL REQUIREMENTS ----------')
 
-    print(Fore.BLUE + '---------- BUILD ADDITIONAL WHEELS ----------' + Style.RESET_ALL)
-    build_wheels(include_list)
+    print_color('---------- BUILD ADDITIONAL WHEELS ----------')
+    additional_whl = build_wheels(include_list)
+    failed_wheels = additional_whl['failed']
+    succeeded_wheels = additional_whl['succeeded']
 
-    print(Fore.BLUE + '---------- BUILD WHEELS ----------' + Style.RESET_ALL)
-    build_wheels(excluded_requirements)
+    print_color('---------- BUILD WHEELS ----------')
+    standard_whl = build_wheels(excluded_requirements)
+    failed_wheels += standard_whl['failed']
+    succeeded_wheels += standard_whl['succeeded']
 
-    print(Fore.BLUE + '---------- STATISTICS ----------')
-    print(Fore.GREEN + f'Succeeded {succeeded_wheels} wheels')
-    print(Fore.RED + f'Failed {failed_wheels} wheels' + Style.RESET_ALL)
+    print_color('---------- STATISTICS ----------')
+    print_color(f'Succeeded {succeeded_wheels} wheels', Fore.GREEN)
+    print_color(f'Failed {failed_wheels} wheels', Fore.RED)
 
-    assert failed_wheels == 0
+    if failed_wheels != 0:
+        raise SystemExit('One or more wheels failed to build')
+
+    return 0
 
 
 if __name__ == '__main__':

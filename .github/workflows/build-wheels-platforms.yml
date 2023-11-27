@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '0 0 * * 0,3'
   workflow_dispatch:
+  pull_request:
 
 env:
   MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
@@ -20,13 +21,13 @@ jobs:
           - windows-latest
           - ubuntu-latest
           - macos-latest
-          - linux-armv7-self-hosted
           - macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
-          - BrnoRPI-GH004             # linux ARM64
+          - linux-armv7-self-hosted
+          - linux-arm64-self-hosted
         include:
           - os: linux-armv7-self-hosted
             CONTAINER: python:3.8-bullseye
-          - os: BrnoRPI-GH004
+          - os: linux-arm64-self-hosted
             CONTAINER: python:3.8-bullseye
         python-version: ['3.8']
 
@@ -53,7 +54,7 @@ jobs:
       - name: Setup Python
         # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'BrnoRPI-GH004'
+        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
@@ -129,7 +130,7 @@ jobs:
 
 
       - name: Install additional OS dependencies - Linux ARM64
-        if: matrix.os == 'BrnoRPI-GH004'
+        if: matrix.os == 'linux-arm64-self-hosted'
         run: |
           apt-get update
 
@@ -156,7 +157,7 @@ jobs:
           python build_wheels.py
 
 
-      - name: Upload Release Asset To test S3 bucket
+      - name: Upload release asset to S3 bucket
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -165,8 +166,7 @@ jobs:
           PREFIX: 'pypi'
         shell: bash
         run: |
-          chmod +x Upload-Wheels.sh
-          ./Upload-Wheels.sh $AWS_BUCKET
+          python upload_wheels.py $AWS_BUCKET
           python create_index_pages.py $AWS_BUCKET
 
 
@@ -177,3 +177,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
+
+      - name: Remove temporary directory
+        run: rm -r downloaded_wheels

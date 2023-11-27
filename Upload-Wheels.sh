@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cd downloaded_wheels || exit
+cd download || exit
 
 for wfile in *.whl; do
   file_name=$(echo "${wfile%%-*}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
