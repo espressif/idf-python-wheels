@@ -1,0 +1,45 @@
+name: Build Python dependent wheels
+
+on:
+  workflow_call:
+
+jobs:
+  triage:
+    name: Build Python wheels for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+          #- macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
+          - linux-armv7-self-hosted
+          - linux-arm64-self-hosted
+        include:
+          - os: linux-armv7-self-hosted
+            CONTAINER: [python:3.9-bullseye, python:3.10-bullseye, python:3.11-bullseye]
+          - os: linux-arm64-self-hosted
+            CONTAINER: [python:3.9-bullseye, python:3.10-bullseye, python:3.11-bullseye]
+        python-version: ['3.9', '3.10', '3.11']
+
+    # Use python container on ARM
+    container: ${{ matrix.CONTAINER }}
+    steps:
+      - name: Setup Python
+        # GitHub action for MacOS M1 does not have Python <= 3.10
+        # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
+        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        uses: actions/setup-python@v4
+        with:
+            python-version: ${{ matrix.python-version }}
+
+      - name: Get Python version
+        run: |
+            python --version
+            python -m pip install --upgrade pip
+
+      - name: Build Python dependent wheels for ${{ matrix.python-version }}
+        run: |
+          python build_wheels_from_file.py

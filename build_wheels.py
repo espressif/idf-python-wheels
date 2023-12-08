@@ -416,7 +416,7 @@ def exclude_from_requirements(assembled_requirements:set, exclude_list: set, pri
 
 
 # --- Build wheels ---
-def build_wheels(requirements: set) -> dict:
+def build_wheels(requirements: set, local_links:bool = True) -> dict:
     """Build Python wheels
         - 'failed' - failed wheels counter
         - 'succeeded' - succeeded wheels counter
@@ -465,6 +465,49 @@ def build_wheels(requirements: set) -> dict:
     return {'failed': failed_wheels, 'succeeded': succeeded_wheels}
 
 
+def get_python_dependent_wheels(wheel_dir:str, requirements:set, store:bool = True) -> set:
+    """Get Python dependent requirements from downloaded wheel directory"""
+    dependent_wheels_set = set()
+    dependent_requirements_set = set()
+    #python_version_requirements = set()
+
+    file_names = os.listdir(wheel_dir)
+
+    # find dependent wheels in wheel directory
+    for wheel in file_names:
+        pattern = re.compile(r'([^ -]*)-(\d+(\.\d+)*).*?(cp\d+)')
+        match = pattern.search(wheel)
+        if match is not None:
+            wheel_name = match.group(1)
+            wheel_version = match.group(2)
+            build = match.group(3)
+
+            dependent_wheels_set.add((wheel_name, wheel_version, build))
+
+    # find dependent wheel in requirements
+    for name, version, _ in dependent_wheels_set:
+        for requirement in requirements:
+            if requirement.marker:
+                if 'python_version' in str(requirement.marker):
+                    #python_version_requirements.add(requirement)
+                    #dependent_requirements_set.add(requirement)
+                    pass
+
+            if name.lower() == requirement.name.lower():
+                # add requirements with markers
+                dependent_requirements_set.add(requirement)
+            else:
+                # add downloaded requirement (all dependencies)
+                dependent_requirements_set.add(f'{name}=={version}')
+
+    if store:
+        with open('dependent_requirements.txt', 'w') as f:
+            for wheel in dependent_requirements_set:
+                f.write(f'{str(wheel)}\n')
+
+    return dependent_requirements_set
+
+
 def main() -> int:
     """Builds Python wheels for ESP-IDF dependencies for master and release branches
     grater or equal to specified"""
@@ -476,10 +519,10 @@ def main() -> int:
     idf_constraints = get_constraints_versions(idf_branches)
     print(f'ESP-IDF constrains files versions to be downloaded requirements for:\n{idf_constraints}\n')
 
-    requirements = assemble_requirements(idf_branches, idf_constraints)
+    requirements = assemble_requirements(idf_branches, idf_constraints, True)
 
     exclude_list = yaml_to_requirement('exclude_list.yaml', exclude=True)
-    excluded_requirements = exclude_from_requirements(requirements, exclude_list)
+    after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
 
     include_list = yaml_to_requirement('include_list.yaml')
     print_color('---------- ADDITIONAL REQUIREMENTS ----------')
@@ -493,7 +536,7 @@ def main() -> int:
     succeeded_wheels = additional_whl['succeeded']
 
     print_color('---------- BUILD WHEELS ----------')
-    standard_whl = build_wheels(excluded_requirements)
+    standard_whl = build_wheels(after_exclude_requirements)
     failed_wheels += standard_whl['failed']
     succeeded_wheels += standard_whl['succeeded']
 
@@ -503,6 +546,14 @@ def main() -> int:
 
     if failed_wheels != 0:
         raise SystemExit('One or more wheels failed to build')
+
+    print_color('---------- PYTHON VERSION DEPENDENT REQUIREMENTS ----------')
+    dependent_wheels = get_python_dependent_wheels(f'{os.path.curdir}{(os.sep)}downloaded_wheels',
+                                                   after_exclude_requirements)
+
+    for req in dependent_wheels:
+        print(req)
+    print_color('---------- END OF PYTHON VERSION DEPENDENT REQUIREMENTS ----------')
 
     return 0
 

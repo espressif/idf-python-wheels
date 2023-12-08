@@ -6,9 +6,3 @@
 #    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
 #    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
 #    python: '<python_version_with_operator>' / ['<python_version>', '<python_version>', '<python_version>']                 # optional
-
-# lxml is missing as a dependency of pytest-embedded
-# https://github.com/espressif/pytest-embedded/blob/main/pyproject.toml
-# According to PEP518 when the pyproject.toml is preset the build system uses it
-- package_name: 'lxml'
-  version: '~=4.9.3'
