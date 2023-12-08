@@ -195,19 +195,27 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
 
 
 # --- exclude_list and include_list ---
-def _change_specifier_logic(specifier: str) -> str:
+def _change_specifier_logic(spec_with_text: str) -> tuple:
     """Change specifier logic to opposite
-        - e.g. "<3" will be ">3"
+        e.g. "<3" will be ">3"
+        - return (new_specifier, text_after, old_specifier)
     """
-    new_spec = specifier
+    pattern = re.compile(r'(===|==|!=|~=|<=?|>=?|===?)\s*(.*)')
+    str_match = pattern.findall(spec_with_text)
+    specifier, text = str_match[0]
     replacements = (('<', '>'),
                     ('>', '<'),
                     ('!', '='),
+                    ('~', '!'),
                     ('==', '!='))
     for old, new in replacements:
-        if old in specifier and '===' not in specifier:
+        if old in specifier and specifier != '===':
             new_spec = specifier.replace(old, new)
-    return new_spec
+            break
+        elif specifier == '===':
+            new_spec = '==='
+            break
+    return (new_spec, text, specifier)
 
 
 def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
@@ -227,23 +235,30 @@ def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
 
         if 'version' in package:
             if not isinstance(package['version'], list):
+                new_spec, ver, old_spec = _change_specifier_logic(package['version'])
                 requirement_str_list.append(
-                    _change_specifier_logic(package['version']) if exclude else package['version']
+                    f'{new_spec}{ver}' if exclude else f'{old_spec}{ver}'
                     )
 
             else:
-                version_list = (
-                    [f'{_change_specifier_logic(ver)}' if exclude else f'{ver}' for ver in package['version']]
-                    )
+                version_list = []
+                for elem in package['version']:
+                    new_spec, ver, old_spec = _change_specifier_logic(elem)
+                    if exclude:
+                        version_list.append(f'{new_spec}{ver}')
+                    else:
+                        version_list.append(f'{old_spec}{ver}')
 
                 requirement_str_list.append(','.join(version_list))
 
+        if 'platform' in package or 'python' in package:
+            requirement_str_list.append('; ')
 
         if 'platform' in package and 'version' not in package:
             if not isinstance(package['platform'], list):
                 requirement_str_list.append((
-                    f"; sys_platform != '{package['platform']}'" if exclude
-                    else f"; sys_platform == '{package['platform']}'"
+                    f"sys_platform != '{package['platform']}'" if exclude
+                    else f"sys_platform == '{package['platform']}'"
                     ))
 
             else:
@@ -252,28 +267,76 @@ def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
                      else f"sys_platform == '{plf}'" for plf in package['platform']]
                     )
 
-                requirement_str_list.append('; ' + ' or '.join(platform_list))
+                requirement_str_list.append(' or '.join(platform_list))
 
+        if ('platform' in package or 'python' in package) and 'version' in package and exclude:
+            requirement_old_str_list = [f"{package['package_name']}; "]
 
         if 'platform' in package and 'version' in package:
-            requirement_old_str_list = [f"{package['package_name']}"]
-
             if not isinstance(package['platform'], list):
-                requirement_str_list.append(f"; sys_platform == '{package['platform']}'")
+                requirement_str_list.append(f"sys_platform == '{package['platform']}'")
 
                 if exclude:
-                    requirement_old_str_list.append(f"; sys_platform != '{package['platform']}'")
-                    requirements_set.add(Requirement(''.join(requirement_old_str_list)))
+                    requirement_old_str_list.append(f"sys_platform != '{package['platform']}'")
 
             else:
                 platform_list = [f"sys_platform == '{plf}'" for plf in package['platform']]
-                requirement_str_list.append('; ' + ' or '.join(platform_list))
+                requirement_str_list.append(' or '.join(platform_list))
 
                 if exclude:
                     platform_list_old =  [f"sys_platform != '{plf}'" for plf in package['platform']]
-                    requirement_old_str_list.append('; ' + ' or '.join(platform_list_old))
-                    requirements_set.add(Requirement(''.join(requirement_old_str_list)))
+                    requirement_old_str_list.append(' or '.join(platform_list_old))
 
+        if 'platform' in package and 'python' in package:
+            requirement_str_list.append(' and ')
+
+        if ('platform' in package and 'python' in package) and 'version' in package and exclude:
+            requirement_old_str_list.append(' and ')
+
+        if 'python' in package and 'version' not in package:
+            if not isinstance(package['python'], list):
+                new_spec, text_after, old_spec = _change_specifier_logic(package['python'])
+                requirement_str_list.append((
+                    f"python_version {new_spec} '{text_after}'" if exclude
+                    else f"python_version {old_spec} '{text_after}'"
+                    ))
+
+            else:
+                python_list = []
+                for elem in package['python']:
+                    new_spec, text_after, old_spec = _change_specifier_logic(elem)
+                    if exclude:
+                        python_list.append(f"python_version {new_spec} '{text_after}'")
+                    else:
+                        python_list.append(f"python_version {old_spec} '{text_after}'")
+
+                requirement_str_list.append(' and '.join(python_list))
+
+        if 'python' in package and 'version' in package:
+
+            if not isinstance(package['python'], list):
+                new_spec, text_after, old_spec = _change_specifier_logic(package['python'])
+                requirement_str_list.append(f"python_version {old_spec} '{text_after}'")
+
+                if exclude:
+                    requirement_old_str_list.append(f"python_version {new_spec} '{text_after}'")
+
+            else:
+                python_list = []
+                python_list_old = []
+                for elem in package['python']:
+                    new_spec, text_after, old_spec = _change_specifier_logic(elem)
+
+                    python_list.append(f"python_version {old_spec} '{text_after}'")
+                    if exclude:
+                        python_list_old.append(f"python_version {new_spec} '{text_after}'")
+                requirement_str_list.append('' + ' and '.join(python_list))
+
+                if exclude:
+                    requirement_old_str_list.append(' and '.join(python_list_old))
+
+        if ('platform' in package or 'python' in package) and 'version' in package and exclude:
+            requirements_set.add(Requirement(''.join(requirement_old_str_list)))
 
         requirements_set.add(Requirement(''.join(requirement_str_list)))
     return requirements_set

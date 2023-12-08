@@ -35,8 +35,9 @@ The opposite logic of exclude_list is handled by the function itself, which mean
 
 For every `package_name` there are options:
 * `version`
-    - supports all logic operators defined by PEP508 for versions (<, >, !=, etc.)
+    - supports all logic operators defined by [PEP508](https://peps.python.org/pep-0508/) for versions (<, >, !=, etc.)
 * `platform`
+* `python`
 
 which could be a string or a list of strings.
 
@@ -45,18 +46,20 @@ exclude_list template:
     - package_name: '<name_of_package>'
         version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
         platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
+        python: '<python_version_with_operator>' / ['<python_version>', '<python_version>', '<python_version>']                                                     # optional
 
-The syntax can be converted into a sentence: "From assembled **main requirements** exclude `package_name` with `version` on `platform`".
+The syntax can be converted into a sentence: "From assembled **main requirements** exclude `package_name` with `version` on `platform` for `python` version".
 
 example:
 
     - package_name: 'pyserial'
         version: ['>=3.3', '<3.6']
         platform: ['win32', 'linux', 'darwin']
+        python: '>=3.9'
 
-This would mean: "From assembled **main requirements** exclude `pyserial` with version `>=3.3` and `<3.6` on platform `win32`, `linux`, `darwin`".
+This would mean: "From assembled **main requirements** exclude `pyserial` with version `>=3.3` and `<3.6` on platform `win32`, `linux`, `darwin` for `python` version `>=3.9`".
 
-From the example above is clear that the `platform` could be left out (because all main platforms are specified) so the options `platform` or `version` are optional, one of them or both can be not specified and the key can be erased. When only `package_name` is given the package will be excluded from **main requirements**.
+From the example above is clear that the `platform` could be left out (because all main platforms are specified) so the options `platform` or `version` or `python` are optional, one of them or both can be not specified and the key can be erased. When only `package_name` is given the package will be excluded from **main requirements**.
 
 
 ### include_list.yaml
@@ -64,7 +67,7 @@ File for additional Python packages to the **main requirements** list. Built sep
 
 This YAML file uses the same mechanism such as **exclude_list** but without the opposite logic.
 
-The syntax can be also converted into a sentence: "For assembled **main requirements** additionally include `package_name` with `version` on `platform`".
+The syntax can be also converted into a sentence: "For assembled **main requirements** additionally include `package_name` with `version` on `platform` for `python` version".
 
 
 ### build_requirements.txt

@@ -5,6 +5,7 @@
 #- package_name: '<name_of_package>'
 #    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
 #    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
+#    python: '<python_version_with_operator>' / ['<python_version>', '<python_version>', '<python_version>']                 # optional
 
 # dbus-python can not be build on Windows
 - package_name: 'dbus-python'
