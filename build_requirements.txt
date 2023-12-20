@@ -1,7 +1,8 @@
 # This is a list of Python packages needed for build process and script. This file is used with pip.
 # ----- build script -----
-requests
-packaging
-PyYAML
-colorama
-boto3
+requests~=2.31.0
+packaging~=23.2
+PyYAML~=6.0.1
+colorama~=0.4.6
+# ----- build process -----
+boto3~=1.34.4

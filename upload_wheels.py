@@ -1,3 +1,8 @@
+#
+# SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 """This script uploads wheel files from the downloaded wheels directory to S3 bucket.
     - argument S3 bucket
 """
@@ -21,16 +26,13 @@ if not os.path.exists(WHEELS_DIR):
 wheel_files = os.listdir(WHEELS_DIR)
 
 for wheel in wheel_files:
-    pattern = re.compile(r'([^ -]*)-(\d+)')
+    pattern = re.compile(r'(\w*)-(\d+)')
     match = pattern.search(wheel)
     if match:
         wheel_name = match.group(1)
 
     wheel_name = wheel_name.lower()
     wheel_name = wheel_name.replace('_', '-')
-
-    if sys.platform in 'CYGWIN,MINGW,MINGW32,MSYS' and wheel_name == 'esptool':
-        continue
 
     BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
     print(f'Uploaded {wheel}')
