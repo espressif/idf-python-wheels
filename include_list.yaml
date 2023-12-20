@@ -1,0 +1,8 @@
+# List of Python packages to additionally include to the automatically assembled requirements
+#"For assembled <main requirements> additionally include <package_name> with <version> on <platform>".
+
+# include_list template
+#- package_name: '<name_of_package>'
+#    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
+#    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
+#    python: '<python_version_with_operator>' / ['<python_version>', '<python_version>', '<python_version>']                 # optional

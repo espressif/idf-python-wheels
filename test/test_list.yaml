@@ -1,0 +1,107 @@
+# List of Python packages for testing
+# platform
+- package_name: 'platform'
+  platform: 'win32'
+
+- package_name: 'platform'
+  platform: ['win32', 'linux']
+# version
+- package_name: 'version'
+  version: '<42'
+
+- package_name: 'version'
+  version: ['<42', '>50']
+# Python
+- package_name: 'python'
+  python: '>3.10'
+
+- package_name: 'python'
+  python: ['>3.10', '!=3.8']
+# version and platform
+- package_name: 'version-platform'
+  version: '<=0.9.0.2'
+  platform: 'win32'
+
+- package_name: 'version-platform'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: 'win32'
+
+- package_name: 'version-platform'
+  version: '<=0.9.0.2'
+  platform: ['win32', 'linux']
+
+- package_name: 'version-platform'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: ['win32', 'linux']
+# version and Python
+- package_name: 'version-python'
+  version: '<=0.9.0.2'
+  python: '<3.8'
+
+- package_name: 'version-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  python: '<3.8'
+
+- package_name: 'version-python'
+  version: '<=0.9.0.2'
+  python: ['<3.8', '>3.11']
+
+- package_name: 'version-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  python: ['<3.8', '>3.11']
+# platform and Python
+- package_name: 'platform-python'
+  platform: 'win32'
+  python: '<3.8'
+
+- package_name: 'platform-python'
+  platform: ['win32', 'linux']
+  python: '<3.8'
+
+- package_name: 'platform-python'
+  platform: 'win32'
+  python: ['<3.8', '>3.11']
+
+- package_name: 'platform-python'
+  platform: ['win32', 'linux']
+  python: ['<3.8', '>3.11']
+# version and platform and Python
+- package_name: 'version-platform-python'
+  version: '<=0.9.0.2'
+  platform: 'win32'
+  python: '<3.8'
+
+- package_name: 'version-platform-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: 'win32'
+  python: '<3.8'
+
+- package_name: 'version-platform-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: ['win32', 'linux']
+  python: '<3.8'
+
+- package_name: 'version-platform-python'
+  version: '<=0.9.0.2'
+  platform: ['win32', 'linux']
+  python: '<3.8'
+
+- package_name: 'version-platform-python'
+  version: '<=0.9.0.2'
+  platform: 'win32'
+  python: ['<3.8', '>3.11']
+
+- package_name: 'version-platform-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: 'win32'
+  python: ['<3.8', '>3.11']
+
+- package_name: 'version-platform-python'
+  version: ['<=0.9.0.2', '>0.9.1']
+  platform: ['win32', 'linux']
+  python: ['<3.8', '>3.11']
+
+- package_name: 'version-platform-python'
+  version: '<=0.9.0.2'
+  platform: ['win32', 'linux']
+  python: ['<3.8', '>3.11']
