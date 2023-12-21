@@ -10,3 +10,14 @@
 # dbus-python can not be build on Windows
 - package_name: 'dbus-python'
   platform: ['win32']
+  python: '==3.11" and sys_platform == "darwin' # temporary workaround for macos Python 3.11 until dbus-python support drop
+  # More entries of the same requirement in this list are not merged which may leads into unwanted behavior
+
+# gevent==1.5.0 can not be build with Python > 3.8
+- package_name: 'gevent'
+  version: '==1.5.0'
+  python: '>3.8'
+
+# gdbgui==0.13.2.0 leads to installation of gevent 1.5.0 which can not be build
+- package_name: 'gdbgui'
+  version: '==0.13.2.0'

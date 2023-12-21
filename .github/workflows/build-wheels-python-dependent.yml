@@ -1,11 +1,11 @@
-name: Build Python dependent wheels
+name: Build Python version dependent wheels
 
 on:
   workflow_call:
 
 jobs:
   triage:
-    name: Build Python wheels for ${{ matrix.os }}
+    name: ${{ matrix.os }} - ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -14,19 +14,42 @@ jobs:
           - windows-latest
           - ubuntu-latest
           - macos-latest
-          #- macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
+          - macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
           - linux-armv7-self-hosted
           - linux-arm64-self-hosted
+        python-version:
+          - '3.9'
+          - '3.10'
+          - '3.11'
         include:
           - os: linux-armv7-self-hosted
-            CONTAINER: [python:3.9-bullseye, python:3.10-bullseye, python:3.11-bullseye]
+            python-version: '3.9'
+            CONTAINER: 'python:3.9-bullseye'
+          - os: linux-armv7-self-hosted
+            python-version: '3.10'
+            CONTAINER: 'python:3.10-bullseye'
+          - os: linux-armv7-self-hosted
+            python-version: '3.11'
+            CONTAINER: 'python:3.11-bullseye'
+
           - os: linux-arm64-self-hosted
-            CONTAINER: [python:3.9-bullseye, python:3.10-bullseye, python:3.11-bullseye]
-        python-version: ['3.9', '3.10', '3.11']
+            python-version: '3.9'
+            CONTAINER: 'python:3.9-bullseye'
+          - os: linux-arm64-self-hosted
+            python-version: '3.10'
+            CONTAINER: 'python:3.10-bullseye'
+          - os: linux-arm64-self-hosted
+            python-version: '3.11'
+            CONTAINER: 'python:3.11-bullseye'
+
 
     # Use python container on ARM
     container: ${{ matrix.CONTAINER }}
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Setup Python
         # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
@@ -35,11 +58,62 @@ jobs:
         with:
             python-version: ${{ matrix.python-version }}
 
+      - name: Setup Python - MacOS M1
+        # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
+        if: matrix.os == 'macos-latest-xlarge'
+        run: |
+          brew install python@${{ matrix.python-version }}
+          # change python symlink called with default command 'python'
+          ln -s -f /opt/homebrew/bin/python${{ matrix.python-version }} /usr/local/bin/python
+
       - name: Get Python version
         run: |
             python --version
             python -m pip install --upgrade pip
 
+
+      - name: Install dependencies
+        run: python -m pip install -r build_requirements.txt
+
+      - name: Install additional OS dependencies - Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: os_dependencies/ubuntu.sh
+
+      - name: Install additional OS dependencies - MacOS
+        if: matrix.os == 'macos-latest' || matrix.os == 'macos-latest-xlarge'
+        run: os_dependencies/macos.sh
+
+
+      - name: Install additional OS dependencies - Linux ARM7
+        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'linux-arm64-self-hosted'
+        run: os_dependencies/linux_arm.sh
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dependent_requirements_${{ matrix.os}}
+          path: dependent_requirements_${{ matrix.os}}
+
+
       - name: Build Python dependent wheels for ${{ matrix.python-version }}
+        if: matrix.os != 'windows-latest'
         run: |
-          python build_wheels_from_file.py
+            # Rust directory needs to be included for Linux ARM7
+            if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
+              . $HOME/.cargo/env
+            fi
+
+            python build_wheels_from_file.py dependent_requirements_${{ matrix.os}}
+
+      - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
+        if: matrix.os == 'windows-latest'
+        run: python build_wheels_from_file.py dependent_requirements_${{ matrix.os}}
+
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-download-directory-${{ matrix.os }}-${{ matrix.python-version }}
+          if-no-files-found: ignore
+          path: ./downloaded_wheels
+          retention-days: 1

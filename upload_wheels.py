@@ -23,16 +23,19 @@ WHEELS_DIR = f'{os.path.curdir}{(os.sep)}downloaded_wheels'
 if not os.path.exists(WHEELS_DIR):
     raise SystemExit(f'Error: The wheels directory {WHEELS_DIR} not found.')
 
-wheel_files = os.listdir(WHEELS_DIR)
+wheels_subdirs = os.listdir(WHEELS_DIR)
 
-for wheel in wheel_files:
-    pattern = re.compile(r'(\w*)-(\d+)')
-    match = pattern.search(wheel)
-    if match:
-        wheel_name = match.group(1)
+for subdir in wheels_subdirs:
+    wheel_files = os.listdir(f'{WHEELS_DIR}{os.sep}{subdir}')
 
-    wheel_name = wheel_name.lower()
-    wheel_name = wheel_name.replace('_', '-')
+    for wheel in wheel_files:
+        pattern = re.compile(r'(\w*)-(\d+)')
+        match = pattern.search(wheel)
+        if match:
+            wheel_name = match.group(1)
 
-    BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
-    print(f'Uploaded {wheel}')
+        wheel_name = wheel_name.lower()
+        wheel_name = wheel_name.replace('_', '-')
+
+        BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{subdir}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
+        print(f'Uploaded {wheel}')
