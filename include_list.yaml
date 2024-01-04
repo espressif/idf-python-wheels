@@ -1,5 +1,5 @@
 # List of Python packages to additionally include to the automatically assembled requirements
-#"For assembled <main requirements> additionally include <package_name> with <version> on <platform>".
+#"For assembled <main requirements> additionally include <package_name> with <version> on <platform> for <python> version".
 
 # include_list template
 #- package_name: '<name_of_package>'

@@ -343,7 +343,6 @@ def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
 
 def _merge_requirements(requirement:Requirement, req_to_exclude:Requirement) -> Requirement:
     if requirement.specifier and req_to_exclude.specifier:
-        # TODO  ++ gevent!=1.5.0,==1.5.0; python_version > "3.8"  !!
         new_specifier = req_to_exclude.specifier
     elif requirement.specifier and not req_to_exclude.specifier:
         new_specifier = requirement.specifier
@@ -469,7 +468,6 @@ def get_python_dependent_wheels(wheel_dir:str, requirements:set) -> set:
     """Get Python dependent requirements from downloaded wheel directory"""
     dependent_wheels_set = set()
     dependent_requirements_set = set()
-    #python_version_requirements = set()
 
     file_names = os.listdir(wheel_dir)
 
@@ -490,9 +488,7 @@ def get_python_dependent_wheels(wheel_dir:str, requirements:set) -> set:
             if requirement.marker:
                 if 'python_version' in str(requirement.marker):
                     # add python version specific requirements from all branches
-                    ##python_version_requirements.add(requirement)
                     dependent_requirements_set.add(requirement)
-                    pass
 
             if name.lower() == requirement.name.lower():
                 # add requirements with markers

@@ -1,5 +1,5 @@
 # List of Python packages to exclude from automatically assembled requirements
-#"From assembled <main requirements> exclude <package_name> with <version> on <platform>".
+#"From assembled <main requirements> exclude <package_name> with <version> on <platform> for <python> version".
 
 # exclude_list template
 #- package_name: '<name_of_package>'

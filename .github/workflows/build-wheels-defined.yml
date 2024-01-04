@@ -275,5 +275,4 @@ jobs:
   upload-python-wheels:
     needs: [ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
     name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@feat/python_version_specific_wheels
-    # TODO right branch to ref
+    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main

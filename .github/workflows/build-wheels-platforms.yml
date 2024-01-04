@@ -1,11 +1,9 @@
 name: platforms-dispatches
 
 on:
-  # TODO schedule on final merge
-  #schedule:
-  #  - cron: '0 0 * * 0,3'
+  schedule:
+   - cron: '0 0 * * 0,3'
   workflow_dispatch:
-  pull_request:
 
 env:
   MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
@@ -124,15 +122,14 @@ jobs:
   build-python-version-dependent-wheels:
     needs: build-wheels
     name: Build Python version dependendent wheels for IDF
-    uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@feat/python_version_specific_wheels
-    # TODO right branch to ref
+    uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
 
 
+  #   # TODO in following PR: use the separate workflow bellow, right branch to ref
   # upload-python-wheels:
   #   needs: [build-wheels, build-python-version-dependent-wheels]
   #   name: Upload Python wheels
   #   uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@feat/python_version_specific_wheels
-  #   # TODO right branch to ref
   upload-python-wheels:
     needs: [build-wheels, build-python-version-dependent-wheels]
     name: Upload Python wheels
@@ -155,16 +152,13 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          #name: wheels-download-directory
           path: ./downloaded_wheels
 
       - name: Upload release asset to S3 bucket
         run: |
           python upload_wheels.py $AWS_BUCKET
           python create_index_pages.py $AWS_BUCKET
+
       - name: Drop AWS cache
         id: invalidate-index-cache
         run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
-
-      - name: Remove temporary directory
-        run: rm -r downloaded_wheels
