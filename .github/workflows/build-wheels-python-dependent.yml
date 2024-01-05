@@ -21,6 +21,7 @@ jobs:
           - '3.9'
           - '3.10'
           - '3.11'
+          - '3.12'
         include:
           - os: linux-armv7-self-hosted
             python-version: '3.9'
@@ -31,6 +32,9 @@ jobs:
           - os: linux-armv7-self-hosted
             python-version: '3.11'
             CONTAINER: 'python:3.11-bullseye'
+          - os: linux-armv7-self-hosted
+            python-version: '3.12'
+            CONTAINER: 'python:3.12-bullseye'
 
           - os: linux-arm64-self-hosted
             python-version: '3.9'
@@ -41,6 +45,9 @@ jobs:
           - os: linux-arm64-self-hosted
             python-version: '3.11'
             CONTAINER: 'python:3.11-bullseye'
+          - os: linux-arm64-self-hosted
+            python-version: '3.12'
+            CONTAINER: 'python:3.12-bullseye'
 
 
     # Use python container on ARM
@@ -53,14 +60,14 @@ jobs:
       - name: Setup Python
         # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        if: (matrix.os != 'macos-latest-xlarge' && matrix.python-version != '3.12') && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
         uses: actions/setup-python@v4
         with:
             python-version: ${{ matrix.python-version }}
 
       - name: Setup Python - MacOS M1
         # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
-        if: matrix.os == 'macos-latest-xlarge'
+        if: matrix.os == 'macos-latest-xlarge' && matrix.python-version != '3.12'
         run: |
           brew install python@${{ matrix.python-version }}
           # change python symlink called with default command 'python'

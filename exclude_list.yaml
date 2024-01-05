@@ -10,7 +10,7 @@
 # dbus-python can not be build on Windows
 - package_name: 'dbus-python'
   platform: ['win32']
-  python: '==3.11" and sys_platform == "darwin' # temporary workaround for macos Python 3.11 until dbus-python support drop
+  python: '>3.11" and sys_platform == "darwin' # temporary workaround for macos Python 3.11 until dbus-python support drop
   # More entries of the same requirement in this list are not merged which may leads into unwanted behavior
 
 # gevent==1.5.0 can not be build with Python > 3.8
