@@ -6,3 +6,7 @@
 #    version: '<package_version_with_operator>' / ['<package_version_with_operator>', '<package_version_with_operator>']     # optional
 #    platform: '<platform>' / ['<platform>', '<platform>', '<platform>']                                                     # optional
 #    python: '<python_version_with_operator>' / ['<python_version>', '<python_version>', '<python_version>']                 # optional
+
+- package_name: 'gdbgui'
+  version: '>=0.15.2.0'
+  platform: ['linux', 'darwin']
