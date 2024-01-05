@@ -1,5 +1,5 @@
 #
-# SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+# SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -16,8 +16,8 @@ parser = argparse.ArgumentParser(description='Process build arguments.')
 parser.add_argument('requirements_path', metavar='Path', type=str, nargs='?', default='',
                     help='path to Python version dependent requirements txt')
 
-parser.add_argument('-r', '--requirements', metavar='Requirement/s', type=str, nargs='*',
-                    help='requirement/s to be build wheel/s for')
+parser.add_argument('-r', '--requirements', metavar='Requirement(s)', type=str, nargs='*',
+                    help='requirement(s) to be build wheel(s) for')
 
 args = parser.parse_args()
 
@@ -33,7 +33,7 @@ if requirements_dir:
     try:
         with open(f'{requirements_dir}{os.sep}dependent_requirements.txt', 'r') as f:
             requirements = f.readlines()
-    except Exception as e:
+    except FileNotFoundError as e:
         raise SystemExit(f'Python version dependent requirements directory or file not found ({e})')
 
     for requirement in requirements:
