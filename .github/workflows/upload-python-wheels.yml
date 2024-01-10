@@ -1,0 +1,37 @@
+name: upload-python-wheels
+
+on:
+  workflow_call:
+
+jobs:
+  triage:
+    name: Upload Python wheels
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+      PREFIX: 'pypi'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: python -m pip install -r build_requirements.txt
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./downloaded_wheels
+
+      - name: Upload release asset to S3 bucket
+        run: |
+          python upload_wheels.py $AWS_BUCKET
+          python create_index_pages.py $AWS_BUCKET
+
+      - name: Drop AWS cache
+        id: invalidate-index-cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"

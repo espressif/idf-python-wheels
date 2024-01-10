@@ -1,5 +1,5 @@
 #
-# SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+# SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -15,9 +15,10 @@ from typing import Union
 import requests
 import yaml
 from colorama import Fore
-from colorama import Style
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
+
+from _helper_functions import print_color
 
 # GLOBAL VARIABLES
 # URL to fetch IDF branches from
@@ -38,13 +39,6 @@ MIN_IDF_MINOR_VERSION: int = int(os.environ.get('MIN_IDF_MINOR_VERSION', '0'))
 print(f'ENV variables: IDF v{MIN_IDF_MAJOR_VERSION}.{MIN_IDF_MINOR_VERSION}'
       f' -- grater or equal release and master branches will be considered'
       )
-
-
-def print_color(text:str, color:str = Fore.BLUE):
-    """Print colored text specified by color argument based on colorama
-        - default color BLUE
-    """
-    print(f'{color}', f'{text}', Style.RESET_ALL)
 
 
 def check_response(response: requests.Response, warning: str, exit_on_wrong: bool = False) -> bool:
@@ -349,7 +343,7 @@ def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
 
 def _merge_requirements(requirement:Requirement, req_to_exclude:Requirement) -> Requirement:
     if requirement.specifier and req_to_exclude.specifier:
-        new_specifier = requirement.specifier & req_to_exclude.specifier
+        new_specifier = req_to_exclude.specifier
     elif requirement.specifier and not req_to_exclude.specifier:
         new_specifier = requirement.specifier
     elif not requirement.specifier and req_to_exclude.specifier:
@@ -470,11 +464,10 @@ def build_wheels(requirements: set, local_links:bool = True) -> dict:
     return {'failed': failed_wheels, 'succeeded': succeeded_wheels}
 
 
-def get_python_dependent_wheels(wheel_dir:str, requirements:set, store:bool = True) -> set:
+def get_python_dependent_wheels(wheel_dir:str, requirements:set) -> set:
     """Get Python dependent requirements from downloaded wheel directory"""
     dependent_wheels_set = set()
     dependent_requirements_set = set()
-    #python_version_requirements = set()
 
     file_names = os.listdir(wheel_dir)
 
@@ -494,21 +487,15 @@ def get_python_dependent_wheels(wheel_dir:str, requirements:set, store:bool = Tr
         for requirement in requirements:
             if requirement.marker:
                 if 'python_version' in str(requirement.marker):
-                    #python_version_requirements.add(requirement)
-                    #dependent_requirements_set.add(requirement)
-                    pass
+                    # add python version specific requirements from all branches
+                    dependent_requirements_set.add(requirement)
 
             if name.lower() == requirement.name.lower():
                 # add requirements with markers
                 dependent_requirements_set.add(requirement)
             else:
-                # add downloaded requirement (all dependencies)
-                dependent_requirements_set.add(f'{name}=={version}')
-
-    if store:
-        with open('dependent_requirements.txt', 'w') as f:
-            for wheel in dependent_requirements_set:
-                f.write(f'{str(wheel)}\n')
+                # add downloaded and already built requirements (all dependencies)
+                dependent_requirements_set.add(Requirement(f'{name}=={version}'))
 
     return dependent_requirements_set
 
@@ -552,13 +539,14 @@ def main() -> int:
     if failed_wheels != 0:
         raise SystemExit('One or more wheels failed to build')
 
-    print_color('---------- PYTHON VERSION DEPENDENT REQUIREMENTS ----------')
+    print_color('---------- PYTHON VERSION DEPENDENT ----------')
     dependent_wheels = get_python_dependent_wheels(f'{os.path.curdir}{(os.sep)}downloaded_wheels',
                                                    after_exclude_requirements)
+    after_exclude_dependent_wheels = exclude_from_requirements(dependent_wheels, exclude_list)
 
-    for req in dependent_wheels:
-        print(req)
-    print_color('---------- END OF PYTHON VERSION DEPENDENT REQUIREMENTS ----------')
+    with open('dependent_requirements.txt', 'w') as f:
+        for wheel in after_exclude_dependent_wheels:
+            f.write(f'{str(wheel)}\n')
 
     return 0
 
