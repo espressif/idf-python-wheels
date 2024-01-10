@@ -74,3 +74,4 @@ for name, filenames in packages.items():
                       DL_BUCKET,
                       f'pypi/{name}/index.html',
                       ExtraArgs={'ACL': 'public-read', 'ContentType':'text/html'})
+# TODO index.html in wheel URL is pointing on the same URL and should not be or maybe it can be deleted

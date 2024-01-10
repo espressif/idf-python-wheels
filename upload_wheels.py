@@ -39,3 +39,4 @@ for subdir in wheels_subdirs:
 
         BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{subdir}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
         print(f'Uploaded {wheel}')
+# TODO dependent_requirements.txt files should not be uploaded

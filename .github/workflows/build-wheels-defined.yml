@@ -47,6 +47,7 @@ jobs:
     if: ${{ inputs.os_ubuntu_latest }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
@@ -56,7 +57,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python_version}}
+          python-version: ${{ matrix.python-version}}
 
       - name: Get Python version
         run: |
@@ -85,6 +86,7 @@ jobs:
     if: ${{ inputs.os_windows_latest }}
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
@@ -94,7 +96,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python_version}}
+          python-version: ${{ matrix.python-version}}
 
       - name: Get Python version
         run: |
@@ -120,6 +122,7 @@ jobs:
     if: ${{ inputs.os_macos_latest }}
     runs-on: macos-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
@@ -129,7 +132,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python_version}}
+          python-version: ${{ matrix.python-version}}
 
       - name: Get Python version
         run: |
@@ -158,18 +161,27 @@ jobs:
     if: ${{ inputs.os_macos_arm64 }}
     runs-on: macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
+        if: matrix.python-version == '3.12'
+        uses: actions/setup-python@v4
+        with:
+            python-version: ${{ matrix.python-version }}
+
       - name: Setup Python - MacOS M1
         # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
+        if: matrix.python-version != '3.12'
         run: |
-          brew install python@${{ matrix.python_version }}
+          brew install python@${{ matrix.python-version }}
           # change python symlink called with default command 'python'
-          ln -s -f /opt/homebrew/bin/python${{ matrix.python_version }} /usr/local/bin/python
+          ln -s -f /opt/homebrew/bin/python${{ matrix.python-version }} /usr/local/bin/python
 
       - name: Get Python version
         run: |
@@ -198,16 +210,24 @@ jobs:
     if: ${{ inputs.os_linux_armv7 }}
     runs-on: linux-armv7-self-hosted
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        include:
+          - python-version: '3.8'
+            CONTAINER: 'python:3.8-bullseye'
+          - python-version: '3.9'
+            CONTAINER: 'python:3.9-bullseye'
+          - python-version: '3.10'
+            CONTAINER: 'python:3.10-bullseye'
+          - python-version: '3.11'
+            CONTAINER: 'python:3.11-bullseye'
+          - python-version: '3.12'
+            CONTAINER: 'python:3.12-bullseye'
+    container: ${{ matrix.CONTAINER }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python_version}}
 
       - name: Get Python version
         run: |
@@ -239,16 +259,24 @@ jobs:
     if: ${{ inputs.os_linux_arm64 }}
     runs-on: linux-arm64-self-hosted
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        include:
+          - python-version: '3.8'
+            CONTAINER: 'python:3.8-bullseye'
+          - python-version: '3.9'
+            CONTAINER: 'python:3.9-bullseye'
+          - python-version: '3.10'
+            CONTAINER: 'python:3.10-bullseye'
+          - python-version: '3.11'
+            CONTAINER: 'python:3.11-bullseye'
+          - python-version: '3.12'
+            CONTAINER: 'python:3.12-bullseye'
+    container: ${{ matrix.CONTAINER }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python_version}}
 
       - name: Get Python version
         run: |
@@ -273,6 +301,8 @@ jobs:
 
 
   upload-python-wheels:
+    if: ${{ always() }}
     needs: [ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
     name: Upload Python wheels
     uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+    secrets: inherit
