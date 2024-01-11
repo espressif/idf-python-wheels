@@ -70,7 +70,7 @@ for name, filenames in packages.items():
         index_wheel.append(f'<a href="/pypi/{name}/{fn}">{fn}</a><br/>')
     index_wheel.append(HTML_FOOTER)
 
-    s3.upload_fileobj(BytesIO('\n'.join(index).encode('utf-8')),
+    s3.upload_fileobj(BytesIO('\n'.join(index_wheel).encode('utf-8')),
                       DL_BUCKET,
                       f'pypi/{name}/index.html',
                       ExtraArgs={'ACL': 'public-read', 'ContentType':'text/html'})
