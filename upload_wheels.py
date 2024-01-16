@@ -34,9 +34,8 @@ for subdir in wheels_subdirs:
         if match:
             wheel_name = match.group(1)
 
-        wheel_name = wheel_name.lower()
-        wheel_name = wheel_name.replace('_', '-')
+            wheel_name = wheel_name.lower()
+            wheel_name = wheel_name.replace('_', '-')
 
-        BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{subdir}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
-        print(f'Uploaded {wheel}')
-# TODO dependent_requirements.txt files should not be uploaded
+            BUCKET.upload_file(f'{WHEELS_DIR}{os.sep}{subdir}{os.sep}{wheel}', f'pypi/{wheel_name}/{wheel}')
+            print(f'Uploaded {wheel}')
