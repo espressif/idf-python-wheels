@@ -12,6 +12,13 @@ Supported architectures:
     - x86_64
     - ARM64
 
+Supported Python versions:
+* 3.8
+* 3.9
+* 3.10
+* 3.11
+* 3.12
+
 For each `release` branch of [ESP-IDF] starting from the version defined in GitHub variables and [ESP-IDF] `master` branch all the requirements and constraints files are automatically downloaded and wheels are built and uploaded.
 
 
@@ -20,8 +27,10 @@ For each `release` branch of [ESP-IDF] starting from the version defined in GitH
 to change the [ESP-IDF] `release` branches to build wheels for.
 
 
-## Usage of ad-hoc
-Not supported yet.
+## Usage of manual wheel(s) build - defined wheels workflow
+If there is a need to manually build and upload wheel(s) the `defined-wheels` workflow can be used for this. The pip package needs to be specified with marker support (e.g. coredump~=1.2;sys_platform!='win32') and check the architecture(s) which should be wheel(s) build and upload for. Multiple wheels can be separated by space.
+
+Then the wheel(s) is built and uploaded for all supported Python versions.
 
 
 ## Requirements lists
@@ -72,6 +81,9 @@ The syntax can be also converted into a sentence: "For assembled **main requirem
 
 ### build_requirements.txt
 File for the requirements needed for the build process and the build script.
+
+### os_dependencies
+When there is a need for additional OS dependencies to successfully build the wheel(s) on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
 
 [ESP-IDF]: https://github.com/espressif/esp-idf
