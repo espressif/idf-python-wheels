@@ -1,0 +1,78 @@
+@startuml
+
+:build-wheels-platforms.yml;
+start
+
+:Install OS dependencies (os_dependencies directory);
+
+:Build wheels for IDF (build_wheels.py)
+
+- minimum IDF-supported Python version;
+start
+
+:Fetch all ESP-IDF branches;
+
+:Get supported ESP-IDF branches (specified from GitHub variables);
+
+:Get constraints files for each ESP-IDF branches;
+
+:                      Assemble requirements
+- create requirements.txt
+- remove requirements defined by exclude_list.yaml
+- add additional requirements from include_list.yaml;
+
+:         Build additional requirements
+- from include_list.yaml
+- print list of requirement to be built
+- print statistics;
+if (1 or more wheel(s) build failed) then (yes)
+:Raise Error;
+stop
+endif
+
+:                 Build requirements
+- from requirements.txt after exclude
+- print list of requirement to be built
+- print statistics;
+if (1 or more wheel(s) build failed) then (yes)
+:Raise Error;
+stop
+endif
+
+:                Get Python version dependent wheels
+- check built wheels in the directory
+- resolve Python dependent requirements from wheels
+- print list of requirement to be built
+- create dependent_requirements.txt;
+
+:          Upload artifacts
+- wheels directory
+- dependent_requirements.txt;
+
+:build-wheels-python-dependent.yml
+
+- all IDF-supported Python versions;
+start
+
+:Install OS dependencies (os_dependencies directory);
+
+:     Build requirements
+- build_wheels_from_file.py;
+
+:    Upload artifacts
+- wheels directories;
+
+
+:upload-python-wheels.yml;
+start
+
+: Download artifacts
+- wheels directories;
+
+:       Upload to S3
+- upload_wheels.py
+- create_index_pages.py;
+
+stop
+
+@enduml

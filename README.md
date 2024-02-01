@@ -85,5 +85,16 @@ File for the requirements needed for the build process and the build script.
 ### os_dependencies
 When there is a need for additional OS dependencies to successfully build the wheel(s) on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
+## Activity diagram
+The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
+![IDF Python wheels - Activity diagram](./resources/idf-python-wheels_diagram.svg "IDF Python wheels - Activity diagram")
+
+*The diagram was generated with the open-source tool [PlantUML](https://plantuml.com) (and edited)*
+
+> [!NOTE]
+> **Python version dependent wheels explanation**
+>
+> Python dependent wheels are wheels which depend on the [CPython’s Application Binary Interface (ABI)](https://docs.python.org/3/c-api/stable.html). These are checked based on the [wheel filename format](https://peps.python.org/pep-0491/#file-format) where the `abi tag` is checked for `cp`. Such wheels need to be build also for all supported Python versions, not only for the minimum Python version supported by [ESP-IDF].
+
 
 [ESP-IDF]: https://github.com/espressif/esp-idf

@@ -1,0 +1,1164 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   contentStyleType="text/css"
+   height="255mm"
+   preserveAspectRatio="none"
+   version="1.1"
+   viewBox="0 0 646.29912 963.7804"
+   width="171mm"
+   zoomAndPan="magnify"
+   id="svg83"
+   sodipodi:docname="idf-python-wheels_diagram.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview83"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.88520411"
+     inkscape:cx="612.28816"
+     inkscape:cy="486.32851"
+     inkscape:window-width="2560"
+     inkscape:window-height="1369"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg83"
+     inkscape:document-units="mm" />
+  <defs
+     id="defs1" />
+  <rect
+     style="fill:#ffffff;stroke:none;stroke-width:1.75748;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:0.811765"
+     id="rect1"
+     width="642.51953"
+     height="956.22137"
+     x="0"
+     y="0"
+     rx="18.897636"
+     ry="18.897636" />
+  <rect
+     style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:1.17588;stroke-dasharray:1.17588, 3.52763;stroke-dashoffset:0;stroke-opacity:0.811765"
+     id="rect86"
+     width="639.93164"
+     height="937.41174"
+     x="2.5879388"
+     y="14.10479"
+     rx="12.647298"
+     ry="12.647298" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="163"
+     x="124"
+     y="32.138699"
+     id="text1"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46559,-13.367997)">build-wheels-platforms.yml</text>
+  <circle
+     cx="126.60233"
+     cy="29.750458"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse1"
+     r="6.6925282" />
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="232.89998"
+     x="10.152344"
+     y="49.828041"
+     id="rect2" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="328"
+     x="41.5"
+     y="126.1074"
+     id="text2"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)">Install OS dependencies (os_dependencies directory)</text>
+  <rect
+     fill="#f1f1f1"
+     height="41.430965"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="177.35199"
+     x="37.926334"
+     y="85.946747"
+     id="rect3" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="230"
+     x="83"
+     y="180.0762"
+     id="text3"
+     style="font-size:12px;font-family:sans-serif;fill:#000000"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)">Build wheels for IDF (<tspan
+   style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, ';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+   id="tspan83">build_wheels.py</tspan>)</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="4"
+     x="83"
+     y="194.04491"
+     id="text4"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)"> </text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="245"
+     x="83"
+     y="208.0137"
+     id="text5"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)">- minimum IDF-supported Python version</text>
+  <circle
+     cx="313.99313"
+     cy="105.96162"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse5"
+     r="6.6925282" />
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="119.79625"
+     x="254.09499"
+     y="126.03922"
+     id="rect5" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="159"
+     x="126"
+     y="301.98239"
+     id="text6"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">Fetch all ESP-IDF branches</text>
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="260.33936"
+     x="183.82344"
+     y="162.15791"
+     id="rect6" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="369"
+     x="21"
+     y="355.9512"
+     id="text7"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">Get supported ESP-IDF branches (specified from GitHub variables)</text>
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="203.45285"
+     x="212.26669"
+     y="198.27669"
+     id="rect7" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="284"
+     x="63.5"
+     y="409.91989"
+     id="text8"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">Get constraints files for each ESP-IDF branches</text>
+  <rect
+     fill="#f1f1f1"
+     height="60.12822"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="234.90773"
+     x="196.53925"
+     y="234.39539"
+     id="rect8" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="145"
+     x="128"
+     y="463.8887"
+     id="text9"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">Assemble requirements</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="151"
+     x="40"
+     y="477.85739"
+     id="text10"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-59.916298)">- create requirements.txt</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="331"
+     x="40"
+     y="491.8262"
+     id="text11"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-59.916298)">- remove requirements defined by exclude_list.yaml</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="328"
+     x="40"
+     y="519.76367"
+     id="text13"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-67.916298)">- add additional requirements from include_list.yaml</text>
+  <rect
+     fill="#f1f1f1"
+     height="50.779556"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="183.37527"
+     x="222.30548"
+     y="307.90866"
+     id="rect13" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="176"
+     x="114.5"
+     y="573.73242"
+     id="text14"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">Build additional requirements</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="138"
+     x="78.5"
+     y="587.70117"
+     id="text15"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">- from include_list.yaml</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="254"
+     x="78.5"
+     y="601.66992"
+     id="text16"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)"
+     style="letter-spacing:0px"
+     dx="0">- print list of requirement to be built</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="93"
+     x="78.5"
+     y="615.63867"
+     id="text17"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">- print statistics</text>
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="57.55574"
+     x="441.21524"
+     y="394.46664"
+     id="rect17" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="66"
+     x="172.5"
+     y="718.00983"
+     id="text18"
+     transform="matrix(0.66925281,0,0,0.66925281,332.46167,-71.916296)">Raise Error</text>
+  <circle
+     cx="469.99313"
+     cy="443.6463"
+     fill="none"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse18"
+     r="7.3617811" />
+  <circle
+     cx="469.99313"
+     cy="443.6463"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse19"
+     r="4.0155168" />
+  <polygon
+     fill="#f1f1f1"
+     points="293.5,648.4688 305.5,660.4688 293.5,672.4688 117.5,672.4688 105.5,660.4688 117.5,648.4688 "
+     style="stroke:#181818;stroke-width:0.5"
+     id="polygon19"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="11px"
+     lengthAdjust="spacing"
+     textLength="21"
+     x="209.5"
+     y="682.6792"
+     id="text19"
+     transform="matrix(0.66925281,0,0,0.66925281,242.08978,-79.457842)">yes</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="11px"
+     lengthAdjust="spacing"
+     textLength="176"
+     x="117.5"
+     y="664.27692"
+     id="text20"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)">1 or more wheel(s) build failed</text>
+  <rect
+     fill="#f1f1f1"
+     height="50.779556"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="183.37527"
+     x="222.30548"
+     y="409.1167"
+     id="rect20" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="114"
+     x="146.5"
+     y="844.49408"
+     id="text21"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)">Build requirements</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="224"
+     x="78.5"
+     y="858.46289"
+     id="text22"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)">- from requirements.txt after exclude</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="254"
+     x="78.5"
+     y="872.43158"
+     id="text23"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)">-print list of requirement to be built</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="93"
+     x="78.5"
+     y="886.40039"
+     id="text24"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)">- print statistics</text>
+  <polygon
+     fill="#f1f1f1"
+     points="105.5,931.2305 117.5,919.2305 293.5,919.2305 305.5,931.2305 293.5,943.2305 117.5,943.2305 "
+     style="stroke:#181818;stroke-width:0.5"
+     id="polygon26"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="11px"
+     lengthAdjust="spacing"
+     textLength="176"
+     x="117.5"
+     y="935.03857"
+     id="text27"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)">1 or more wheel(s) build failed</text>
+  <rect
+     fill="#f1f1f1"
+     height="60.12822"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="235.577"
+     x="196.20462"
+     y="502.32471"
+     id="rect27" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="230"
+     x="103.5"
+     y="1115.2559"
+     id="text28"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">Get Python version dependent wheels</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="217"
+     x="39.5"
+     y="1129.2246"
+     id="text29"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- check built wheels in the directory</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="332"
+     x="39.5"
+     y="1143.1934"
+     id="text30"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- resolve Python dependent requirements from wheels</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="254"
+     x="39.5"
+     y="1157.1621"
+     id="text31"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">-print list of requirement to be built</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="223"
+     x="39.5"
+     y="1171.1309"
+     id="text32"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- create dependent_requirements.txt</text>
+  <rect
+     fill="#f1f1f1"
+     height="41.430965"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="133.85056"
+     x="247.06784"
+     y="575.83795"
+     id="rect32" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="95"
+     x="155.5"
+     y="1225.0996"
+     id="text33"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">Upload artifacts</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="111"
+     x="115.5"
+     y="1239.0684"
+     id="text34"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- wheels directory</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="180"
+     x="115.5"
+     y="1253.0371"
+     id="text35"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- dependent_requirements.txt</text>
+  <rect
+     fill="#f1f1f1"
+     height="41.430965"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="159.28217"
+     x="234.35204"
+     y="630.65393"
+     id="rect35" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="218"
+     x="96.5"
+     y="1307.0059"
+     id="text36"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">build-wheels-python-dependent.yml</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="4"
+     x="96.5"
+     y="1320.9746"
+     id="text37"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)"> </text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="212"
+     x="96.5"
+     y="1334.9434"
+     id="text38"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)">- all IDF-supported Python versions</text>
+  <circle
+     cx="514.76898"
+     cy="651.36938"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse38"
+     r="6.6925282" />
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="232.89998"
+     x="398.31897"
+     y="671.44696"
+     id="rect38" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="328"
+     x="41.5"
+     y="1428.9121"
+     id="text39"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">Install OS dependencies (os_dependencies directory)</text>
+  <rect
+     fill="#f1f1f1"
+     height="32.082306"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="122.47327"
+     x="453.53232"
+     y="707.56573"
+     id="rect39" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="114"
+     x="144"
+     y="1482.8809"
+     id="text40"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">Build requirements</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="163"
+     x="124"
+     y="1496.8496"
+     id="text41"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">- build_wheels_from_file.py</text>
+  <rect
+     fill="#f1f1f1"
+     height="32.082306"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="95.033897"
+     x="467.25201"
+     y="753.03308"
+     id="rect41" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="95"
+     x="160.5"
+     y="1550.8184"
+     id="text42"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">Upload artifacts</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="122"
+     x="144.5"
+     y="1564.7871"
+     id="text43"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">- wheels directories</text>
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="119.79625"
+     x="454.87085"
+     y="798.50043"
+     id="rect43" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="159"
+     x="126"
+     y="1618.7559"
+     id="text44"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)">upload-python-wheels.yml</text>
+  <circle
+     cx="313.99313"
+     cy="810.09735"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse44"
+     r="6.6925282" />
+  <rect
+     fill="#f1f1f1"
+     height="32.082306"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="95.033897"
+     x="266.47617"
+     y="830.17493"
+     id="rect44" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="112"
+     x="148.5"
+     y="1712.7246"
+     id="text45"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)">Download artifacts</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="122"
+     x="144.5"
+     y="1726.6934"
+     id="text46"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)">- wheels directories</text>
+  <rect
+     fill="#f1f1f1"
+     height="41.430965"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="113.10372"
+     x="257.44125"
+     y="875.64227"
+     id="rect46" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="79"
+     x="159"
+     y="1780.6621"
+     id="text47"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)">Upload to S3</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="117"
+     x="131"
+     y="1794.6309"
+     id="text48"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)">- upload_wheels.py</text>
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="149"
+     x="131"
+     y="1808.5996"
+     id="text49"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)">- create_index_pages.py</text>
+  <circle
+     cx="313.99313"
+     cy="937.82013"
+     fill="none"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse49"
+     r="7.3617811" />
+  <circle
+     cx="313.99313"
+     cy="937.82013"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse50"
+     r="4.0155168" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="126.60233"
+     x2="126.60233"
+     y1="36.442986"
+     y2="49.828041"
+     id="line51" />
+  <polygon
+     fill="#181818"
+     points="205.5,104.9688 209.5,94.9688 205.5,98.9688 201.5,94.9688 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon51"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="126.60233"
+     x2="126.60233"
+     y1="72.561691"
+     y2="85.946747"
+     id="line52" />
+  <polygon
+     fill="#181818"
+     points="205.5,158.9375 209.5,148.9375 205.5,152.9375 201.5,148.9375 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon52"
+     transform="matrix(0.66925281,0,0,0.66925281,-10.92912,-20.422624)" />
+  <path
+     id="line53"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="m 215.27833,106.21452 h 91.57175"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="205.5,240.8438 209.5,230.8438 205.5,234.8438 201.5,230.8438 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon53"
+     transform="matrix(0,-0.66925281,0.66925281,0,145.6647,243.74597)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="112.65415"
+     y2="126.03922"
+     id="line54" />
+  <polygon
+     fill="#181818"
+     points="205.5,280.8438 209.5,270.8438 205.5,274.8438 201.5,270.8438 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon54"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="148.77286"
+     y2="162.15791"
+     id="line55" />
+  <polygon
+     fill="#181818"
+     points="205.5,334.8125 209.5,324.8125 205.5,328.8125 201.5,324.8125 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon55"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="184.89163"
+     y2="198.27669"
+     id="line56" />
+  <polygon
+     fill="#181818"
+     points="205.5,388.7813 209.5,378.7813 205.5,382.7813 201.5,378.7813 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon56"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="221.01033"
+     y2="234.39539"
+     id="line57" />
+  <polygon
+     fill="#181818"
+     points="205.5,442.75 209.5,432.75 205.5,436.75 201.5,432.75 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon57"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="294.52362"
+     y2="307.90866"
+     id="line58" />
+  <polygon
+     fill="#181818"
+     points="205.5,552.5938 209.5,542.5938 205.5,546.5938 201.5,542.5938 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon58"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="469.99313"
+     x2="469.99313"
+     y1="417.20029"
+     y2="436.28452"
+     id="line59" />
+  <polygon
+     fill="#181818"
+     points="205.5,753.3555 201.5,749.3555 205.5,759.3555 209.5,749.3555 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon59"
+     transform="matrix(0.66925281,0,0,0.66925281,332.46167,-71.916296)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="388.13535"
+     y2="404.46664"
+     id="line60" />
+  <path
+     id="line61"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="m 380.9184,380.10431 h 88.03102"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="313.5,729.3555 317.5,739.3555 321.5,729.3555 317.5,733.3555 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon61"
+     transform="matrix(0.66925281,0,0,0.66925281,256.46167,-101.91629)" />
+  <path
+     id="line62"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="m 468.94943,380.10431 v 9.62735"
+     sodipodi:nodetypes="cc" />
+  <rect
+     fill="#f1f1f1"
+     height="22.733715"
+     rx="8.3656597"
+     ry="8.3656597"
+     style="stroke:#181818;stroke-width:0.334626"
+     width="57.55574"
+     x="441.21524"
+     y="495.67468"
+     id="rect17-6" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="12px"
+     lengthAdjust="spacing"
+     textLength="66"
+     x="172.5"
+     y="718.00983"
+     id="text18-8"
+     transform="matrix(0.66925281,0,0,0.66925281,332.46167,29.291726)">Raise Error</text>
+  <circle
+     cx="469.99313"
+     cy="544.85431"
+     fill="none"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse18-9"
+     r="7.3617811" />
+  <circle
+     cx="469.99313"
+     cy="544.85431"
+     fill="#222222"
+     style="stroke:#222222;stroke-width:0.669253"
+     id="ellipse19-8"
+     r="4.0155168" />
+  <text
+     fill="#000000"
+     font-family="sans-serif"
+     font-size="11px"
+     lengthAdjust="spacing"
+     textLength="21"
+     x="209.5"
+     y="682.6792"
+     id="text19-9"
+     transform="matrix(0.66925281,0,0,0.66925281,242.08978,21.75018)">yes</text>
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="469.99313"
+     x2="469.99313"
+     y1="518.40833"
+     y2="537.49255"
+     id="line59-4" />
+  <polygon
+     fill="#181818"
+     points="201.5,749.3555 205.5,759.3555 209.5,749.3555 205.5,753.3555 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon59-2"
+     transform="matrix(0.66925281,0,0,0.66925281,332.46167,29.291726)" />
+  <path
+     id="line61-7"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="m 380.9184,481.31234 h 88.03102"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="317.5,739.3555 321.5,729.3555 317.5,733.3555 313.5,729.3555 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon61-6"
+     transform="matrix(0.66925281,0,0,0.66925281,256.46167,-0.70826902)" />
+  <path
+     id="line62-3"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="m 468.94943,481.31234 v 9.62735"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="205.5,823.3555 209.5,813.3555 205.5,817.3555 201.5,813.3555 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon64"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="358.68823"
+     y2="372.07327"
+     id="line65" />
+  <polygon
+     fill="#181818"
+     points="205.5,648.4688 209.5,638.4688 205.5,642.4688 201.5,638.4688 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon65"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-61.916298)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="488.93964"
+     y2="502.32471"
+     id="line71" />
+  <polygon
+     fill="#181818"
+     points="209.5,1084.1172 205.5,1088.1172 201.5,1084.1172 205.5,1094.1172 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon71"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="459.89624"
+     y2="473.28131"
+     id="line72" />
+  <polygon
+     fill="#181818"
+     points="205.5,919.2305 209.5,909.2305 205.5,913.2305 201.5,909.2305 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon72"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-141.91629)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="562.45288"
+     y2="575.83795"
+     id="line73" />
+  <polygon
+     fill="#181818"
+     points="209.5,1193.9609 205.5,1197.9609 201.5,1193.9609 205.5,1203.9609 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon73"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="617.26886"
+     y2="630.65393"
+     id="line74" />
+  <polygon
+     fill="#181818"
+     points="209.5,1275.8672 205.5,1279.8672 201.5,1275.8672 205.5,1285.8672 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon74"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-229.91629)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="514.76898"
+     x2="514.76898"
+     y1="658.06195"
+     y2="671.44696"
+     id="line76" />
+  <polygon
+     fill="#181818"
+     points="201.5,1397.7734 205.5,1407.7734 209.5,1397.7734 205.5,1401.7734 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon76"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="514.76898"
+     x2="514.76898"
+     y1="694.18066"
+     y2="707.56573"
+     id="line77" />
+  <polygon
+     fill="#181818"
+     points="201.5,1451.7422 205.5,1461.7422 209.5,1451.7422 205.5,1455.7422 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon77"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="514.76898"
+     x2="514.76898"
+     y1="739.64801"
+     y2="753.03308"
+     id="line78" />
+  <polygon
+     fill="#181818"
+     points="201.5,1519.6797 205.5,1529.6797 209.5,1519.6797 205.5,1523.6797 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon78"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="514.76898"
+     x2="514.76898"
+     y1="785.11542"
+     y2="798.50043"
+     id="line79" />
+  <polygon
+     fill="#181818"
+     points="201.5,1587.6172 205.5,1597.6172 209.5,1587.6172 205.5,1591.6172 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon79"
+     transform="matrix(0.66925281,0,0,0.66925281,377.23751,-270.70933)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="816.78986"
+     y2="830.17493"
+     id="line81" />
+  <polygon
+     fill="#181818"
+     points="209.5,1681.5859 205.5,1685.5859 201.5,1681.5859 205.5,1691.5859 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon81"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="862.2572"
+     y2="875.64227"
+     id="line82" />
+  <polygon
+     fill="#181818"
+     points="209.5,1749.5234 205.5,1753.5234 201.5,1749.5234 205.5,1759.5234 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon82"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)" />
+  <line
+     style="stroke:#181818;stroke-width:0.669253"
+     x1="313.99313"
+     x2="313.99313"
+     y1="917.07318"
+     y2="930.45831"
+     id="line83" />
+  <polygon
+     fill="#181818"
+     points="209.5,1831.4297 205.5,1835.4297 201.5,1831.4297 205.5,1841.4297 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon83"
+     transform="matrix(0.66925281,0,0,0.66925281,176.46167,-301.92368)" />
+  <path
+     id="line53-8"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="M 393.6342,650.86223 H 507.07497"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="205.5,240.8438 209.5,230.8438 205.5,234.8438 201.5,230.8438 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon53-0"
+     transform="matrix(0,-0.66925281,0.66925281,0,345.88959,788.39367)" />
+  <path
+     id="line53-8-1"
+     style="stroke:#181818;stroke-width:0.669253"
+     d="M 455.03935,810.09735 H 324.19802"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     fill="#181818"
+     points="209.5,230.8438 205.5,234.8438 201.5,230.8438 205.5,240.8438 "
+     style="stroke:#181818;stroke-width:1"
+     id="polygon53-0-0"
+     transform="matrix(0,0.66925281,-0.66925281,0,482.70631,672.56585)" />
+</svg>
