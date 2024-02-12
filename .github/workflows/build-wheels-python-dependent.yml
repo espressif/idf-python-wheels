@@ -61,7 +61,7 @@ jobs:
         # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
         if: (matrix.os != 'macos-latest-xlarge' && matrix.python-version != '3.12') && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
             python-version: ${{ matrix.python-version }}
 
