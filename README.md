@@ -24,13 +24,13 @@ For each `release` branch of [ESP-IDF] starting from the version defined in GitH
 
 ## Configuration
 `MIN_IDF_MAJOR_VERSION` and `MIN_IDF_MINOR_VERSION` GitHub variables can be set in project settings
-to change the [ESP-IDF] `release` branches to build wheels for.
+to change the [ESP-IDF] `release` branches to build wheels for. If these variables are not set (not in the environment for [build-wheels-platforms.yml](./.github/workflows/build-wheels-platforms.yml)), the default values specified in [build_wheels.py](./build_wheels.py) are used.
 
 
-## Usage of manual wheel(s) build - defined wheels workflow
-If there is a need to manually build and upload wheel(s) the `defined-wheels` workflow can be used for this. The pip package needs to be specified with marker support (e.g. coredump~=1.2;sys_platform!='win32') and check the architecture(s) which should be wheel(s) build and upload for. Multiple wheels can be separated by space.
+## Usage of manual wheels build - defined wheels workflow
+If there is a need to manually build and upload wheels the `defined-wheels` workflow can be used for this. The pip package needs to be specified with marker support (e.g. coredump~=1.2;sys_platform!='win32') and check the architectures which should be wheels built and uploaded for. Multiple wheels can be separated by space.
 
-Then the wheel(s) is built and uploaded for all supported Python versions.
+Then the wheels are built and uploaded for all supported Python versions.
 
 
 ## Requirements lists
@@ -74,8 +74,6 @@ From the example above is clear that the `platform` could be left out (because a
 ### include_list.yaml
 File for additional Python packages to the **main requirements** list. Built separately to not restrict the **main requirements** list.
 
-This YAML file uses the same mechanism such as **exclude_list** but without the opposite logic.
-
 The syntax can be also converted into a sentence: "For assembled **main requirements** additionally include `package_name` with `version` on `platform` for `python` version".
 
 
@@ -83,7 +81,7 @@ The syntax can be also converted into a sentence: "For assembled **main requirem
 File for the requirements needed for the build process and the build script.
 
 ### os_dependencies
-When there is a need for additional OS dependencies to successfully build the wheel(s) on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
+When there is a need for additional OS dependencies to successfully build the wheels on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
 ## Activity diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.

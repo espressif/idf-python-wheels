@@ -13,12 +13,13 @@ from typing import Optional
 from typing import Union
 
 import requests
-import yaml
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import merge_requirements
 from _helper_functions import print_color
+from yaml_list_adapter import YAMLListAdapter
 
 # GLOBAL VARIABLES
 # URL to fetch IDF branches from
@@ -193,182 +194,6 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
     return _add_into_requirements(requirements_txt)
 
 
-# --- exclude_list and include_list ---
-def _change_specifier_logic(spec_with_text: str) -> tuple:
-    """Change specifier logic to opposite
-        e.g. "<3" will be ">3"
-        - return (new_specifier, text_after, old_specifier)
-    """
-    pattern = re.compile(r'(===|==|!=|~=|<=?|>=?|===?)\s*(.*)')
-    str_match = pattern.findall(spec_with_text)
-    specifier, text = str_match[0]
-    replacements = (('<', '>'),
-                    ('>', '<'),
-                    ('!', '='),
-                    ('~', '!'),
-                    ('==', '!='))
-    for old, new in replacements:
-        if old in specifier and specifier != '===':
-            new_spec = specifier.replace(old, new)
-            break
-        elif specifier == '===':
-            new_spec = '==='
-            break
-    return (new_spec, text, specifier)
-
-
-def yaml_to_requirement(yaml_file:str, exclude: bool = False) -> set:
-    """Converts YAML defined package into packaging.requirements Requirement
-    which can be directly used with pip
-    - when exclude is set to True it makes opposite logic for Requirement to be excluded"""
-    with open(yaml_file, 'r') as f:
-        yaml_list = yaml.load(f, yaml.Loader)
-
-    requirements_set: set[Requirement] = set()
-
-    if not yaml_list:
-        return requirements_set
-
-    for package in yaml_list:
-        requirement_str_list = [f"{package['package_name']}"]
-
-        if 'version' in package:
-            if not isinstance(package['version'], list):
-                new_spec, ver, old_spec = _change_specifier_logic(package['version'])
-                requirement_str_list.append(
-                    f'{new_spec}{ver}' if exclude else f'{old_spec}{ver}'
-                    )
-
-            else:
-                version_list = []
-                for elem in package['version']:
-                    new_spec, ver, old_spec = _change_specifier_logic(elem)
-                    if exclude:
-                        version_list.append(f'{new_spec}{ver}')
-                    else:
-                        version_list.append(f'{old_spec}{ver}')
-
-                requirement_str_list.append(','.join(version_list))
-
-        if 'platform' in package or 'python' in package:
-            requirement_str_list.append('; ')
-
-        if 'platform' in package and 'version' not in package:
-            if not isinstance(package['platform'], list):
-                requirement_str_list.append((
-                    f"sys_platform != '{package['platform']}'" if exclude
-                    else f"sys_platform == '{package['platform']}'"
-                    ))
-
-            else:
-                platform_list = (
-                    [f"sys_platform != '{plf}'" if exclude
-                     else f"sys_platform == '{plf}'" for plf in package['platform']]
-                    )
-
-                requirement_str_list.append(' or '.join(platform_list))
-
-        if ('platform' in package or 'python' in package) and 'version' in package and exclude:
-            requirement_old_str_list = [f"{package['package_name']}; "]
-
-        if 'platform' in package and 'version' in package:
-            if not isinstance(package['platform'], list):
-                requirement_str_list.append(f"sys_platform == '{package['platform']}'")
-
-                if exclude:
-                    requirement_old_str_list.append(f"sys_platform != '{package['platform']}'")
-
-            else:
-                platform_list = [f"sys_platform == '{plf}'" for plf in package['platform']]
-                requirement_str_list.append(' or '.join(platform_list))
-
-                if exclude:
-                    platform_list_old =  [f"sys_platform != '{plf}'" for plf in package['platform']]
-                    requirement_old_str_list.append(' or '.join(platform_list_old))
-
-        if 'platform' in package and 'python' in package:
-            requirement_str_list.append(' and ')
-
-        if ('platform' in package and 'python' in package) and 'version' in package and exclude:
-            requirement_old_str_list.append(' and ')
-
-        if 'python' in package and 'version' not in package:
-            if not isinstance(package['python'], list):
-                new_spec, text_after, old_spec = _change_specifier_logic(package['python'])
-                requirement_str_list.append((
-                    f"python_version {new_spec} '{text_after}'" if exclude
-                    else f"python_version {old_spec} '{text_after}'"
-                    ))
-
-            else:
-                python_list = []
-                for elem in package['python']:
-                    new_spec, text_after, old_spec = _change_specifier_logic(elem)
-                    if exclude:
-                        python_list.append(f"python_version {new_spec} '{text_after}'")
-                    else:
-                        python_list.append(f"python_version {old_spec} '{text_after}'")
-
-                requirement_str_list.append(' and '.join(python_list))
-
-        if 'python' in package and 'version' in package:
-
-            if not isinstance(package['python'], list):
-                new_spec, text_after, old_spec = _change_specifier_logic(package['python'])
-                requirement_str_list.append(f"python_version {old_spec} '{text_after}'")
-
-                if exclude:
-                    requirement_old_str_list.append(f"python_version {new_spec} '{text_after}'")
-
-            else:
-                python_list = []
-                python_list_old = []
-                for elem in package['python']:
-                    new_spec, text_after, old_spec = _change_specifier_logic(elem)
-
-                    python_list.append(f"python_version {old_spec} '{text_after}'")
-                    if exclude:
-                        python_list_old.append(f"python_version {new_spec} '{text_after}'")
-                requirement_str_list.append('' + ' and '.join(python_list))
-
-                if exclude:
-                    requirement_old_str_list.append(' and '.join(python_list_old))
-
-        if ('platform' in package or 'python' in package) and 'version' in package and exclude:
-            requirements_set.add(Requirement(''.join(requirement_old_str_list)))
-
-        requirements_set.add(Requirement(''.join(requirement_str_list)))
-    return requirements_set
-
-
-def _merge_requirements(requirement:Requirement, req_to_exclude:Requirement) -> Requirement:
-    if requirement.specifier and req_to_exclude.specifier:
-        new_specifier = req_to_exclude.specifier
-    elif requirement.specifier and not req_to_exclude.specifier:
-        new_specifier = requirement.specifier
-    elif not requirement.specifier and req_to_exclude.specifier:
-        new_specifier = req_to_exclude.specifier
-    else:
-        new_specifier = ''
-
-    if requirement.marker and req_to_exclude.marker:
-        new_markers = f'({requirement.marker}) and ({req_to_exclude.marker})'
-    elif requirement.marker and not req_to_exclude.marker:
-        new_markers = requirement.marker
-    elif not requirement.marker and req_to_exclude.marker:
-        new_markers = req_to_exclude.marker
-    else:
-        new_markers = ''
-
-
-    if new_markers:
-        new_requirement = Requirement(f'{requirement.name}{new_specifier}; {new_markers}')
-    else:
-        new_requirement = Requirement(f'{requirement.name}{new_specifier}')
-
-    return new_requirement
-
-
 def exclude_from_requirements(assembled_requirements:set, exclude_list: set, print_requirements: bool = True) -> set:
     """Exclude packages defined in exclude_list from assembled requirements
         - print_requirements = true will print the changes
@@ -391,7 +216,7 @@ def exclude_from_requirements(assembled_requirements:set, exclude_list: set, pri
                     continue
 
                 # Merge requirement and requirement_from_exclude list
-                new_requirement = _merge_requirements(requirement, req_to_exclude)
+                new_requirement = merge_requirements(requirement, req_to_exclude)
                 new_assembled_requirements.add(new_requirement)
 
                 if print_requirements:
@@ -513,10 +338,11 @@ def main() -> int:
 
     requirements = assemble_requirements(idf_branches, idf_constraints, True)
 
-    exclude_list = yaml_to_requirement('exclude_list.yaml', exclude=True)
+    exclude_list = YAMLListAdapter('exclude_list.yaml', exclude=True).requirements
+
     after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
 
-    include_list = yaml_to_requirement('include_list.yaml')
+    include_list = YAMLListAdapter('include_list.yaml').requirements
     print_color('---------- ADDITIONAL REQUIREMENTS ----------')
     for req in include_list:
         print(req)
