@@ -124,7 +124,6 @@ jobs:
     name: Build Python version dependendent wheels for IDF
     uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
 
-
   upload-python-wheels:
     needs: [build-wheels, build-python-version-dependent-wheels]
     name: Upload Python wheels
