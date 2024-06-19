@@ -13,8 +13,8 @@ jobs:
         os:
           - windows-latest
           - ubuntu-latest
-          - macos-latest
-          - macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
+          - macos-13      # MacOS x86_64
+          - macos-latest  # MacOS arm64 (M1)
           - linux-armv7-self-hosted
           - linux-arm64-self-hosted
         python-version:
@@ -58,30 +58,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Python
-        # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
         uses: actions/setup-python@v5
         with:
             python-version: ${{ matrix.python-version }}
 
-      - name: Setup Python - MacOS M1
-        # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
-        if: matrix.os == 'macos-latest-xlarge'
-        run: |
-          brew install python@${{ matrix.python-version }}
-
-          # correcting pip installation for later usage such as Python module
-          # to be used from global scope since no venv is used
-          # because of the "managed environment error"
-          if [ "${{ matrix.python-version }}" == "3.12" ]; then
-            mkdir -p ~/.config/pip
-            echo "[global]" >> ~/.config/pip/pip.conf
-            echo "break-system-packages = true" >> ~/.config/pip/pip.conf
-          fi
-
-          # change python symlink called with default command 'python'
-          ln -s -f /opt/homebrew/bin/python${{ matrix.python-version }} /usr/local/bin/python
 
       - name: Get Python version
         run: |
@@ -97,7 +79,7 @@ jobs:
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-latest-xlarge'
+        if: matrix.os == 'macos-latest' || matrix.os == 'macos-13'
         run: os_dependencies/macos.sh
 
 
