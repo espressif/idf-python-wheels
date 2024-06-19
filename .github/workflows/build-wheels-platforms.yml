@@ -16,11 +16,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
+        os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
           - windows-latest
           - ubuntu-latest
-          - macos-latest
-          - macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
+          - macos-13      # MacOS x86_64
+          - macos-latest  # MacOS arm64 (M1)
           - linux-armv7-self-hosted
           - linux-arm64-self-hosted
         include:
@@ -51,21 +51,11 @@ jobs:
 
 
       - name: Setup Python
-        # GitHub action for MacOS M1 does not have Python <= 3.10
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'macos-latest-xlarge' && matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-
-      - name: Setup Python - MacOS M1
-        # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
-        if: matrix.os == 'macos-latest-xlarge'
-        run: |
-          brew install python@3.8
-          # change python symlink called with default command 'python'
-          ln -s -f /opt/homebrew/bin/python3.8 /usr/local/bin/python
 
 
       - name: Get Python version
@@ -83,7 +73,7 @@ jobs:
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-latest-xlarge'
+        if: matrix.os == 'macos-latest' || matrix.os == 'macos-13'
         run: os_dependencies/macos.sh
 
       - name: Install additional OS dependencies - Linux ARM
