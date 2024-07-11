@@ -8,6 +8,7 @@ on:
 env:
   MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
   MIN_IDF_MINOR_VERSION: ${{ vars.MIN_IDF_MINOR_VERSION }}
+  GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build-wheels:
