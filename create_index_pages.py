@@ -11,20 +11,14 @@ from typing import Dict
 
 import boto3
 
-HTML_HEADER = '''
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta name="pypi:repository-version" content="1.0">
-    <title>Simple index</title>
-  </head>
-  <body>
-'''
+def _html_loader(path: str) -> str:
+    """Loads the HTML file"""
+    with open(path, 'r') as file:
+        return file.read()
 
-HTML_FOOTER = '''
-</body>
-</html>
-'''
+HTML_HEADER = _html_loader('resources/html/header.html')
+HTML_PRETTY_HEADER = _html_loader('resources/html/pretty_header.html')
+HTML_FOOTER = _html_loader('resources/html/footer.html')
 
 DL_BUCKET = sys.argv[1]
 
@@ -53,14 +47,25 @@ for response in response_iterator:
         packages[name].append(Path(package['Key']).name)
 
 index = []
+index_pretty = []
 index.append(HTML_HEADER)
+index_pretty.append(HTML_PRETTY_HEADER)
 for name in packages.keys():
-    index.append(f'<a href="/pypi/{name}/">{name}/</a>')
+    index.append(f'        <a href="/pypi/{name}/">{name}/</a>')
+    index_pretty.append(
+        f'        <div><a href="/pypi/{name}">{name}</a><span>Entries: {len(packages[name])}</span></div><br>'
+        )
 index.append(HTML_FOOTER)
+index_pretty.append(HTML_FOOTER)
 
 s3.upload_fileobj(BytesIO('\n'.join(index).encode('utf-8')),
                   DL_BUCKET,
                   'pypi/index.html',
+                  ExtraArgs={'ACL': 'public-read', 'ContentType':'text/html'})
+
+s3.upload_fileobj(BytesIO('\n'.join(index_pretty).encode('utf-8')),
+                  DL_BUCKET,
+                  'pypi/pretty/index.html',
                   ExtraArgs={'ACL': 'public-read', 'ContentType':'text/html'})
 
 for name, filenames in packages.items():
