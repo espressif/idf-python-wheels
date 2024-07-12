@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Union
@@ -37,6 +38,15 @@ IDF_MASTER_VERSION_URL = f'{IDF_RESOURCES_URL}master/tools/cmake/version.cmake'
 MIN_IDF_MAJOR_VERSION: int = int(os.environ.get('MIN_IDF_MAJOR_VERSION', '5'))
 MIN_IDF_MINOR_VERSION: int = int(os.environ.get('MIN_IDF_MINOR_VERSION', '0'))
 
+# GH token for the authenticated requests to extend the limit
+GH_TOKEN: str = os.environ.get('GH_TOKEN', '')
+
+# Authentication header
+AUTH_HEADER: Dict[str, str] = {
+    'authorization': f'Bearer {GH_TOKEN}',
+    'content-type': 'application/json'
+}
+
 print(f'ENV variables: IDF v{MIN_IDF_MAJOR_VERSION}.{MIN_IDF_MINOR_VERSION}'
       f' -- grater or equal release and master branches will be considered'
       )
@@ -55,7 +65,7 @@ def check_response(response: requests.Response, warning: str, exit_on_wrong: boo
 # ESP-IDF branches list
 def fetch_idf_branches() -> List[str]:
     """Fetch IDF branches from URL specified in global variables"""
-    res = requests.get(IDF_BRANCHES_URL, timeout=10)
+    res = requests.get(IDF_BRANCHES_URL, headers=AUTH_HEADER, timeout=10)
     if check_response(res, 'Failed to fetch ESP-IDF branches.', True):
         return [branch['name'] for branch in res.json()]
     return []
@@ -84,7 +94,7 @@ def get_used_idf_branches(idf_repo_branches: List[str]) -> List[str]:
 # Constraints files versions list
 def _idf_version_from_cmake() -> Optional[dict]:
     """Get IDF master branch version from version.cmake"""
-    res = requests.get(IDF_MASTER_VERSION_URL, timeout=10)
+    res = requests.get(IDF_MASTER_VERSION_URL, headers=AUTH_HEADER, timeout=10)
     if check_response(res, 'Failed to get master version of IDF from CMAKE.'):
         regex = re.compile(r'^\s*set\s*\(\s*IDF_VERSION_([A-Z]{5})\s+(\d+)')
         lines = res.text.splitlines()
@@ -133,7 +143,9 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
     requirements_txt: List[str] = []
 
     for feature in idf_requirements_json['features']:
-        res = requests.get(f"{IDF_RESOURCES_URL}{branch}/{feature['requirement_path']}", timeout=10)
+        res = requests.get(
+            f"{IDF_RESOURCES_URL}{branch}/{feature['requirement_path']}", headers=AUTH_HEADER, timeout=10
+            )
         if check_response(res, f"Failed to download feature (requirement group) '{feature['name']}'"):
             requirements_txt += res.text.splitlines()
             print(f"Added ESP-IDF {feature['name']} requirements")
@@ -142,7 +154,7 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
 
 def _download_branch_constraints(constraint_file_url: str, branch, idf_constraint: str) -> List[str]:
     """Download constraints file for specific branch"""
-    res = requests.get(constraint_file_url, timeout=10)
+    res = requests.get(constraint_file_url, headers=AUTH_HEADER, timeout=10)
     if check_response(res, f'Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}'):
         requirements_txt = res.text.splitlines()
         print(f'Added ESP-IDF constraints file {idf_constraint} for branch {branch}')
@@ -176,7 +188,7 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
         idf_requirements_json_url = f'{IDF_RESOURCES_URL}{branch}/tools/requirements.json'
         constraint_file_url = f'https://dl.espressif.com/dl/esp-idf/espidf.constraints.{idf_constraints[i]}.txt'
 
-        res = requests.get(idf_requirements_json_url, timeout=10)
+        res = requests.get(idf_requirements_json_url, headers=AUTH_HEADER, timeout=10)
         if not check_response(res, f'\nFailed to download requirements JSON for branch {branch}'):
             continue
 

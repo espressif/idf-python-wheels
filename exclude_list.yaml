@@ -24,3 +24,7 @@
 # gdbgui==0.13.2.0 leads to installation of gevent 1.5.0 which can not be build
 - package_name: 'gdbgui'
   version: '==0.13.2.0'
+
+# cffi==1.17.0 does not exist yet it is required by some wheel (7/11/2024)
+- package_name: 'cffi'
+  version: '==1.17.0'
