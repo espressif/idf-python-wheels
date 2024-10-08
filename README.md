@@ -18,6 +18,7 @@ Supported Python versions:
 * 3.10
 * 3.11
 * 3.12
+* 3.13
 
 For each `release` branch of [ESP-IDF] starting from the version defined in GitHub variables and [ESP-IDF] `master` branch all the requirements and constraints files are automatically downloaded and wheels are built and uploaded.
 

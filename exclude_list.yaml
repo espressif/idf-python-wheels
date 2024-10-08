@@ -25,6 +25,22 @@
 - package_name: 'gdbgui'
   version: '==0.13.2.0'
 
-# cffi==1.17.0 does not exist yet it is required by some wheel (7/11/2024)
-- package_name: 'cffi'
-  version: '==1.17.0'
+# Python 13.3 does not support Pillow 9.5.0
+- package_name: 'Pillow'
+  version: '==9.5.0'
+  python: '==3.13'
+
+# gdbgui leads to installation of greenlet which does not support Python 3.13 yet
+# issue: https://github.com/cs01/gdbgui/issues/494
+- package_name: 'gdbgui'
+  python: '==3.13'
+# some versions of greenlet are not supported by Python 3.13
+- package_name: 'greenlet'
+  version: '<3.0'
+  python: '==3.13'
+
+# Python 3.13 does not support windows_curses on Windows
+# issue: https://github.com/zephyrproject-rtos/windows-curses/issues/69
+- package_name: 'windows_curses'
+  platform: 'win32'
+  python: '==3.13'
