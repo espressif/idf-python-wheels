@@ -4,70 +4,41 @@ on:
   schedule:
     - cron: '0 0 * * 0,3'
   workflow_dispatch:
-
 env:
   MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
   MIN_IDF_MINOR_VERSION: ${{ vars.MIN_IDF_MINOR_VERSION }}
   GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
-
 jobs:
   build-wheels:
-    name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
+    name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os:
           - windows-latest
           - ubuntu-latest
+          - ubuntu-24.04-arm   # GitHub-hosted ARM64 runner (public-preview)
           - macos-13      # MacOS x86_64
           - macos-latest  # MacOS arm64 (M1)
-          - linux-armv7-self-hosted
-          - linux-arm64-self-hosted
-        include:
-          - os: linux-armv7-self-hosted
-            CONTAINER: python:3.8-bullseye
-          - os: linux-arm64-self-hosted
-            CONTAINER: python:3.8-bullseye
         python-version: ['3.8']
 
-    # Use python container on ARM
-    container: ${{ matrix.CONTAINER }}
-
     steps:
-      - name: OS info
-        if: matrix.os != 'windows-latest'
-        run: |
-          echo "Operating System: ${{ runner.os }}"
-          echo "Architecture: $(uname -m)"
-      - name: OS info
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "Operating System: ${{ runner.os }}"
-          echo "Architecture: $env:PROCESSOR_ARCHITECTURE"
-
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      - name: Setup Python
-        # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-
-      - name: Get Python version
+      - name: Upgrade pip and install dependencies
         run: |
-          python --version
           python -m pip install --upgrade pip
-
+          python -m pip install cibuildwheel
 
       - name: Install build dependencies
         run: python -m pip install -r build_requirements.txt
-
 
       - name: Install additional OS dependencies - Ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -77,25 +48,13 @@ jobs:
         if: matrix.os == 'macos-latest' || matrix.os == 'macos-13'
         run: os_dependencies/macos.sh
 
-      - name: Install additional OS dependencies - Linux ARM
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'linux-arm64-self-hosted'
+      - name: Install additional OS dependencies - Linux ARM64
+        if: matrix.os == 'ubuntu-24.04-arm'
         run: os_dependencies/linux_arm.sh
 
-
-      - name: Build wheels for IDF
-        if: matrix.os != 'windows-latest'
+      - name: Build wheels with cibuildwheel
         run: |
-          # Rust directory needs to be included for Linux ARM7
-          if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
-            . $HOME/.cargo/env
-          fi
-
-          python build_wheels.py
-
-      - name: Build wheels for IDF - Windows
-        if: matrix.os == 'windows-latest'
-        run: |
-          python build_wheels.py
+          python -m cibuildwheel --output-dir wheelhouse
 
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
@@ -109,14 +68,51 @@ jobs:
           name: dependent_requirements_${{ matrix.os}}
           path: ./dependent_requirements.txt
 
+  build-armv7:
+    name: Build for ARMv7 with QEMU
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  build-python-version-dependent-wheels:
-    needs: build-wheels
-    name: Build Python version dependendent wheels for IDF
-    uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-  upload-python-wheels:
-    needs: [build-wheels, build-python-version-dependent-wheels]
-    name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
-    secrets: inherit
+      - name: Upgrade pip and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cibuildwheel
+
+      - name: Install additional OS dependencies - Linux ARM
+        run: os_dependencies/linux_arm.sh
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build ARMv7 wheels with cibuildwheel
+        run: |
+          . $HOME/.cargo/env
+          python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_ARCHS_LINUX: "armv7l"
+          CIBW_BUILD: "py3-*"
+          CIBW_SKIP: "*-musllinux_*"
+
+      - name: Upload ARMv7 wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-armv7
+          path: wheelhouse/*.whl
+
+  # build-python-version-dependent-wheels:
+  #   needs: build-wheels
+  #   name: Build Python version dependent wheels for IDF
+  #   uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
+
+  # upload-python-wheels:
+  #   needs: [build-wheels, build-python-version-dependent-wheels]
+  #   name: Upload Python wheels
+  #   uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+  #   secrets: inherit

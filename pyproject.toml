@@ -14,3 +14,20 @@
     python_version           = "3.9" # Specifies the Python version used to parse and check the target program
     warn_no_return           = true  # Shows errors for missing return statements on some execution paths
     warn_return_any          = true  # Shows a warning when returning a value with type Any from a function declared with a non- Any return type
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel]
+build = "py3"  # Universal compatibility for Python 3.8+
+skip = "*-musllinux_*"  # Skip Alpine Linux (not manylinux compatible)
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "armv7", "aarch64"]  # Enable x86_64, ARMv7, ARM64
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]  # Build for Intel and M1 Macs
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]  # Window
