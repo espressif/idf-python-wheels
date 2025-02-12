@@ -8,115 +8,116 @@ on:
 env:
   MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
   MIN_IDF_MINOR_VERSION: ${{ vars.MIN_IDF_MINOR_VERSION }}
-  GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build-wheels:
-    name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
-    runs-on: ${{ matrix.os }}
+    name: Build for ${{ matrix.name }} (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.CONTAINER }}
     strategy:
       fail-fast: false
       matrix:
-        os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-          - windows-latest
-          - ubuntu-latest
-          - macos-13      # MacOS x86_64
-          - macos-latest  # MacOS arm64 (M1)
-          - linux-armv7-self-hosted
-          - linux-arm64-self-hosted
+        python-version: ['3.8', '3.9']
+        runs-on: [windows-latest, ubuntu-latest, macos-13, macos-latest, self-hosted-linux-ARMv7, self-hosted-linux-ARM64]
         include:
-          - os: linux-armv7-self-hosted
-            CONTAINER: python:3.8-bullseye
-          - os: linux-arm64-self-hosted
-            CONTAINER: python:3.8-bullseye
-        python-version: ['3.8']
+          - name: windows
+            runs-on: windows-latest
+            platform: win
+            arch: x64
 
-    # Use python container on ARM
-    container: ${{ matrix.CONTAINER }}
+          - name: ubuntu
+            runs-on: ubuntu-latest
+            platform: ubuntu
+            arch: x64
+
+          - name: macX64
+            runs-on: macos-13  
+            platform: mac
+            arch: x64
+
+          - name: macM1
+            runs-on: macos-latest
+            platform: mac
+            arch: aarch64
+
+          - name: self-hosted-linux-ARMv7
+            runs-on: [self-hosted, Linux, ARM]
+            CONTAINER: python:3.8-bookworm
+            platform: rpi
+            arch: armv7
+
+          - name: self-hosted-linux-ARM64
+            runs-on: [self-hosted, Linux, ARM64]
+            CONTAINER: python:3.8-bookworm
+            platform: rpi
+            arch: aarch64
 
     steps:
-      - name: OS info
-        if: matrix.os != 'windows-latest'
+      - name: OS Info
+        shell: bash
         run: |
           echo "Operating System: ${{ runner.os }}"
-          echo "Architecture: $(uname -m)"
-      - name: OS info
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "Operating System: ${{ runner.os }}"
-          echo "Architecture: $env:PROCESSOR_ARCHITECTURE"
-
+          uname -m 2>/dev/null || echo $PROCESSOR_ARCHITECTURE
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       - name: Setup Python
-        # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
         uses: actions/setup-python@v5
+        # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
+        if: matrix.platform != 'rpi'
         with:
-          python-version: ${{ matrix.python-version }}
-
+          python-version: 3.8
+          cache: pip
 
       - name: Get Python version
         run: |
           python --version
           python -m pip install --upgrade pip
 
-
       - name: Install build dependencies
         run: python -m pip install -r build_requirements.txt
 
-
-      - name: Install additional OS dependencies - Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install additional OS dependencies for Ubuntu
+        if: matrix.platform == 'ubuntu'
         run: os_dependencies/ubuntu.sh
 
-      - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-13'
+      - name: Install additional OS dependencies for MacOS
+        if: matrix.platform == 'mac'
         run: os_dependencies/macos.sh
 
-      - name: Install additional OS dependencies - Linux ARM
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'linux-arm64-self-hosted'
+      - name: Install additional OS dependencies for RaspiOS-Debian
+        if: matrix.platform == 'rpi'
         run: os_dependencies/linux_arm.sh
 
-
       - name: Build wheels for IDF
-        if: matrix.os != 'windows-latest'
-        run: |
-          # Rust directory needs to be included for Linux ARM7
-          if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
-            . $HOME/.cargo/env
-          fi
+        if: matrix.arch != 'armv7'
+        run: python build_wheels.py
 
-          python build_wheels.py
-
-      - name: Build wheels for IDF - Windows
-        if: matrix.os == 'windows-latest'
-        run: |
-          python build_wheels.py
+      - name: Build wheels for IDF [ARMv7 only]
+        if: matrix.arch == 'armv7'
+        run: . $HOME/.cargo/env && python build_wheels.py
 
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-${{ matrix.os}}-${{ matrix.python-version }}
+          name: wheels-download-directory-${{ matrix.runs-on }}-3.8
           path: ./downloaded_wheels
 
       - name: Upload artifacts of Python version dependent wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dependent_requirements_${{ matrix.os}}
+          name: dependent_requirements_${{ matrix.runs-on }}
           path: ./dependent_requirements.txt
-
 
   build-python-version-dependent-wheels:
     needs: build-wheels
-    name: Build Python version dependendent wheels for IDF
-    uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
+    name: Build Python version dependent wheels for IDF
+    uses: ./.github/workflows/build-wheels-python-dependent.yml
 
   upload-python-wheels:
     needs: [build-wheels, build-python-version-dependent-wheels]
     name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+    uses: ./.github/workflows/upload-python-wheels.yml
     secrets: inherit
