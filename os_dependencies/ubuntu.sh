@@ -6,3 +6,6 @@ sudo apt install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev
 
 # dbus-python needs build dependecies
 sudo apt-get install cmake build-essential libdbus-1-dev libdbus-glib-1-dev -y
+
+# Pillow needs libjpeg-dev
+sudo apt-get install libjpeg-dev -y

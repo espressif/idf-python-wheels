@@ -44,3 +44,8 @@
 - package_name: 'windows_curses'
   platform: 'win32'
   python: '==3.13'
+
+# Python 13.3 does not support ruamel.yaml.clib 0.2.8
+- package_name: 'ruamel.yaml.clib'
+  version: '==0.2.8'
+  python: '==3.13'
