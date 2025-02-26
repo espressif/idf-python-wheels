@@ -62,7 +62,8 @@ jobs:
       - name: Get Python version
         run: |
           python --version
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools setuptools-scm
+          pip show pip setuptools setuptools-scm
 
 
       - name: Install build dependencies
