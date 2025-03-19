@@ -8,7 +8,7 @@ apt-get update
 apt-get install -y -q --no-install-recommends awscli
 
 # PyGObject needs build dependecies https://pygobject.readthedocs.io/en/latest/getting_started.html
-apt-get install libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev -y
+apt-get install libgirepository1.0-dev libgirepository-2.0-dev gcc libcairo2-dev pkg-config python3-dev -y
 
 # dbus-python build dependecies
 apt-get install libtiff5 libjpeg-dev libopenjp2-7 cmake libdbus-1-dev -y
