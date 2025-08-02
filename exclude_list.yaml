@@ -49,3 +49,6 @@
 - package_name: 'ruamel.yaml.clib'
   version: '==0.2.8'
   python: '==3.13'
+
+# Esptool wheels many times are faulty. Mostly because it installs "esptool.py" which collides with the package name.
+- package_name: 'esptool'
