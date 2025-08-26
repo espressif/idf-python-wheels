@@ -2,6 +2,15 @@ name: Build Python version dependent wheels
 
 on:
   workflow_call:
+    inputs:
+      supported_python_versions:
+        description: 'JSON array of supported Python versions'
+        required: true
+        type: string
+      oldest_supported_python:
+        description: 'Oldest supported Python version to exclude from builds'
+        required: true
+        type: string
 
 jobs:
   triage:
@@ -15,50 +24,26 @@ jobs:
           - ubuntu-latest
           - macos-13      # MacOS x86_64
           - macos-latest  # MacOS arm64 (M1)
+          - ubuntu-24.04-arm
           - linux-armv7-self-hosted
-          - linux-arm64-self-hosted
-        python-version:
-          - '3.9'
-          - '3.10'
-          - '3.11'
-          - '3.12'
-          - '3.13'
-        include:
-          - os: linux-armv7-self-hosted
-            python-version: '3.9'
-            CONTAINER: 'python:3.9-bullseye'
-          - os: linux-armv7-self-hosted
-            python-version: '3.10'
-            CONTAINER: 'python:3.10-bullseye'
-          - os: linux-armv7-self-hosted
-            python-version: '3.11'
-            CONTAINER: 'python:3.11-bullseye'
-          - os: linux-armv7-self-hosted
-            python-version: '3.12'
-            CONTAINER: 'python:3.12-bullseye'
-          - os: linux-armv7-self-hosted
-            python-version: '3.13'
-            CONTAINER: 'python:3.13-bullseye'
+        python-version: ${{ fromJson(inputs.supported_python_versions) }}
+        exclude:
+          # Exclude oldest supported Python since it's already built in the platform builds
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: windows-latest
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: ubuntu-latest
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: macos-13
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: macos-latest
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: ubuntu-24.04-arm
+          - python-version: ${{ inputs.oldest_supported_python }}
+            os: linux-armv7-self-hosted
 
-          - os: linux-arm64-self-hosted
-            python-version: '3.9'
-            CONTAINER: 'python:3.9-bullseye'
-          - os: linux-arm64-self-hosted
-            python-version: '3.10'
-            CONTAINER: 'python:3.10-bullseye'
-          - os: linux-arm64-self-hosted
-            python-version: '3.11'
-            CONTAINER: 'python:3.11-bullseye'
-          - os: linux-arm64-self-hosted
-            python-version: '3.12'
-            CONTAINER: 'python:3.12-bullseye'
-          - os: linux-arm64-self-hosted
-            python-version: '3.13'
-            CONTAINER: 'python:3.13-bullseye'
-
-
-    # Use python container on ARM
-    container: ${{ matrix.CONTAINER }}
+    # Use python container on ARM - dynamically constructed
+    container: ${{matrix.os == 'linux-armv7-self-hosted' && format('python:{0}-bullseye', matrix.python-version) || null }}
 
     steps:
       - name: Checkout repository
@@ -66,7 +51,7 @@ jobs:
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        if: matrix.os != 'linux-armv7-self-hosted'
         uses: actions/setup-python@v5
         with:
             python-version: ${{ matrix.python-version }}
@@ -91,7 +76,7 @@ jobs:
 
 
       - name: Install additional OS dependencies - Linux ARM7
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'linux-arm64-self-hosted'
+        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'ubuntu-24.04-arm'
         run: os_dependencies/linux_arm.sh
 
       - name: Download artifacts

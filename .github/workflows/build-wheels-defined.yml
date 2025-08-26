@@ -41,15 +41,24 @@ on:
         required: false
         default: true
 
+env:
+  GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
+  get-supported-versions:
+    name: Get Supported Versions
+    uses: ./.github/workflows/get-supported-versions.yml
+    secrets: inherit
+
   ubuntu-latest:
+    needs: get-supported-versions
     name: linux x86_64
     if: ${{ inputs.os_ubuntu_latest }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -82,13 +91,14 @@ jobs:
 
 
   windows-latest:
+    needs: get-supported-versions
     name: windows x86_64
     if: ${{ inputs.os_windows_latest }}
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -118,13 +128,14 @@ jobs:
 
 
   macos-latest:
+    needs: get-supported-versions
     name: macos x86_64
     if: ${{ inputs.os_macos_latest }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -157,13 +168,14 @@ jobs:
 
 
   macos-m1:
+    needs: get-supported-versions
     name: macos arm64
     if: ${{ inputs.os_macos_arm64 }}
     runs-on: macos-latest-xlarge       # MacOS M1 GitHub beta runner - paid $0.16
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -206,27 +218,15 @@ jobs:
 
 
   linux-armv7:
+    needs: get-supported-versions
     name: linux aarch32 (armv7)
     if: ${{ inputs.os_linux_armv7 }}
     runs-on: linux-armv7-self-hosted
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
-        include:
-          - python-version: '3.8'
-            CONTAINER: 'python:3.8-bullseye'
-          - python-version: '3.9'
-            CONTAINER: 'python:3.9-bullseye'
-          - python-version: '3.10'
-            CONTAINER: 'python:3.10-bullseye'
-          - python-version: '3.11'
-            CONTAINER: 'python:3.11-bullseye'
-          - python-version: '3.12'
-            CONTAINER: 'python:3.12-bullseye'
-          - python-version: '3.13'
-            CONTAINER: 'python:3.13-bullseye'
-    container: ${{ matrix.CONTAINER }}
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    container: python:${{ matrix.python-version }}-bullseye
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -257,27 +257,15 @@ jobs:
 
 
   linux-arm64:
+    needs: get-supported-versions
     name: linux aarch64 (arm64)
     if: ${{ inputs.os_linux_arm64 }}
-    runs-on: linux-arm64-self-hosted
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
-        include:
-          - python-version: '3.8'
-            CONTAINER: 'python:3.8-bullseye'
-          - python-version: '3.9'
-            CONTAINER: 'python:3.9-bullseye'
-          - python-version: '3.10'
-            CONTAINER: 'python:3.10-bullseye'
-          - python-version: '3.11'
-            CONTAINER: 'python:3.11-bullseye'
-          - python-version: '3.12'
-            CONTAINER: 'python:3.12-bullseye'
-          - python-version: '3.13'
-            CONTAINER: 'python:3.13-bullseye'
-    container: ${{ matrix.CONTAINER }}
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    container: python:${{ matrix.python-version }}-bullseye
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -303,10 +291,10 @@ jobs:
           name: wheels-download-directory-linux-arm64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
-
-  upload-python-wheels:
-    if: ${{ always() }}
-    needs: [ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
-    name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
-    secrets: inherit
+# TODO Uncomment this when we are ready to upload the wheels
+  # upload-python-wheels:
+  #   if: ${{ always() }}
+  #   needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
+  #   name: Upload Python wheels
+  #   uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+  #   secrets: inherit

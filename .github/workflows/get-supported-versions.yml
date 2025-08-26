@@ -1,0 +1,64 @@
+name: Get Supported Versions
+on:
+  workflow_dispatch:
+  workflow_call:
+     outputs:
+      supported_idf:
+        description: "Array of supported IDF versions"
+        value: ${{ jobs.triage.outputs.supported_idf }}
+      oldest_supported_idf:
+        description: "Oldest supported IDF version"
+        value: ${{ jobs.triage.outputs.oldest_supported_idf }}
+      supported_python:
+        description: "Array of supported Python versions"
+        value: ${{ jobs.triage.outputs.supported_python }}
+      oldest_supported_python:
+        description: "Oldest supported Python version"
+        value: ${{ jobs.triage.outputs.oldest_supported_python }}
+      min_idf_major_version:
+        description: "Minimum IDF major version"
+        value: ${{ jobs.triage.outputs.min_idf_major_version }}
+      min_idf_minor_version:
+        description: "Minimum IDF minor version"
+        value: ${{ jobs.triage.outputs.min_idf_minor_version }}
+
+jobs:
+  triage:
+    name: Get Supported Versions
+    runs-on: ubuntu-latest
+    outputs:
+      supported_idf: ${{ steps.set-arrays.outputs.supported_idf }}
+      oldest_supported_idf: ${{ steps.set-arrays.outputs.oldest_supported_idf }}
+      supported_python: ${{ steps.set-arrays.outputs.supported_python }}
+      oldest_supported_python: ${{ steps.set-arrays.outputs.oldest_supported_python }}
+      min_idf_major_version: ${{ steps.compute-idf-versions.outputs.min_idf_major_version }}
+      min_idf_minor_version: ${{ steps.compute-idf-versions.outputs.min_idf_minor_version }}
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Run script to generate supported_versions.json
+        run: |
+          python supported_versions.py ${{ secrets.IDF_VERSIONS_TXT }}
+
+      - name: Set outputs from supported_versions.json
+        id: set-arrays
+        run: |
+          echo "supported_idf=$(jq -c .supported_idf < supported_versions.json)" >> $GITHUB_OUTPUT
+          echo "oldest_supported_idf=$(jq -c .oldest_supported_idf < supported_versions.json)" >> $GITHUB_OUTPUT
+          echo "supported_python=$(jq -c .supported_python < supported_versions.json)" >> $GITHUB_OUTPUT
+          echo "oldest_supported_python=$(jq -r .oldest_supported_python < supported_versions.json)" >> $GITHUB_OUTPUT
+
+      - name: Compute IDF MAJOR and MINOR version and set outputs
+        id: compute-idf-versions
+        run: |
+          IDF_VERSION=$(jq -r .oldest_supported_idf < supported_versions.json)
+          # Extract major version (e.g., "v5.1" -> "5")
+          IDF_MAJOR=$(echo "$IDF_VERSION" | sed 's/v//' | cut -d'.' -f1)
+          # Extract minor version (e.g., "v5.1" -> "1")
+          IDF_MINOR=$(echo "$IDF_VERSION" | sed 's/v//' | cut -d'.' -f2)
+          echo "min_idf_major_version=$IDF_MAJOR" >> $GITHUB_OUTPUT
+          echo "min_idf_minor_version=$IDF_MINOR" >> $GITHUB_OUTPUT
+          echo "Computed MIN_IDF_MAJOR_VERSION=$IDF_MAJOR, MIN_IDF_MINOR_VERSION=$IDF_MINOR"
