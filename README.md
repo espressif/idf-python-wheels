@@ -15,15 +15,15 @@ Supported architectures:
     - ARM64
 
 Supported Python versions:
-* 3.8
-* 3.9
-* 3.10
-* 3.11
-* 3.12
 * 3.13
+* 3.12
+* 3.11
+* 3.10
+* 3.9
+* 3.8
 
 > [!NOTE]
-> This list of supported Python versions is automatically updated by [update_readme_versions.py](./update_readme_versions.py) script and [update-readme.yml](./.github/workflows/update-readme.yml) workflow.
+> This list of supported Python versions is automatically updated by [update_python_versions.py](./update_python_versions.py) script and [update-python-versions.yml](./.github/workflows/update-python-versions.yml) workflow.
 
 For each `release` branch of [ESP-IDF] which is not EOL and [ESP-IDF] `master` branch, all the requirements and constraints files are automatically downloaded and wheels are built and uploaded.
 
@@ -31,7 +31,9 @@ For each `release` branch of [ESP-IDF] which is not EOL and [ESP-IDF] `master` b
 ## Completely Automated
 This repository has been completely automated. All the supported versions of [ESP-IDF] and Python versions are fetch and resolved automatically. The implementation of this logic is in the [supported_versions.py](./supported_versions.py) script and [get-supported-versions.yml](./.github/workflows/get-supported-versions.yml) workflow.
 
-### Supported versions action
+Also `README.md` file and `pyproject.toml` is automatically updated with the script `update_python_versions.py` and `update-python-versions.yml` workflow.
+
+### Supported Versions Action
 This workflow is reusable action and it is possible to be called in other projects - it will generate `supported_versions.json` file with the following structure, which can be parsed and used in caller workflow to avoid developer interaction of changing the supported versions.
 
 Also it sets the `min_idf_major_version` and `min_idf_minor_version` as a GitHub env variables so this can be used as well like this:

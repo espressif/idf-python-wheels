@@ -20,7 +20,6 @@ repos:
       - id: check-executables-have-shebangs
       - id: mixed-line-ending
         args: ['-f=lf']
-      - id: double-quote-string-fixer
       - id: check-yaml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
