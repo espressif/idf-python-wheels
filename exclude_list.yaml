@@ -11,6 +11,20 @@
 - package_name: 'dbus-python'
   platform: ['win32']
 
+# dbus-python has persistent build issues on Linux ARM due to missing dbus-1.pc files in containers
+- package_name: 'dbus-python'
+  platform: ['linux']
+  python: '==3.8'
+
+# PyGObject is difficult to build from source on Windows due to MSYS2/pkg-config issues
+- package_name: 'pygobject'
+  platform: ['win32']
+  python: '==3.8'
+
+# PyGObject has persistent girepository dependency issues on ARMv7
+- package_name: 'pygobject'
+  platform: ['linux']
+
 # dbus-python can not be build with Python > 3.11 on MacOS
 - package_name: 'dbus-python'
   platform: 'darwin'
@@ -29,6 +43,11 @@
 - package_name: 'Pillow'
   version: '==9.5.0'
   python: '==3.13'
+
+# Pillow 9.5.0 has KeyError: '__version__' build issues on ARMv7
+- package_name: 'Pillow'
+  version: '==9.5.0'
+  platform: 'linux'
 
 # gdbgui leads to installation of greenlet which does not support Python 3.13 yet
 # issue: https://github.com/cs01/gdbgui/issues/494
