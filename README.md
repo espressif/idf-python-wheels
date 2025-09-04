@@ -1,5 +1,7 @@
 # ESP idf-python-wheels
 
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/espressif/idf-python-wheels/main.svg)](https://results.pre-commit.ci/latest/github/espressif/idf-python-wheels/main)
+
 This project automates the build and upload process of required Python Wheels by [ESP-IDF]. The wheels for multiple OSes and architectures are being built.
 
 Supported architectures:
