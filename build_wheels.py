@@ -212,6 +212,8 @@ def exclude_from_requirements(assembled_requirements: set, exclude_list: set, pr
     """Exclude packages defined in exclude_list from assembled requirements
     - print_requirements = true will print the changes
     """
+    from packaging.utils import canonicalize_name
+
     new_assembled_requirements = set()
     not_in_exclude = []
     if print_requirements:
@@ -220,7 +222,8 @@ def exclude_from_requirements(assembled_requirements: set, exclude_list: set, pr
     for requirement in assembled_requirements:
         printed = False
         for req_to_exclude in exclude_list:
-            if req_to_exclude.name not in requirement.name:
+            # Use canonical name comparison to handle dots vs underscores (ruamel.yaml.clib vs ruamel_yaml_clib)
+            if canonicalize_name(req_to_exclude.name) != canonicalize_name(requirement.name):
                 not_in_exclude.append(True)
             else:
                 if not req_to_exclude.specifier and not req_to_exclude.marker:
