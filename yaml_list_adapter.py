@@ -99,15 +99,15 @@ class YAMLListAdapter:
         ver_specifier, text = str_match  # e.g. ('<', '1.20')
 
         for old, new in (
-            ("<", ">="),
-            (">", "<="),
-            ("<=", ">"),
-            (">=", "<"),
-            ("!", "="),
-            ("~", "!"),
             ("===", "==="),  # not changed specifier for arbitrary equality defined by PEP440
             # (https://packaging.python.org/en/latest/specifications/version-specifiers/#arbitrary-equality)
+            ("<=", ">"),
+            (">=", "<"),
             ("==", "!="),
+            ("!=", "=="),
+            ("~=", "!="),  # Handle compatible release
+            ("<", ">="),
+            (">", "<="),
         ):
             if old in ver_specifier:
                 new_ver_spec = ver_specifier.replace(old, new)
