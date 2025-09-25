@@ -4,8 +4,10 @@
 
 [tool.ruff]
     line-length    = 120
-    select         = ['E', 'F', 'W']
     target-version = "py38"
+    lint.isort.force-single-line = true     # All imports on individual lines
+    lint.isort.lines-between-types = 1      # One blank line between different types of imports (e.g., standard library, third-party, local imports).
+    lint.select = ['E', 'F', 'I', 'W']
 
 [tool.mypy]
     disallow_incomplete_defs = false # Disallows defining functions with incomplete type annotations

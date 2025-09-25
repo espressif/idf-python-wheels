@@ -1,4 +1,6 @@
-# ESP idf-python-wheels
+# ESPRESSIF'S IDF Python Wheels
+
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/espressif/idf-python-wheels/main.svg)](https://results.pre-commit.ci/latest/github/espressif/idf-python-wheels/main)
 
 This project automates the build and upload process of required Python Wheels by [ESP-IDF]. The wheels for multiple OSes and architectures are being built.
 
@@ -13,28 +15,59 @@ Supported architectures:
     - ARM64
 
 Supported Python versions:
-* 3.8
-* 3.9
-* 3.10
-* 3.11
-* 3.12
 * 3.13
+* 3.12
+* 3.11
+* 3.10
+* 3.9
+* 3.8
 
-For each `release` branch of [ESP-IDF] starting from the version defined in GitHub variables and [ESP-IDF] `master` branch all the requirements and constraints files are automatically downloaded and wheels are built and uploaded.
+> [!NOTE]
+> This list of supported Python versions is automatically updated by [update_python_versions.py](./update_python_versions.py) script and [update-python-versions.yml](./.github/workflows/update-python-versions.yml) workflow.
+
+For each `release` branch of [ESP-IDF] which is not EOL and [ESP-IDF] `master` branch, all the requirements and constraints files are automatically downloaded and wheels are built and uploaded.
 
 
-## Configuration
-`MIN_IDF_MAJOR_VERSION` and `MIN_IDF_MINOR_VERSION` GitHub variables can be set in project settings
-to change the [ESP-IDF] `release` branches to build wheels for. If these variables are not set (not in the environment for [build-wheels-platforms.yml](./.github/workflows/build-wheels-platforms.yml)), the default values specified in [build_wheels.py](./build_wheels.py) are used.
+## Completely Automated
+This repository has been completely automated. All the supported versions of [ESP-IDF] and Python versions are fetch and resolved automatically. The implementation of this logic is in the [supported_versions.py](./supported_versions.py) script and [get-supported-versions.yml](./.github/workflows/get-supported-versions.yml) workflow.
+
+Also `README.md` file and `pyproject.toml` is automatically updated with the script `update_python_versions.py` and `update-python-versions.yml` workflow.
+
+### Supported Versions Action
+This workflow is reusable action and it is possible to be called in other projects - it will generate `supported_versions.json` file with the following structure, which can be parsed and used in caller workflow to avoid developer interaction of changing the supported versions.
+
+Also it sets the `min_idf_major_version` and `min_idf_minor_version` as a GitHub env variables so this can be used as well like this:
+
+`echo "MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}" >> $GITHUB_ENV`
+
+    {
+        "supported_idf": [
+            "v5.5",
+            "v5.4",
+            "v5.3",
+            "v5.2",
+            "v5.1"
+        ],
+        "oldest_supported_idf": "v5.1",
+        "supported_python": [
+            "3.13",
+            "3.12",
+            "3.11",
+            "3.10",
+            "3.9",
+            "3.8"
+        ],
+        "oldest_supported_python": "3.8"
+    }
 
 
-## Usage of manual wheels build - defined wheels workflow
+## Usage of Manual Wheels Build - [DEFINED WHEELS WORKFLOW](./.github/workflows/build-wheels-defined.yml)
 If there is a need to manually build and upload wheels the `defined-wheels` workflow can be used for this. The pip package needs to be specified with marker support (e.g. coredump~=1.2;sys_platform!='win32') and check the architectures which should be wheels built and uploaded for. Multiple wheels can be separated by space.
 
 Then the wheels are built and uploaded for all supported Python versions.
 
 
-## Requirements lists
+## Requirements Lists
 These lists are files for requirements that should be added or excluded from the main requirements list which is automatically assembled.
 
 ### exclude_list.yaml
@@ -84,7 +117,7 @@ File for the requirements needed for the build process and the build script.
 ### os_dependencies
 When there is a need for additional OS dependencies to successfully build the wheels on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
-## Activity diagram
+## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
 ![IDF Python wheels - Activity diagram](./resources/idf-python-wheels_diagram.svg "IDF Python wheels - Activity diagram")
 

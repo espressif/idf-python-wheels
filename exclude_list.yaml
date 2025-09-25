@@ -11,6 +11,20 @@
 - package_name: 'dbus-python'
   platform: ['win32']
 
+# dbus-python has persistent build issues on Linux ARM due to missing dbus-1.pc files in containers
+- package_name: 'dbus-python'
+  platform: ['linux']
+  python: '==3.8'
+
+# PyGObject is difficult to build from source on Windows due to MSYS2/pkg-config issues
+- package_name: 'pygobject'
+  platform: ['win32']
+  python: '==3.8'
+
+# PyGObject has persistent girepository dependency issues on ARMv7
+- package_name: 'pygobject'
+  platform: ['linux']
+
 # dbus-python can not be build with Python > 3.11 on MacOS
 - package_name: 'dbus-python'
   platform: 'darwin'
@@ -25,30 +39,38 @@
 - package_name: 'gdbgui'
   version: '==0.13.2.0'
 
-# Python 13.3 does not support Pillow 9.5.0
+# Pillow 9.5.0 is problematic on ARMv7 and Python 3.13
 - package_name: 'Pillow'
   version: '==9.5.0'
-  python: '==3.13'
 
-# gdbgui leads to installation of greenlet which does not support Python 3.13 yet
-# issue: https://github.com/cs01/gdbgui/issues/494
-- package_name: 'gdbgui'
-  python: '==3.13'
 # some versions of greenlet are not supported by Python 3.13
 - package_name: 'greenlet'
   version: '<3.0'
   python: '==3.13'
 
-# Python 3.13 does not support windows_curses on Windows
-# issue: https://github.com/zephyrproject-rtos/windows-curses/issues/69
-- package_name: 'windows_curses'
-  platform: 'win32'
-  python: '==3.13'
-
-# Python 13.3 does not support ruamel.yaml.clib 0.2.8
+# Python 3.13 does not support ruamel.yaml.clib 0.2.8 (0.2.12+ supports Python 3.13)
 - package_name: 'ruamel.yaml.clib'
   version: '==0.2.8'
   python: '==3.13'
+
+# tree-sitter versions are not supported by all Python versions
+# https://pypi.org/project/tree-sitter/
+- package_name: 'tree-sitter'
+  version: '>0.22.0'
+  python: ['==3.8', '==3.9']
+# https://pypi.org/project/tree-sitter-c/
+- package_name: 'tree-sitter-c'
+  version: '>0.22.0'
+  python: ['==3.8', '==3.9']
+# ARMv7 Linux can't build tree-sitter-c with Python 3.8
+- package_name: 'tree-sitter-c'
+  python: '==3.8'
+  platform: ['linux']
+
+# ARMv7 Linux can't build cryptography with Python 3.8
+- package_name: 'cryptography'
+  platform: ['linux']
+  python: '==3.8'
 
 # Esptool wheels many times are faulty. Mostly because it installs "esptool.py" which collides with the package name.
 - package_name: 'esptool'

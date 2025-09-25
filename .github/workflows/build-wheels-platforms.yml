@@ -6,12 +6,16 @@ on:
   workflow_dispatch:
 
 env:
-  MIN_IDF_MAJOR_VERSION: ${{ vars.MIN_IDF_MAJOR_VERSION }}
-  MIN_IDF_MINOR_VERSION: ${{ vars.MIN_IDF_MINOR_VERSION }}
   GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  get-supported-versions:
+    name: Get Supported Versions
+    uses: ./.github/workflows/get-supported-versions.yml
+    secrets: inherit
+
   build-wheels:
+    needs: get-supported-versions
     name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -22,14 +26,12 @@ jobs:
           - ubuntu-latest
           - macos-13      # MacOS x86_64
           - macos-latest  # MacOS arm64 (M1)
+          - ubuntu-24.04-arm
           - linux-armv7-self-hosted
-          - linux-arm64-self-hosted
         include:
           - os: linux-armv7-self-hosted
-            CONTAINER: python:3.8-bullseye
-          - os: linux-arm64-self-hosted
-            CONTAINER: python:3.8-bullseye
-        python-version: ['3.8']
+            CONTAINER: python:${{ needs.get-supported-versions.outputs.oldest_supported_python }}-bullseye
+        python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
     # Use python container on ARM
     container: ${{ matrix.CONTAINER }}
@@ -50,10 +52,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set IDF version environment variables
+        run: |
+          echo "MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}" >> $GITHUB_ENV
+          echo "MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }}" >> $GITHUB_ENV
+          echo "Setting MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}, MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }}"
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted' && matrix.os != 'linux-arm64-self-hosted'
+        if: matrix.os != 'linux-armv7-self-hosted'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -79,8 +86,12 @@ jobs:
         run: os_dependencies/macos.sh
 
       - name: Install additional OS dependencies - Linux ARM
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'linux-arm64-self-hosted'
+        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'ubuntu-24.04-arm'
         run: os_dependencies/linux_arm.sh
+
+      - name: Install additional OS dependencies - Windows
+        if: matrix.os == 'windows-latest'
+        run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
 
 
       - name: Build wheels for IDF
@@ -112,12 +123,16 @@ jobs:
 
 
   build-python-version-dependent-wheels:
-    needs: build-wheels
+    needs: [get-supported-versions, build-wheels]
     name: Build Python version dependendent wheels for IDF
-    uses: espressif/idf-python-wheels/.github/workflows/build-wheels-python-dependent.yml@main
+    uses: ./.github/workflows/build-wheels-python-dependent.yml
+    with:
+      supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
+      oldest_supported_python: ${{ needs.get-supported-versions.outputs.oldest_supported_python }}
 
-  upload-python-wheels:
-    needs: [build-wheels, build-python-version-dependent-wheels]
-    name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
-    secrets: inherit
+  # TODO Uncomment this when we are ready to upload the wheels
+  #upload-python-wheels:
+  #  needs: [build-wheels, build-python-version-dependent-wheels]
+  #  name: Upload Python wheels
+  #  uses: ./.github/workflows/upload-python-wheels.yml
+  #  secrets: inherit
