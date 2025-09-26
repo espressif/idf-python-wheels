@@ -1,0 +1,35 @@
+name: Build tree-sitter-c for armv7
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  build-tree-sitter-c-armv7:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build with ARMv7
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          docker run --rm -v ${{ github.workspace }}:/ws -w /ws --platform linux/arm/v7 \
+            -v /tmp/cargo:/root/.cargo \
+            -e CARGO_HOME=/root/.cargo \
+            python:3.8-bullseye \
+            bash -c '
+              apt-get update && apt-get install -y git cargo
+              git clone --depth 1 --branch v0.21.4 https://github.com/tree-sitter/tree-sitter-c.git
+              cd tree-sitter-c
+              python -m pip wheel . --no-deps -w ../downloaded_wheels
+            '
+
+      - name: Store artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded_wheels_armv7
+          path: downloaded_wheels
