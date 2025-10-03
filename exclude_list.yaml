@@ -74,3 +74,18 @@
 
 # Esptool wheels many times are faulty. Mostly because it installs "esptool.py" which collides with the package name.
 - package_name: 'esptool'
+
+# pytest-embedded-xxx is not supported by some older Pythons
+# https://pypi.org/project/pytest-embedded-idf/#history
+- package_name: 'pytest-embedded-idf'
+  version: '>1.17.0'
+  python: ['==3.8', '==3.9']
+- package_name: 'pytest-embedded-jtag'
+  version: '>1.17.0'
+  python: ['==3.8', '==3.9']
+- package_name: 'pytest-embedded-qemu'
+  version: '>1.17.0'
+  python: ['==3.8', '==3.9']
+- package_name: 'pytest-embedded-serial-esp'
+  version: '>1.17.0'
+  python: ['==3.8', '==3.9']
