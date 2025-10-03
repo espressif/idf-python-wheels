@@ -66,7 +66,7 @@ index_pretty.append(HTML_PRETTY_HEADER)
 for name in packages_new.keys():
     index.append(f'        <a href="/pypi/{name}/">{name}/</a>')
     index_pretty.append(
-        f'        <div><a href="/pypi/{name}">{name}</a><span>Entries: {len(packages_new[name])}</span></div><br>'
+        f'        <div><a href="/pypi/{name}">{name}</a><span>Entries: {len(packages_new[name]) - 1}</span></div><br>'
     )
 index.append(HTML_FOOTER)
 index_pretty.append(HTML_FOOTER)
