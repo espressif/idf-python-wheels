@@ -291,10 +291,9 @@ jobs:
           name: wheels-download-directory-linux-arm64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
-# TODO Uncomment this when we are ready to upload the wheels
-  # upload-python-wheels:
-  #   if: ${{ always() }}
-  #   needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
-  #   name: Upload Python wheels
-  #   uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
-  #   secrets: inherit
+  upload-python-wheels:
+    if: ${{ always() }}
+    needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
+    name: Upload Python wheels
+    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+    secrets: inherit
