@@ -6,7 +6,7 @@ default_install_hook_types: [pre-commit, commit-msg]
 
 ci:
   autofix_commit_msg: |
-    Apply automatic fixes from pre-commit hooks
+    fix: Apply automatic fixes from pre-commit hooks
   autofix_prs: true
   autoupdate_commit_msg: 'ci: Bump pre-commit hooks'
   autoupdate_schedule: quarterly

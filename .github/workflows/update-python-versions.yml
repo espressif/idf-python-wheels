@@ -60,7 +60,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: |
-            Update README and pyproject.toml with current supported Python versions
+            docs: Updated README and pyproject.toml with current supported Python versions
 
             Auto-updated by update-readme workflow based on current ESP-IDF and Python support lifecycle.
 
