@@ -15,6 +15,7 @@ Supported architectures:
     - ARM64
 
 Supported Python versions:
+* 3.14
 * 3.13
 * 3.12
 * 3.11
