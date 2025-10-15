@@ -42,8 +42,8 @@ jobs:
           - python-version: ${{ inputs.oldest_supported_python }}
             os: linux-armv7-self-hosted
 
-    # Use python container on ARM - dynamically constructed
-    container: ${{matrix.os == 'linux-armv7-self-hosted' && format('python:{0}-bullseye', matrix.python-version) || null }}
+    # Use python container on ARM - dynamically constructed with bookworm (Debian 12)
+    container: ${{matrix.os == 'linux-armv7-self-hosted' && format('python:{0}-bookworm', matrix.python-version) || null}}
 
     steps:
       - name: Checkout repository
