@@ -6,3 +6,8 @@ PyYAML~=6.0.1
 colorama~=0.4.6
 # ----- build process -----
 boto3~=1.34.4
+
+# setuptools and wheel are needed for Python < 3.10, otherwise resolution with importlib_metadata might be broken
+# https://github.com/espressif/esp-idf/commit/3bad4348d0597597e4079878aa5de1871403e0b2
+setuptools<75.8.1; python_version < "3.10"
+wheel<0.45.0; python_version < "3.10"
