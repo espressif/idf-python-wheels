@@ -226,7 +226,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
-    container: python:${{ matrix.python-version }}-bullseye
+    container: python:${{ matrix.python-version }}-bookworm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -265,7 +265,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
-    container: python:${{ matrix.python-version }}-bullseye
+    container: python:${{ matrix.python-version }}-bookworm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
