@@ -46,12 +46,12 @@
 # some versions of greenlet are not supported by Python 3.13
 - package_name: 'greenlet'
   version: '<3.0'
-  python: '==3.13'
+  python: '>=3.13'
 
-# Python 3.13 does not support ruamel.yaml.clib 0.2.8 (0.2.12+ supports Python 3.13)
+# Python 3.13 and newer does not support ruamel.yaml.clib 0.2.8 (0.2.12+ supports Python 3.13)
 - package_name: 'ruamel.yaml.clib'
   version: '==0.2.8'
-  python: '==3.13'
+  python: '>=3.13'
 
 # tree-sitter versions are not supported by all Python versions
 # https://pypi.org/project/tree-sitter/
@@ -89,3 +89,25 @@
 - package_name: 'pytest-embedded-serial-esp'
   version: '>1.17.0'
   python: ['==3.8', '==3.9']
+
+# rpds_py has issues with Python 3.14
+- package_name: 'rpds_py'
+  version: '<0.27.0'
+  python: '>=3.14'
+
+# windows_curses==2.4.1 does not support Python 3.14
+# https://pypi.org/project/windows-curses/
+- package_name: 'windows_curses'
+  platform: ['win32']
+  python: '>=3.14'
+
+# pydantic has issues with Python 3.14
+- package_name: 'pydantic_core'
+  version: '<2.41.2'
+  python: '>=3.14'
+
+# pyobjc_core==10.3.2 does not support Python 3.14 on MacOS
+- package_name: 'pyobjc_core'
+  platform: ['darwin']
+  version: '==10.3.2'
+  python: '>=3.14'
