@@ -108,3 +108,8 @@
   platform: ['darwin']
   version: '==10.3.2'
   python: '>=3.14'
+
+# mcp is not supported by Python older than 3.10
+# https://pypi.org/project/mcp/
+- package_name: 'mcp'
+  python: ['==3.8', '==3.9']
