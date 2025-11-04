@@ -24,13 +24,13 @@ jobs:
         os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
           - windows-latest
           - ubuntu-latest
-          - macos-13      # MacOS x86_64
+          - macos-15-intel     # MacOS x86_64
           - macos-latest  # MacOS arm64 (M1)
           - ubuntu-24.04-arm
           - linux-armv7-self-hosted
         include:
           - os: linux-armv7-self-hosted
-            CONTAINER: python:${{ needs.get-supported-versions.outputs.oldest_supported_python }}-bullseye
+            CONTAINER: python:${{ needs.get-supported-versions.outputs.oldest_supported_python }}-bookworm
         python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
     # Use python container on ARM
@@ -66,15 +66,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
 
-      - name: Get Python version
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r build_requirements.txt
+
+
+      - name: Get Tools versions
         run: |
           python --version
-          python -m pip install --upgrade pip setuptools setuptools-scm
-          pip show pip setuptools setuptools-scm
-
-
-      - name: Install build dependencies
-        run: python -m pip install -r build_requirements.txt
+          pip show pip setuptools
 
 
       - name: Install additional OS dependencies - Ubuntu
@@ -82,7 +83,7 @@ jobs:
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-13'
+        if: matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel'
         run: os_dependencies/macos.sh
 
       - name: Install additional OS dependencies - Linux ARM
@@ -97,7 +98,7 @@ jobs:
       - name: Build wheels for IDF
         if: matrix.os != 'windows-latest'
         run: |
-          # Rust directory needs to be included for Linux ARM7
+          # Source Rust environment for self-hosted ARMv7 runner
           if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
             . $HOME/.cargo/env
           fi
@@ -106,8 +107,7 @@ jobs:
 
       - name: Build wheels for IDF - Windows
         if: matrix.os == 'windows-latest'
-        run: |
-          python build_wheels.py
+        run: python build_wheels.py
 
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4

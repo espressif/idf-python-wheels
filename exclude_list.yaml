@@ -16,6 +16,11 @@
   platform: ['linux']
   python: '==3.8'
 
+# dbus-python can not be build with Python > 3.11 on MacOS
+- package_name: 'dbus-python'
+  platform: 'darwin'
+  python: '>3.11'
+
 # PyGObject is difficult to build from source on Windows due to MSYS2/pkg-config issues
 - package_name: 'pygobject'
   platform: ['win32']
@@ -24,11 +29,6 @@
 # PyGObject has persistent girepository dependency issues on ARMv7
 - package_name: 'pygobject'
   platform: ['linux']
-
-# dbus-python can not be build with Python > 3.11 on MacOS
-- package_name: 'dbus-python'
-  platform: 'darwin'
-  python: '>3.11'
 
 # gevent==1.5.0 can not be build with Python > 3.8
 - package_name: 'gevent'
@@ -43,15 +43,15 @@
 - package_name: 'Pillow'
   version: '==9.5.0'
 
-# some versions of greenlet are not supported by Python 3.13
+# some versions of greenlet are not supported by Python 3.13 and newer
 - package_name: 'greenlet'
   version: '<3.0'
-  python: '==3.13'
+  python: '>=3.13'
 
-# Python 3.13 does not support ruamel.yaml.clib 0.2.8 (0.2.12+ supports Python 3.13)
+# Python 3.13 and newer does not support ruamel.yaml.clib 0.2.8 (0.2.12+ supports Python 3.13 and newer)
 - package_name: 'ruamel.yaml.clib'
   version: '==0.2.8'
-  python: '==3.13'
+  python: '>=3.13'
 
 # tree-sitter versions are not supported by all Python versions
 # https://pypi.org/project/tree-sitter/
@@ -88,4 +88,28 @@
   python: ['==3.8', '==3.9']
 - package_name: 'pytest-embedded-serial-esp'
   version: '>1.17.0'
+  python: ['==3.8', '==3.9']
+
+# windows_curses does not support Python 3.14
+# https://pypi.org/project/windows-curses/
+# https://github.com/zephyrproject-rtos/windows-curses/issues/76
+- package_name: 'windows_curses'
+  platform: ['win32']
+  python: '>=3.14'
+
+# pydantic and some dependencies have issues with Python 3.14 and mainly MacOS
+- package_name: 'pydantic_core'
+  version: '<2.41.2'
+  python: '>=3.14'
+- package_name: 'rpds_py'
+  version: '<0.27.0'
+  python: '>=3.14'
+- package_name: 'pyobjc_core'
+  platform: ['darwin']
+  version: '==10.3.2'
+  python: '>=3.14'
+
+# mcp is not supported by Python older than 3.10
+# https://pypi.org/project/mcp/
+- package_name: 'mcp'
   python: ['==3.8', '==3.9']

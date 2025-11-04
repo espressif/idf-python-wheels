@@ -6,3 +6,15 @@ PyYAML~=6.0.1
 colorama~=0.4.6
 # ----- build process -----
 boto3~=1.34.4
+
+# setuptools and wheel are needed for Python < 3.10, otherwise resolution with importlib_metadata might be broken
+# https://github.com/espressif/esp-idf/commit/3bad4348d0597597e4079878aa5de1871403e0b2
+setuptools<75.8.1; python_version < "3.10"
+wheel<0.45.0; python_version < "3.10"
+
+# Common build dependencies for packages built with --no-build-isolation
+cffi>=1.15.0                # Required by packages with C extensions (e.g., xcffib, cryptography)
+setuptools-scm>=6.2,<9      # Required by packages using git-based versioning
+setuptools-rust>=1.5.0,<2   # Required by packages with Rust extensions (e.g., cryptography, bleak, rpds-py)
+cython>=0.29.0              # Required by packages using Cython (e.g., coverage, pyyaml speedups)
+poetry-core>=1.0.0          # Required as build backend for packages using Poetry
