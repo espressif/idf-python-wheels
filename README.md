@@ -118,8 +118,13 @@ File for the requirements needed for the build process and the build script.
 ### os_dependencies
 When there is a need for additional OS dependencies to successfully build the wheels on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
+## Manylinux wheels
+We are using [`auditwheel`](https://github.com/pypa/auditwheel) package to repair already built wheels which need static link for the libraries to achieve manylinux tag. This logic is done by the [manylinux workflow](./.github/workflows/manylinux-repair.yml) and the [`repair_wheels.py` script](./repair_wheels.py)
+
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
+
+
 ![IDF Python wheels - Activity diagram](./resources/idf-python-wheels_diagram.svg "IDF Python wheels - Activity diagram")
 
 *The diagram was generated with the open-source tool [PlantUML](https://plantuml.com) (and edited)*
