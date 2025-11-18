@@ -15,35 +15,48 @@ on:
 jobs:
   triage:
     name: ${{ matrix.os }} - ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         os:
-          - windows-latest
-          - ubuntu-latest
-          - macos-15-intel      # MacOS x86_64
-          - macos-latest  # MacOS arm64 (M1)
-          - ubuntu-24.04-arm
-          - linux-armv7-self-hosted
+          - Windows
+          - Linux x86_64
+          - macOS Intel
+          - macOS ARM
+          - Linux ARM64
+          - Linux ARMv7
+        include:
+          - os: Windows
+            runner: windows-latest
+          - os: Linux x86_64
+            runner: ubuntu-latest
+          - os: macOS Intel
+            runner: macos-15-intel
+          - os: macOS ARM
+            runner: macos-latest
+          - os: Linux ARM64
+            runner: ubuntu-24.04-arm
+          - os: Linux ARMv7
+            runner: linux-armv7-self-hosted  # Self-hosted ARMv7 runner
         python-version: ${{ fromJson(inputs.supported_python_versions) }}
         exclude:
           # Exclude oldest supported Python since it's already built in the platform builds
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: windows-latest
+            os: Windows
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: ubuntu-latest
+            os: Linux x86_64
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: macos-15-intel
+            os: macOS Intel
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: macos-latest
+            os: macOS ARM
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: ubuntu-24.04-arm
+            os: Linux ARM64
           - python-version: ${{ inputs.oldest_supported_python }}
-            os: linux-armv7-self-hosted
+            os: Linux ARMv7
 
     # Use python container on ARM - dynamically constructed with bookworm (Debian 12)
-    container: ${{matrix.os == 'linux-armv7-self-hosted' && format('python:{0}-bookworm', matrix.python-version) || null}}
+    container: ${{matrix.os == 'Linux ARMv7' && format('python:{0}-bookworm', matrix.python-version) || null}}
 
     steps:
       - name: Checkout repository
@@ -51,7 +64,7 @@ jobs:
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted'
+        if: matrix.os != 'Linux ARMv7'
         uses: actions/setup-python@v5
         with:
             python-version: ${{ matrix.python-version }}
@@ -67,52 +80,52 @@ jobs:
         run: python -m pip install -r build_requirements.txt
 
       - name: Install additional OS dependencies - Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'Linux x86_64'
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel'
+        if: matrix.os == 'macOS ARM' || matrix.os == 'macOS Intel'
         run: os_dependencies/macos.sh
 
 
       - name: Install additional OS dependencies - Linux ARM7
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'ubuntu-24.04-arm'
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARM64'
         run: os_dependencies/linux_arm.sh
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dependent_requirements_${{ matrix.os}}
-          path: dependent_requirements_${{ matrix.os}}
+          name: dependent_requirements_${{ matrix.runner}}
+          path: dependent_requirements_${{ matrix.runner}}
 
       - name: Print requirements
-        if: matrix.os != 'windows-latest'
-        run: cat dependent_requirements_${{ matrix.os}}/dependent_requirements.txt
+        if: matrix.os != 'Windows'
+        run: cat dependent_requirements_${{ matrix.runner}}/dependent_requirements.txt
 
       - name: Print requirements - Windows
-        if: matrix.os == 'windows-latest'
-        run: type dependent_requirements_${{ matrix.os}}\\dependent_requirements.txt
+        if: matrix.os == 'Windows'
+        run: type dependent_requirements_${{ matrix.runner}}\\dependent_requirements.txt
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }}
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'Windows'
         run: |
-            # Source Rust environment for self-hosted ARMv7 runner
-            if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
+            # Source Rust environment for ARMv7
+            if [ "${{ matrix.os }}" = "Linux ARMv7" ]; then
               export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
               . $HOME/.cargo/env
             fi
 
-            python build_wheels_from_file.py dependent_requirements_${{ matrix.os}}
+            python build_wheels_from_file.py dependent_requirements_${{ matrix.runner}}
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
-        if: matrix.os == 'windows-latest'
-        run: python build_wheels_from_file.py dependent_requirements_${{ matrix.os}}
+        if: matrix.os == 'Windows'
+        run: python build_wheels_from_file.py dependent_requirements_${{ matrix.runner}}
 
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-${{ matrix.os }}-${{ matrix.python-version }}
+          name: wheels-download-directory-${{ matrix.runner }}-${{ matrix.python-version }}
           if-no-files-found: ignore
           path: ./downloaded_wheels
           retention-days: 1

@@ -17,19 +17,30 @@ jobs:
   build-wheels:
     needs: get-supported-versions
     name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-          - windows-latest
-          - ubuntu-latest
-          - macos-15-intel     # MacOS x86_64
-          - macos-latest  # MacOS arm64 (M1)
-          - ubuntu-24.04-arm
-          - linux-armv7-self-hosted
+        os: # Platform names for identification
+          - Windows
+          - Linux x86_64
+          - macOS Intel
+          - macOS ARM
+          - Linux ARM64
+          - Linux ARMv7
         include:
-          - os: linux-armv7-self-hosted
+          - os: Windows
+            runner: windows-latest
+          - os: Linux x86_64
+            runner: ubuntu-latest
+          - os: macOS Intel
+            runner: macos-15-intel
+          - os: macOS ARM
+            runner: macos-latest
+          - os: Linux ARM64
+            runner: ubuntu-24.04-arm
+          - os: Linux ARMv7
+            runner: linux-armv7-self-hosted  # Self-hosted ARMv7 runner
             CONTAINER: python:${{ needs.get-supported-versions.outputs.oldest_supported_python }}-bookworm
         python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
@@ -38,12 +49,12 @@ jobs:
 
     steps:
       - name: OS info
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'Windows'
         run: |
           echo "Operating System: ${{ runner.os }}"
           echo "Architecture: $(uname -m)"
       - name: OS info
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: |
           echo "Operating System: ${{ runner.os }}"
           echo "Architecture: $env:PROCESSOR_ARCHITECTURE"
@@ -60,7 +71,7 @@ jobs:
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted'
+        if: matrix.os != 'Linux ARMv7'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -79,47 +90,49 @@ jobs:
 
 
       - name: Install additional OS dependencies - Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'Linux x86_64'
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel'
+        if: matrix.os == 'macOS ARM' || matrix.os == 'macOS Intel'
         run: os_dependencies/macos.sh
 
       - name: Install additional OS dependencies - Linux ARM
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'ubuntu-24.04-arm'
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARM64'
         run: os_dependencies/linux_arm.sh
 
       - name: Install additional OS dependencies - Windows
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
 
 
       - name: Build wheels for IDF
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'Windows'
         run: |
-          # Source Rust environment for self-hosted ARMv7 runner
-          if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
+          # Source Rust environment for ARMv7
+          if [ "${{ matrix.os }}" = "Linux ARMv7" ]; then
             . $HOME/.cargo/env
           fi
 
           python build_wheels.py
 
       - name: Build wheels for IDF - Windows
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: python build_wheels.py
 
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-${{ matrix.os}}-${{ matrix.python-version }}
+          name: wheels-download-directory-${{ matrix.runner}}-${{ matrix.python-version }}
           path: ./downloaded_wheels
+          retention-days: 1
 
       - name: Upload artifacts of Python version dependent wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dependent_requirements_${{ matrix.os}}
+          name: dependent_requirements_${{ matrix.runner}}
           path: ./dependent_requirements.txt
+          retention-days: 1
 
 
   build-python-version-dependent-wheels:

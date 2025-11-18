@@ -63,3 +63,4 @@ jobs:
           name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
           overwrite: true
+          retention-days: 1
