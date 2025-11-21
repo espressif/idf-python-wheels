@@ -3,7 +3,7 @@
 arch=$(uname -m)
 
 # PyGObject needs build dependecies https://pygobject.readthedocs.io/en/latest/getting_started.html
-brew install pygobject3 gtk4
+brew install pygobject3 gtk4 gobject-introspection
 
 
 # Only MacOS x86_64 additional dependencies

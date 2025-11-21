@@ -114,6 +114,13 @@ jobs:
             . $HOME/.cargo/env
           fi
 
+          # Set ARCHFLAGS for macOS to prevent universal2 wheels
+          if [ "${{ matrix.os }}" = "macOS ARM" ]; then
+            export ARCHFLAGS="-arch arm64"
+          elif [ "${{ matrix.os }}" = "macOS Intel" ]; then
+            export ARCHFLAGS="-arch x86_64"
+          fi
+
           python build_wheels.py
 
       - name: Build wheels for IDF - Windows
@@ -143,11 +150,11 @@ jobs:
       supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
       oldest_supported_python: ${{ needs.get-supported-versions.outputs.oldest_supported_python }}
 
-  # Repair Linux wheels with auditwheel for manylinux compatibility
-  repair-manylinux-wheels:
+  # Repair wheels for all platforms (Windows, macOS, Linux)
+  repair-wheels:
     needs: [build-wheels, build-python-version-dependent-wheels]
-    name: Repair manylinux wheels
-    uses: ./.github/workflows/manylinux-repair.yml
+    name: Repair wheels
+    uses: ./.github/workflows/wheels-repair.yml
 
   # TODO Uncomment this when we are ready to upload the wheels
   #upload-python-wheels:

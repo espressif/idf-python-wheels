@@ -157,6 +157,8 @@ jobs:
         run: os_dependencies/macos.sh
 
       - name: Build wheels
+        env:
+          ARCHFLAGS: "-arch x86_64"  # Force x86_64-only wheels, not universal2
         run: |
           python build_wheels_from_file.py --requirements ${{ inputs.packages }}
 
@@ -207,6 +209,8 @@ jobs:
         run: os_dependencies/macos.sh
 
       - name: Build wheels
+        env:
+          ARCHFLAGS: "-arch arm64"  # Force arm64-only wheels, not universal2
         run: |
           python build_wheels_from_file.py --requirements ${{ inputs.packages }}
 

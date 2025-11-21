@@ -115,6 +115,13 @@ jobs:
               . $HOME/.cargo/env
             fi
 
+            # Set ARCHFLAGS for macOS to prevent universal2 wheels
+            if [ "${{ matrix.os }}" = "macOS ARM" ]; then
+              export ARCHFLAGS="-arch arm64"
+            elif [ "${{ matrix.os }}" = "macOS Intel" ]; then
+              export ARCHFLAGS="-arch x86_64"
+            fi
+
             python build_wheels_from_file.py dependent_requirements_${{ matrix.runner}}
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows

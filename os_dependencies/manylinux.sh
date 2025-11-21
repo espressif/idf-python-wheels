@@ -22,11 +22,13 @@ yum install -y \
     openjpeg2-devel \
     fribidi-devel \
     harfbuzz-devel \
-    libxcb-devel
+    libxcb-devel \
+    libXau-devel \
+    brotli \
+    brotli-devel
 
 # Additional libraries that wheels might depend on
 yum install -y \
     gcc \
     gcc-c++ \
-    make \
-    brotli-devel
+    make

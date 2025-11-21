@@ -1,0 +1,120 @@
+name: repair-wheels
+
+# Repairs wheels for all platforms (Windows, macOS, Linux)
+# - Windows: delvewheel (bundles DLLs)
+# - macOS: delocate (bundles dylibs)
+# - Linux: auditwheel (bundles SOs)
+
+on:
+  workflow_call:
+
+jobs:
+  repair-wheels:
+    name: Repair ${{ matrix.platform }} wheels
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - Windows
+          - macOS ARM
+          - macOS Intel
+          - Linux x86_64
+          - Linux ARM64
+          - Linux ARMv7
+        include:
+          - platform: Windows
+            runner: windows-latest
+            tool: delvewheel
+          - platform: macOS ARM
+            runner: macos-latest
+            tool: delocate
+          - platform: macOS Intel
+            runner: macos-15-intel
+            tool: delocate
+          - platform: Linux x86_64
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: manylinux_2_34_x86_64
+          - platform: Linux ARM64
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: manylinux_2_34_aarch64
+            setup_qemu: true
+            qemu_platform: arm64
+          - platform: Linux ARMv7
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: manylinux_2_34_armv7l
+            setup_qemu: true
+            qemu_platform: arm/v7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-download-directory-*
+          path: ./downloaded_wheels
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up QEMU
+        if: matrix.setup_qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.qemu_platform }}
+
+      - name: Install repair tool - Windows
+        if: matrix.tool == 'delvewheel'
+        run: python -m pip install delvewheel
+
+      - name: Install repair tool - macOS
+        if: matrix.tool == 'delocate'
+        run: python -m pip install delocate
+
+      - name: Install OS dependencies - macOS
+        if: matrix.tool == 'delocate'
+        run: bash os_dependencies/macos.sh
+
+      - name: Install dependencies and repair - Windows/macOS
+        if: matrix.tool != 'auditwheel'
+        run: |
+          python -m pip install -r build_requirements.txt
+          python repair_wheels.py
+
+      - name: Repair Linux wheels in manylinux container
+        if: matrix.tool == 'auditwheel'
+        run: |
+          docker run --rm \
+            -v $(pwd):/work \
+            -w /work \
+            quay.io/pypa/${{ matrix.manylinux_platform }} \
+            bash -c "
+              # Install OS dependencies
+              bash os_dependencies/manylinux.sh
+
+              # Install pip if not available
+              python3 -m ensurepip --default-pip || curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+              python3 -m pip install --upgrade pip
+
+              # Install Python build requirements (ignore system packages to avoid conflicts)
+              python3 -m pip install --ignore-installed -r build_requirements.txt
+
+              # Repair wheels
+              python3 repair_wheels.py
+            "
+
+      - name: Re-upload artifacts with repaired wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-repaired-${{ matrix.platform }}
+          path: ./downloaded_wheels
+          overwrite: true
+          retention-days: 1
