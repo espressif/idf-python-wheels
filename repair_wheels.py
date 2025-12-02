@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 """
-Repairs wheels for all platforms to ensure broad compatibility.
+Repairs wheels for dynamically linked libraries on all platforms to ensure broad compatibility.
+If this is not able to achieve the broken wheel is deleted and not published to Espressif's PyPI.
+See: https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
 - Windows: delvewheel (bundles DLLs)
 - macOS: delocate (bundles dylibs)
 - Linux: auditwheel (bundles SOs)
@@ -14,21 +16,22 @@ import platform
 import subprocess
 
 from pathlib import Path
+from typing import Union
 
 from colorama import Fore
 
 from _helper_functions import print_color
 
 
-def get_platform():
+def get_platform() -> str:
     return platform.system()
 
 
-def is_pure_python_wheel(wheel_name):
+def is_pure_python_wheel(wheel_name: str) -> bool:
     return "py3-none-any" in wheel_name
 
 
-def is_platform_wheel(wheel_name, target_platform, current_arch=None):
+def is_platform_wheel(wheel_name: str, target_platform: str, current_arch: Union[str, None] = None) -> bool:
     """Check if wheel is for the target platform and architecture."""
     if target_platform == "Windows":
         return "win" in wheel_name
@@ -45,19 +48,19 @@ def is_platform_wheel(wheel_name, target_platform, current_arch=None):
     return False
 
 
-def get_wheel_arch(wheel_name):
+def get_wheel_arch(wheel_name: str) -> Union[str, None]:
     """Extract architecture from wheel filename."""
     # {name}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl
     parts = wheel_name.replace(".whl", "").split("-")
     if len(parts) >= 5:
         platform_tag = parts[-1]
-        for arch in ["x86_64", "aarch64", "armv7l", "i686"]:
+        for arch in ["x86_64", "aarch64", "armv7l"]:
             if arch in platform_tag:
                 return arch
     return None
 
 
-def repair_wheel_windows(wheel_path, temp_dir):
+def repair_wheel_windows(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
     """Repair Windows wheel using delvewheel."""
     result = subprocess.run(
         ["delvewheel", "repair", str(wheel_path), "-w", str(temp_dir), "--no-mangle-all"],
@@ -67,7 +70,7 @@ def repair_wheel_windows(wheel_path, temp_dir):
     return result
 
 
-def fix_universal2_wheel_name(wheel_path, error_msg):
+def fix_universal2_wheel_name(wheel_path: Path, error_msg: str) -> Union[Path, str, None]:
     """Fix incorrectly tagged universal2 wheel by renaming to actual architecture.
 
     Returns:
@@ -108,14 +111,14 @@ def fix_universal2_wheel_name(wheel_path, error_msg):
     return new_path
 
 
-def repair_wheel_macos(wheel_path, temp_dir):
+def repair_wheel_macos(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
     """Repair macOS wheel using delocate."""
     cmd = ["delocate-wheel", "-w", str(temp_dir), "-v", str(wheel_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return result
 
 
-def repair_wheel_linux(wheel_path, temp_dir):
+def repair_wheel_linux(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
     """Repair Linux wheel using auditwheel."""
     result = subprocess.run(
         ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir)], capture_output=True, text=True
@@ -123,28 +126,28 @@ def repair_wheel_linux(wheel_path, temp_dir):
     return result
 
 
-def main():
-    wheels_dir = Path("./downloaded_wheels")
-    temp_dir = Path("./temp_repair")
+def main() -> None:
+    wheels_dir: Path = Path("./downloaded_wheels")
+    temp_dir: Path = Path("./temp_repair")
     temp_dir.mkdir(exist_ok=True)
 
     # Find all wheel files
-    wheels = list(wheels_dir.rglob("*.whl"))
+    wheels: list[Path] = list(wheels_dir.rglob("*.whl"))
 
     if not wheels:
-        print(f"No wheels found in {wheels_dir}")
+        print_color(f"No wheels found in {wheels_dir}", Fore.RED)
         raise SystemExit("No wheels found in downloaded_wheels directory")
 
     print_color(f"Found {len(wheels)} wheels\n")
 
-    current_platform = get_platform()
-    current_arch = platform.machine()
+    current_platform: str = get_platform()
+    current_arch: str = platform.machine()
 
-    repaired_count = 0
-    skipped_count = 0
-    deleted_count = 0
-    error_count = 0
-    errors = []
+    repaired_count: int = 0
+    skipped_count: int = 0
+    deleted_count: int = 0
+    error_count: int = 0
+    errors: list[str] = []
 
     # Repair each wheel
     for wheel in wheels:
@@ -219,7 +222,7 @@ def main():
                     old_wheel.unlink()
 
                 print_color("  -> Retrying delocate with corrected wheel name", Fore.CYAN)
-                result = repair_wheel_macos(renamed_wheel, temp_dir)
+                result = repair_wheel_macos(Path(renamed_wheel), temp_dir)
 
                 if result.stdout:
                     print(f"  {result.stdout.strip()}")
@@ -227,8 +230,19 @@ def main():
                     print_color(f"  {result.stderr.strip()}", Fore.RED)
 
                 # Update wheel reference and error message for subsequent checks
-                wheel = renamed_wheel
+                wheel = Path(renamed_wheel)
                 error_msg = result.stderr.strip() if result.stderr else ""
+
+        # Special handling forLinux ARMv7 broken wheels
+        if (
+            current_platform == "Linux"
+            and current_arch == "armv7l"
+            and "This does not look like a platform wheel, no ELF executable" in error_msg
+        ):
+            print_color("  -> Deleting corrupted wheel", Fore.RED)
+            wheel.unlink()
+            deleted_count += 1
+            continue
 
         # Check for non-critical errors (keep original wheel)
         is_noncritical = (

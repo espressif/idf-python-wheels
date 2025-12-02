@@ -1,6 +1,7 @@
 name: repair-wheels
 
-# Repairs wheels for all platforms (Windows, macOS, Linux)
+# Repairs wheels for dynamically linked libraries on all platforms
+# https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
 # - Windows: delvewheel (bundles DLLs)
 # - macOS: delocate (bundles dylibs)
 # - Linux: auditwheel (bundles SOs)
@@ -26,28 +27,37 @@ jobs:
           - platform: Windows
             runner: windows-latest
             tool: delvewheel
+            arch: windows-x86_64
           - platform: macOS ARM
             runner: macos-latest
             tool: delocate
+            arch: macos-arm64
           - platform: macOS Intel
             runner: macos-15-intel
             tool: delocate
+            arch: macos-x86_64
           - platform: Linux x86_64
             runner: ubuntu-latest
             tool: auditwheel
             manylinux_platform: manylinux_2_34_x86_64
+            arch: linux-x86_64
           - platform: Linux ARM64
             runner: ubuntu-latest
             tool: auditwheel
             manylinux_platform: manylinux_2_34_aarch64
             setup_qemu: true
             qemu_platform: arm64
+            docker_platform: linux/arm64
+            arch: linux-arm64
           - platform: Linux ARMv7
             runner: ubuntu-latest
             tool: auditwheel
-            manylinux_platform: manylinux_2_34_armv7l
+            manylinux_platform: idf-python-wheels-armv7l
+            docker_image: ghcr.io/espressif/github-esp-dockerfiles/idf-python-wheels-armv7l:v1
             setup_qemu: true
-            qemu_platform: arm/v7
+            qemu_platform: arm
+            docker_platform: linux/arm/v7
+            arch: linux-armv7
 
     steps:
       - name: Checkout repository
@@ -63,7 +73,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Set up QEMU
         if: matrix.setup_qemu
@@ -89,32 +99,56 @@ jobs:
           python -m pip install -r build_requirements.txt
           python repair_wheels.py
 
-      - name: Repair Linux wheels in manylinux container
-        if: matrix.tool == 'auditwheel'
+      - name: Repair Linux x86_64 wheels in manylinux container
+        if: matrix.platform == 'Linux x86_64'
         run: |
           docker run --rm \
             -v $(pwd):/work \
             -w /work \
             quay.io/pypa/${{ matrix.manylinux_platform }} \
             bash -c "
-              # Install OS dependencies
               bash os_dependencies/manylinux.sh
-
-              # Install pip if not available
               python3 -m ensurepip --default-pip || curl -sS https://bootstrap.pypa.io/get-pip.py | python3
               python3 -m pip install --upgrade pip
-
-              # Install Python build requirements (ignore system packages to avoid conflicts)
               python3 -m pip install --ignore-installed -r build_requirements.txt
+              python3 repair_wheels.py
+            "
 
-              # Repair wheels
+      - name: Repair Linux ARM64 wheels in manylinux container
+        if: matrix.platform == 'Linux ARM64'
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.docker_platform }} \
+            -v $(pwd):/work \
+            -w /work \
+            quay.io/pypa/${{ matrix.manylinux_platform }} \
+            bash -c "
+              bash os_dependencies/manylinux.sh
+              python3 -m ensurepip --default-pip || curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+              python3 -m pip install --upgrade pip
+              python3 -m pip install --ignore-installed -r build_requirements.txt
+              python3 repair_wheels.py
+            "
+
+      - name: Repair Linux ARMv7 wheels in manylinux container
+        if: matrix.platform == 'Linux ARMv7'
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.docker_platform }} \
+            -v $(pwd):/work \
+            -w /work \
+            ${{ matrix.docker_image }} \
+            bash -c "
+              bash os_dependencies/linux_arm.sh
+              python3 -m pip install --break-system-packages --upgrade pip
+              python3 -m pip install --break-system-packages -r build_requirements.txt
               python3 repair_wheels.py
             "
 
       - name: Re-upload artifacts with repaired wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-repaired-${{ matrix.platform }}
+          name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
           overwrite: true
           retention-days: 1
