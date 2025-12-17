@@ -182,9 +182,8 @@ jobs:
     name: Repair wheels
     uses: ./.github/workflows/wheels-repair.yml
 
-  # TODO Uncomment this when we are ready to upload the wheels
-  #upload-python-wheels:
-  #  needs: [repair-manylinux-wheels]  # Changed to depend on repaired wheels
-  #  name: Upload Python wheels
-  #  uses: ./.github/workflows/upload-python-wheels.yml
-  #  secrets: inherit
+  upload-python-wheels:
+    needs: [repair-wheels]
+    name: Upload Python wheels
+    uses: ./.github/workflows/upload-python-wheels.yml
+    secrets: inherit
