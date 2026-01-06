@@ -1,0 +1,154 @@
+name: repair-wheels
+
+# Repairs wheels for dynamically linked libraries on all platforms
+# https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
+# - Windows: delvewheel (bundles DLLs)
+# - macOS: delocate (bundles dylibs)
+# - Linux: auditwheel (bundles SOs)
+
+on:
+  workflow_call:
+
+jobs:
+  repair-wheels:
+    name: Repair ${{ matrix.platform }} wheels
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - Windows
+          - macOS ARM
+          - macOS Intel
+          - Linux x86_64
+          - Linux ARM64
+          - Linux ARMv7
+        include:
+          - platform: Windows
+            runner: windows-latest
+            tool: delvewheel
+            arch: windows-x86_64
+          - platform: macOS ARM
+            runner: macos-latest
+            tool: delocate
+            arch: macos-arm64
+          - platform: macOS Intel
+            runner: macos-15-intel
+            tool: delocate
+            arch: macos-x86_64
+          - platform: Linux x86_64
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: manylinux_2_34_x86_64
+            arch: linux-x86_64
+          - platform: Linux ARM64
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: manylinux_2_34_aarch64
+            setup_qemu: true
+            qemu_platform: arm64
+            docker_platform: linux/arm64
+            arch: linux-arm64
+          - platform: Linux ARMv7
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: idf-python-wheels-armv7l
+            docker_image: ghcr.io/espressif/github-esp-dockerfiles/idf-python-wheels-armv7l:v1
+            setup_qemu: true
+            qemu_platform: arm
+            docker_platform: linux/arm/v7
+            arch: linux-armv7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-download-directory-*
+          path: ./downloaded_wheels
+          merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up QEMU
+        if: matrix.setup_qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.qemu_platform }}
+
+      - name: Install repair tool - Windows
+        if: matrix.tool == 'delvewheel'
+        run: python -m pip install delvewheel
+
+      - name: Install repair tool - macOS
+        if: matrix.tool == 'delocate'
+        run: python -m pip install delocate
+
+      - name: Install OS dependencies - macOS
+        if: matrix.tool == 'delocate'
+        run: bash os_dependencies/macos.sh
+
+      - name: Install dependencies and repair - Windows/macOS
+        if: matrix.tool != 'auditwheel'
+        run: |
+          python -m pip install -r build_requirements.txt
+          python repair_wheels.py
+
+      - name: Repair Linux x86_64 wheels in manylinux container
+        if: matrix.platform == 'Linux x86_64'
+        run: |
+          docker run --rm \
+            -v $(pwd):/work \
+            -w /work \
+            quay.io/pypa/${{ matrix.manylinux_platform }} \
+            bash -c "
+              bash os_dependencies/manylinux.sh
+              python3 -m ensurepip --default-pip || curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+              python3 -m pip install --upgrade pip
+              python3 -m pip install --ignore-installed -r build_requirements.txt
+              python3 repair_wheels.py
+            "
+
+      - name: Repair Linux ARM64 wheels in manylinux container
+        if: matrix.platform == 'Linux ARM64'
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.docker_platform }} \
+            -v $(pwd):/work \
+            -w /work \
+            quay.io/pypa/${{ matrix.manylinux_platform }} \
+            bash -c "
+              bash os_dependencies/manylinux.sh
+              python3 -m ensurepip --default-pip || curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+              python3 -m pip install --upgrade pip
+              python3 -m pip install --ignore-installed -r build_requirements.txt
+              python3 repair_wheels.py
+            "
+
+      - name: Repair Linux ARMv7 wheels in manylinux container
+        if: matrix.platform == 'Linux ARMv7'
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.docker_platform }} \
+            -v $(pwd):/work \
+            -w /work \
+            ${{ matrix.docker_image }} \
+            bash -c "
+              bash os_dependencies/linux_arm.sh
+              python3 -m pip install --break-system-packages --upgrade pip
+              python3 -m pip install --break-system-packages -r build_requirements.txt
+              python3 repair_wheels.py
+            "
+
+      - name: Re-upload artifacts with repaired wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-repaired-${{ matrix.arch }}
+          path: ./downloaded_wheels
+          overwrite: true
+          retention-days: 1

@@ -61,7 +61,7 @@ def update_python_versions():
     ruff_pattern = r'(target-version\s*=\s*["\'])py\d+(["\'])'
     new_pyproject = re.sub(ruff_pattern, f"\\g<1>{py_version_compact}\\g<2>", pyproject_content)
 
-    # Update mypy python_version (e.g., "3.8")
+    # Update mypy python_version (e.g., "3.9")
     mypy_pattern = r'(python_version\s*=\s*["\'])\d+\.\d+(["\'])'
     new_pyproject = re.sub(mypy_pattern, f"\\g<1>{oldest_python}\\g<2>", new_pyproject)
 

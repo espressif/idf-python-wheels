@@ -118,9 +118,20 @@ File for the requirements needed for the build process and the build script.
 ### os_dependencies
 When there is a need for additional OS dependencies to successfully build the wheels on a specific platform and architecture, the `.sh` script in the `os_dependencies` directory can be adjusted.
 
+## Universal wheel tag - linking of dynamic libraries
+The repair tools are used after build to link and bundle all the needed libraries into the wheel to produce correct universal tag and working wheel. If this is not able to achieve the broken wheel is deleted and not published to Espressif's PyPI.
+
+- [`auditwheel`](https://github.com/pypa/auditwheel) package to repair Linux's `manylinux` wheels
+- [`delocate`](https://github.com/matthew-brett/delocate) package to repair Mac's dynamically linked libraries
+- [`delvewheel`](https://github.com/adang1345/delvewheel) package to repair Windows's DLLs
+
+This logic is done by the [repair workflow](./.github/workflows/wheels-repair.yml) and the [`repair_wheels.py` script](./repair_wheels.py)
+
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
-![IDF Python wheels - Activity diagram](./resources/idf-python-wheels_diagram.svg "IDF Python wheels - Activity diagram")
+
+
+![IDF Python wheels - Activity diagram](./resources/idf-python-wheels-diagram.svg "IDF Python wheels - Activity diagram")
 
 *The diagram was generated with the open-source tool [PlantUML](https://plantuml.com) (and edited)*
 

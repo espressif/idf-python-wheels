@@ -17,33 +17,52 @@ jobs:
   build-wheels:
     needs: get-supported-versions
     name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-          - windows-latest
-          - ubuntu-latest
-          - macos-15-intel     # MacOS x86_64
-          - macos-latest  # MacOS arm64 (M1)
-          - ubuntu-24.04-arm
-          - linux-armv7-self-hosted
+        os: # Platform names for identification
+          - Windows
+          - Linux x86_64
+          - macOS Intel
+          - macOS ARM
+          - Linux ARM64
+          - Linux ARMv7
         include:
-          - os: linux-armv7-self-hosted
-            CONTAINER: python:${{ needs.get-supported-versions.outputs.oldest_supported_python }}-bookworm
+          - os: Windows
+            runner: windows-latest
+            arch: windows-x86_64
+          - os: Linux x86_64
+            runner: ubuntu-latest
+            arch: linux-x86_64
+          - os: macOS Intel
+            runner: macos-15-intel
+            arch: macos-x86_64
+          - os: macOS ARM
+            runner: macos-latest
+            arch: macos-arm64
+          - os: Linux ARM64
+            runner: ubuntu-24.04-arm
+            arch: linux-arm64
+          - os: Linux ARMv7
+            runner: ubuntu-latest
+            arch: linux-armv7
         python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
-    # Use python container on ARM
-    container: ${{ matrix.CONTAINER }}
-
     steps:
+      - name: Set up QEMU for ARMv7
+        if: matrix.os == 'Linux ARMv7'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
       - name: OS info
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'Windows'
         run: |
           echo "Operating System: ${{ runner.os }}"
           echo "Architecture: $(uname -m)"
       - name: OS info
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: |
           echo "Operating System: ${{ runner.os }}"
           echo "Architecture: $env:PROCESSOR_ARCHITECTURE"
@@ -60,66 +79,92 @@ jobs:
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'linux-armv7-self-hosted'
+        if: matrix.os != 'Linux ARMv7'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
 
       - name: Install build dependencies
+        if: matrix.os != 'Linux ARMv7'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r build_requirements.txt
 
-
       - name: Get Tools versions
+        if: matrix.os != 'Linux ARMv7'
         run: |
           python --version
           pip show pip setuptools
 
-
       - name: Install additional OS dependencies - Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'Linux x86_64'
         run: os_dependencies/ubuntu.sh
 
       - name: Install additional OS dependencies - MacOS
-        if: matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel'
+        if: matrix.os == 'macOS ARM' || matrix.os == 'macOS Intel'
         run: os_dependencies/macos.sh
 
-      - name: Install additional OS dependencies - Linux ARM
-        if: matrix.os == 'linux-armv7-self-hosted' || matrix.os == 'ubuntu-24.04-arm'
+      - name: Install additional OS dependencies - Linux ARM64
+        if: matrix.os == 'Linux ARM64'
         run: os_dependencies/linux_arm.sh
 
       - name: Install additional OS dependencies - Windows
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
 
-
-      - name: Build wheels for IDF
-        if: matrix.os != 'windows-latest'
+      - name: Build wheels for IDF - ARMv7 (in Docker)
+        if: matrix.os == 'Linux ARMv7'
         run: |
-          # Source Rust environment for self-hosted ARMv7 runner
-          if [ "${{ matrix.os }}" = "linux-armv7-self-hosted" ]; then
-            . $HOME/.cargo/env
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            -e MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }} \
+            -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
+            -e GH_TOKEN="${GH_TOKEN}" \
+            -e PIP_NO_CACHE_DIR=1 \
+            python:${{ matrix.python-version }}-bookworm \
+            bash -c "
+              set -e
+              python --version
+              # Install pip packages without cache to reduce memory usage
+              python -m pip install --no-cache-dir --upgrade pip
+              python -m pip install --no-cache-dir -r build_requirements.txt
+              bash os_dependencies/linux_arm.sh
+              # Source Rust environment after installation
+              . \$HOME/.cargo/env
+              python build_wheels.py
+            "
+
+      - name: Build wheels for IDF - Linux/macOS
+        if: matrix.os != 'Windows' && matrix.os != 'Linux ARMv7'
+        run: |
+          # Set ARCHFLAGS for macOS to prevent universal2 wheels
+          if [ "${{ matrix.os }}" = "macOS ARM" ]; then
+            export ARCHFLAGS="-arch arm64"
+          elif [ "${{ matrix.os }}" = "macOS Intel" ]; then
+            export ARCHFLAGS="-arch x86_64"
           fi
 
           python build_wheels.py
 
       - name: Build wheels for IDF - Windows
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'Windows'
         run: python build_wheels.py
 
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-${{ matrix.os}}-${{ matrix.python-version }}
+          name: wheels-download-directory-${{ matrix.arch }}-${{ matrix.python-version }}
           path: ./downloaded_wheels
+          retention-days: 1
 
       - name: Upload artifacts of Python version dependent wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dependent_requirements_${{ matrix.os}}
+          name: dependent_requirements_${{ matrix.arch }}
           path: ./dependent_requirements.txt
+          retention-days: 1
 
 
   build-python-version-dependent-wheels:
@@ -130,9 +175,15 @@ jobs:
       supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
       oldest_supported_python: ${{ needs.get-supported-versions.outputs.oldest_supported_python }}
 
-  # TODO Uncomment this when we are ready to upload the wheels
-  #upload-python-wheels:
-  #  needs: [build-wheels, build-python-version-dependent-wheels]
-  #  name: Upload Python wheels
-  #  uses: ./.github/workflows/upload-python-wheels.yml
-  #  secrets: inherit
+  # Repair wheels for dynamically linked libraries on all platforms
+  # https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
+  repair-wheels:
+    needs: [build-wheels, build-python-version-dependent-wheels]
+    name: Repair wheels
+    uses: ./.github/workflows/wheels-repair.yml
+
+  upload-python-wheels:
+    needs: [repair-wheels]
+    name: Upload Python wheels
+    uses: ./.github/workflows/upload-python-wheels.yml
+    secrets: inherit
