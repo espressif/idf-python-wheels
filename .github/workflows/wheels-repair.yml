@@ -23,6 +23,7 @@ jobs:
           - Linux x86_64
           - Linux ARM64
           - Linux ARMv7
+          - Linux ARMv7 Legacy
         include:
           - platform: Windows
             runner: windows-latest
@@ -58,6 +59,15 @@ jobs:
             qemu_platform: arm
             docker_platform: linux/arm/v7
             arch: linux-armv7
+          - platform: Linux ARMv7 Legacy
+            runner: ubuntu-latest
+            tool: auditwheel
+            manylinux_platform: idf-python-wheels-armv7l-legacy
+            docker_image: ghcr.io/espressif/github-esp-dockerfiles/idf-python-wheels-armv7l-legacy:v1
+            setup_qemu: true
+            qemu_platform: arm
+            docker_platform: linux/arm/v7
+            arch: linux-armv7-legacy
 
     steps:
       - name: Checkout repository
@@ -66,7 +76,9 @@ jobs:
       - name: Download wheel artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: wheels-download-directory-*
+          # Download only artifacts for this specific architecture to avoid mixing wheels
+          # (especially important for ARMv7 vs ARMv7 Legacy which produce same-named wheels)
+          pattern: wheels-download-directory-${{ matrix.arch }}-*
           path: ./downloaded_wheels
           merge-multiple: true
 
@@ -142,6 +154,21 @@ jobs:
               bash os_dependencies/linux_arm.sh
               python3 -m pip install --break-system-packages --upgrade pip
               python3 -m pip install --break-system-packages -r build_requirements.txt
+              python3 repair_wheels.py
+            "
+
+      - name: Repair Linux ARMv7 Legacy wheels in manylinux container
+        if: matrix.platform == 'Linux ARMv7 Legacy'
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.docker_platform }} \
+            -v $(pwd):/work \
+            -w /work \
+            ${{ matrix.docker_image }} \
+            bash -c "
+              bash os_dependencies/linux_arm.sh
+              python3 -m pip install --upgrade pip
+              python3 -m pip install -r build_requirements.txt
               python3 repair_wheels.py
             "
 

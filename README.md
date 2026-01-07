@@ -141,4 +141,7 @@ The main file is `build-wheels-platforms.yml` which is scheduled to run periodic
 > Python dependent wheels are wheels which depend on the [CPython’s Application Binary Interface (ABI)](https://docs.python.org/3/c-api/stable.html). These are checked based on the [wheel filename format](https://peps.python.org/pep-0491/#file-format) where the `abi tag` is checked for `cp`. Such wheels need to be build also for all supported Python versions, not only for the minimum Python version supported by [ESP-IDF].
 
 
+## Docker files
+Docker files are here just as a copy for better understanding in the scope of one repository. Actual Docker files are in its own repository where there are build and published from. https://github.com/espressif/github-esp-dockerfiles
+
 [ESP-IDF]: https://github.com/espressif/esp-idf
