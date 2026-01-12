@@ -67,7 +67,7 @@ jobs:
             setup_qemu: true
             qemu_platform: arm
             docker_platform: linux/arm/v7
-            arch: linux-armv7-legacy
+            arch: linux-armv7legacy
 
     steps:
       - name: Checkout repository
@@ -143,6 +143,7 @@ jobs:
             "
 
       - name: Repair Linux ARMv7 wheels in manylinux container
+        # Using --break-system-packages and --ignore-installed to avoid conflicts with system packages
         if: matrix.platform == 'Linux ARMv7'
         run: |
           docker run --rm \
@@ -153,11 +154,12 @@ jobs:
             bash -c "
               bash os_dependencies/linux_arm.sh
               python3 -m pip install --break-system-packages --upgrade pip
-              python3 -m pip install --break-system-packages -r build_requirements.txt
+              python3 -m pip install --break-system-packages --ignore-installed -r build_requirements.txt
               python3 repair_wheels.py
             "
 
       - name: Repair Linux ARMv7 Legacy wheels in manylinux container
+        # Using --break-system-packages and --ignore-installed to avoid conflicts with system packages
         if: matrix.platform == 'Linux ARMv7 Legacy'
         run: |
           docker run --rm \
@@ -167,8 +169,8 @@ jobs:
             ${{ matrix.docker_image }} \
             bash -c "
               bash os_dependencies/linux_arm.sh
-              python3 -m pip install --upgrade pip
-              python3 -m pip install -r build_requirements.txt
+              python3 -m pip install --break-system-packages --upgrade pip
+              python3 -m pip install --break-system-packages --ignore-installed -r build_requirements.txt
               python3 repair_wheels.py
             "
 

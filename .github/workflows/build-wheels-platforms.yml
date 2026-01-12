@@ -50,7 +50,7 @@ jobs:
             arch: linux-armv7
           - os: Linux ARMv7 Legacy
             runner: ubuntu-latest
-            arch: linux-armv7-legacy
+            arch: linux-armv7legacy
         python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
     steps:

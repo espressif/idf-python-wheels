@@ -13,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
 # Install build dependencies and Python versions
+# Note: We don't install patchelf from apt because Bullseye has 0.12 but auditwheel needs >= 0.14
 RUN apt-get update && apt-get install -y \
     # Build essentials
     build-essential \
@@ -24,7 +25,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     ca-certificates \
-    patchelf \
+    autoconf \
+    automake \
     # Python build dependencies
     libssl-dev \
     libffi-dev \
@@ -70,6 +72,18 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install patchelf >= 0.14 from source (Bullseye has 0.12 which is too old for auditwheel)
+RUN cd /tmp && \
+    git clone https://github.com/NixOS/patchelf.git && \
+    cd patchelf && \
+    git checkout 0.18.0 && \
+    ./bootstrap.sh && \
+    ./configure && \
+    make && \
+    make install && \
+    cd / && rm -rf /tmp/patchelf && \
+    patchelf --version
 
 # Install pip and wheel tools
 RUN python3 -m pip install --no-cache-dir --upgrade \
