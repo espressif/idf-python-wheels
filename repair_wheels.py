@@ -119,9 +119,15 @@ def repair_wheel_macos(wheel_path: Path, temp_dir: Path) -> subprocess.Completed
 
 
 def repair_wheel_linux(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
-    """Repair Linux wheel using auditwheel."""
+    """Repair Linux wheel using auditwheel.
+
+    Uses --strip option to strip debugging symbols which can help with
+    ELF alignment issues on ARM (fixes "ELF load command address/offset not properly aligned" errors).
+    """
     result = subprocess.run(
-        ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir)], capture_output=True, text=True
+        ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir), "--strip"],
+        capture_output=True,
+        text=True,
     )
     return result
 

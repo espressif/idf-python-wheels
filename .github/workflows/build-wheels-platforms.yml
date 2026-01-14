@@ -127,6 +127,7 @@ jobs:
             -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
@@ -152,6 +153,7 @@ jobs:
             -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
               set -e
