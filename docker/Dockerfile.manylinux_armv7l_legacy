@@ -1,10 +1,11 @@
 # Minimal manylinux-compatible Docker image for ARMv7l (32-bit ARM)
-# Based on Debian Bookworm for broad compatibility
+# Based on Debian Bullseye for older glibc compatibility (2.31)
+# Use this for compatibility with older systems (e.g., older Raspberry Pi OS)
 
-FROM arm32v7/debian:bookworm
+FROM arm32v7/debian:bullseye
 
 LABEL maintainer="Espressif Systems"
-LABEL description="Minimal manylinux-compatible environment for building Python wheels on ARMv7l"
+LABEL description="Minimal manylinux-compatible environment for building Python wheels on ARMv7l (legacy glibc 2.31)"
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -12,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
 # Install build dependencies and Python versions
-# Note: We build patchelf from source to ensure proper ELF alignment on ARM
+# Note: We don't install patchelf from apt because Bullseye has 0.12 but auditwheel needs >= 0.14
 RUN apt-get update && apt-get install -y \
     # Build essentials
     build-essential \
@@ -50,10 +51,11 @@ RUN apt-get update && apt-get install -y \
     # dbus-python dependencies
     libdbus-1-dev \
     libdbus-glib-1-dev \
-    # Pillow dependencies
+    # Pillow dependencies (include both -dev and runtime libs for auditwheel)
     libjpeg-dev \
     libpng-dev \
     libtiff-dev \
+    libtiff5 \
     libfreetype6-dev \
     liblcms2-dev \
     libwebp-dev \
@@ -64,15 +66,14 @@ RUN apt-get update && apt-get install -y \
     libxau-dev \
     brotli \
     libbrotli-dev \
-    # Python from Debian repos (Bookworm provides 3.11)
+    # Python from Debian repos (Bullseye provides 3.9)
     python3 \
     python3-dev \
     python3-venv \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and install patchelf from source to ensure proper ELF alignment on ARM
-# System patchelf versions can cause "ELF load command address/offset not properly aligned" errors
+# Build and install patchelf >= 0.14 from source (Bullseye has 0.12 which is too old for auditwheel)
 RUN cd /tmp && \
     git clone https://github.com/NixOS/patchelf.git && \
     cd patchelf && \
@@ -85,8 +86,7 @@ RUN cd /tmp && \
     patchelf --version
 
 # Install pip and wheel tools
-# --break-system-packages is OK because it is docker image and not a system
-RUN python3 -m pip install --no-cache-dir --break-system-packages --upgrade \
+RUN python3 -m pip install --no-cache-dir --upgrade \
     pip \
     setuptools \
     wheel \
@@ -94,12 +94,12 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --upgrade \
 
 # Set up manylinux platform tag
 # This makes auditwheel recognize the environment as manylinux-compatible
-# Bookworm has glibc 2.36, so we use manylinux_2_35
-RUN echo "manylinux_2_35_armv7l" > /etc/system-release-cpe
+# Bullseye has glibc 2.31, so we use manylinux_2_31
+RUN echo "manylinux_2_31_armv7l" > /etc/system-release-cpe
 
 # Create a marker file for manylinux detection
 RUN mkdir -p /opt/python && \
-    echo "manylinux_2_35_armv7l" > /opt/python/PLATFORM
+    echo "manylinux_2_31_armv7l" > /opt/python/PLATFORM
 
 # Set working directory
 WORKDIR /workspace

@@ -28,6 +28,7 @@ jobs:
           - macOS ARM
           - Linux ARM64
           - Linux ARMv7
+          - Linux ARMv7 Legacy
         include:
           - os: Windows
             runner: windows-latest
@@ -47,11 +48,14 @@ jobs:
           - os: Linux ARMv7
             runner: ubuntu-latest
             arch: linux-armv7
+          - os: Linux ARMv7 Legacy
+            runner: ubuntu-latest
+            arch: linux-armv7legacy
         python-version: ['${{ needs.get-supported-versions.outputs.oldest_supported_python }}']
 
     steps:
       - name: Set up QEMU for ARMv7
-        if: matrix.os == 'Linux ARMv7'
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/arm/v7
@@ -79,20 +83,20 @@ jobs:
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
-        if: matrix.os != 'Linux ARMv7'
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
 
       - name: Install build dependencies
-        if: matrix.os != 'Linux ARMv7'
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r build_requirements.txt
 
       - name: Get Tools versions
-        if: matrix.os != 'Linux ARMv7'
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         run: |
           python --version
           pip show pip setuptools
@@ -123,6 +127,7 @@ jobs:
             -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
@@ -136,8 +141,34 @@ jobs:
               python build_wheels.py
             "
 
+      - name: Build wheels for IDF - ARMv7 Legacy (in Docker)
+        # Build on Bullseye (glibc 2.31) for compatibility with older systems
+        # Note: Buster has Python 3.7 which is too old for our dependencies
+        if: matrix.os == 'Linux ARMv7 Legacy'
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            -e MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }} \
+            -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
+            -e GH_TOKEN="${GH_TOKEN}" \
+            -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
+            python:${{ matrix.python-version }}-bullseye \
+            bash -c "
+              set -e
+              python --version
+              # Install pip packages without cache to reduce memory usage
+              python -m pip install --no-cache-dir --upgrade pip
+              python -m pip install --no-cache-dir -r build_requirements.txt
+              bash os_dependencies/linux_arm.sh
+              # Source Rust environment after installation
+              . \$HOME/.cargo/env
+              python build_wheels.py
+            "
+
       - name: Build wheels for IDF - Linux/macOS
-        if: matrix.os != 'Windows' && matrix.os != 'Linux ARMv7'
+        if: matrix.os != 'Windows' && matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         run: |
           # Set ARCHFLAGS for macOS to prevent universal2 wheels
           if [ "${{ matrix.os }}" = "macOS ARM" ]; then

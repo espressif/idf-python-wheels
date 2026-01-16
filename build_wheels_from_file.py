@@ -10,6 +10,7 @@ import sys
 
 from colorama import Fore
 
+from _helper_functions import get_no_binary_args
 from _helper_functions import print_color
 
 parser = argparse.ArgumentParser(description="Process build arguments.")
@@ -49,6 +50,9 @@ if requirements_dir:
         raise SystemExit(f"Python version dependent requirements directory or file not found ({e})")
 
     for requirement in requirements:
+        # Get no-binary args for packages that should be built from source
+        no_binary_args = get_no_binary_args(requirement)
+
         out = subprocess.run(
             [
                 f"{sys.executable}",
@@ -60,14 +64,15 @@ if requirements_dir:
                 "downloaded_wheels",
                 "--wheel-dir",
                 "downloaded_wheels",
-            ],
+            ]
+            + no_binary_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        print(out.stdout.decode("utf-8"))
+        print(out.stdout.decode("utf-8", errors="replace"))
         if out.stderr:
-            print_color(out.stderr.decode("utf-8"), Fore.RED)
+            print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
         if out.returncode != 0:
             failed_wheels += 1
@@ -84,6 +89,9 @@ if requirements_dir:
 # Build wheels from passed requirements
 else:
     for requirement in in_requirements:
+        # Get no-binary args for packages that should be built from source
+        no_binary_args = get_no_binary_args(requirement)
+
         out = subprocess.run(
             [
                 f"{sys.executable}",
@@ -95,14 +103,15 @@ else:
                 "downloaded_wheels",
                 "--wheel-dir",
                 "downloaded_wheels",
-            ],
+            ]
+            + no_binary_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        print(out.stdout.decode("utf-8"))
+        print(out.stdout.decode("utf-8", errors="replace"))
         if out.stderr:
-            print_color(out.stderr.decode("utf-8"), Fore.RED)
+            print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
         if out.returncode != 0:
             failed_wheels += 1
