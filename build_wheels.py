@@ -20,6 +20,7 @@ from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
 from _helper_functions import print_color
 from yaml_list_adapter import YAMLListAdapter
@@ -296,13 +297,16 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
-                print(out.stdout.decode("utf-8"))
+                print(out.stdout.decode("utf-8", errors="replace"))
                 if out.stderr:
-                    print_color(out.stderr.decode("utf-8"), Fore.RED)
+                    print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
                 non_classic_requirement.remove(non_classic_requirement[0])
                 continue
 
         # requirement wheel build
+        # Get no-binary args for packages that should be built from source
+        no_binary_args = get_no_binary_args(requirement.name)
+
         out = subprocess.run(
             [
                 f"{sys.executable}",
@@ -318,14 +322,15 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                 f"{dir}",
                 "--no-cache-dir",
                 "--no-build-isolation",
-            ],
+            ]
+            + no_binary_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        print(out.stdout.decode("utf-8"))
+        print(out.stdout.decode("utf-8", errors="replace"))
         if out.stderr:
-            print_color(out.stderr.decode("utf-8"), Fore.RED)
+            print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
         if out.returncode != 0:
             failed_wheels += 1
