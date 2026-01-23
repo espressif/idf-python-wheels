@@ -97,13 +97,19 @@
   platform: ['win32']
   python: '>=3.14'
 
-# pydantic and some dependencies have issues with Python 3.14 and mainly MacOS
+# pydantic supports Python 3.14 from version >= 2.35.0
+# https://pypi.org/project/pydantic_core/#history
 - package_name: 'pydantic_core'
-  version: '<2.41.2'
+  version: '<2.35.0'
   python: '>=3.14'
+# rdps_py supports Python 3.14 from version >= 0.26.0
+# https://pypi.org/project/rpds-py/#history
 - package_name: 'rpds_py'
-  version: '<0.27.0'
+  version: '<0.26.0'
   python: '>=3.14'
+# pyobjc_core supports Python 3.14 from version >= 11.0
+# https://pypi.org/project/pyobjc-core/#history
+# but on macOS version 10.3.2 has issues
 - package_name: 'pyobjc_core'
   platform: ['darwin']
   version: '==10.3.2'
