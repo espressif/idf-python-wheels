@@ -1,0 +1,111 @@
+name: Test wheels installation
+
+# Test that all built wheels are valid and platform-compatible
+# This workflow runs after repair-wheels and before upload to catch any issues
+# Uses test_wheels_install.py for consistent testing across all platforms
+
+on:
+  workflow_call:
+    inputs:
+      supported_python_versions:
+        description: 'JSON array of supported Python versions'
+        required: true
+        type: string
+
+jobs:
+  test-install:
+    name: Test ${{ matrix.os }} - Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - Windows
+          - Linux x86_64
+          - macOS Intel
+          - macOS ARM
+          - Linux ARM64
+          - Linux ARMv7
+          - Linux ARMv7 Legacy
+        include:
+          - os: Windows
+            runner: windows-latest
+            arch: windows-x86_64
+          - os: Linux x86_64
+            runner: ubuntu-latest
+            arch: linux-x86_64
+          - os: macOS Intel
+            runner: macos-15-intel
+            arch: macos-x86_64
+          - os: macOS ARM
+            runner: macos-latest
+            arch: macos-arm64
+          - os: Linux ARM64
+            runner: ubuntu-24.04-arm
+            arch: linux-arm64
+          - os: Linux ARMv7
+            runner: ubuntu-latest
+            arch: linux-armv7
+          - os: Linux ARMv7 Legacy
+            runner: ubuntu-latest
+            arch: linux-armv7legacy
+        python-version: ${{ fromJson(inputs.supported_python_versions) }}
+        exclude:
+          # Python 3.14 doesn't have bullseye images for ARM
+          - python-version: '3.14'
+            os: Linux ARMv7 Legacy
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARMv7
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
+      - name: Download repaired wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-repaired-${{ matrix.arch }}
+          path: ./downloaded_wheels
+
+      - name: Setup Python
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Test wheel installation
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
+        run: |
+          python --version
+          python -m pip install --upgrade pip
+          python test/test_wheels_install.py
+
+      - name: Test wheel installation - ARMv7 (in Docker)
+        if: matrix.os == 'Linux ARMv7'
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            python:${{ matrix.python-version }}-bookworm \
+            bash -c "
+              python --version
+              python -m pip install --upgrade pip
+              python test/test_wheels_install.py
+            "
+
+      - name: Test wheel installation - ARMv7 Legacy (in Docker)
+        if: matrix.os == 'Linux ARMv7 Legacy'
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            python:${{ matrix.python-version }}-bullseye \
+            bash -c "
+              python --version
+              python -m pip install --upgrade pip
+              python test/test_wheels_install.py
+            "

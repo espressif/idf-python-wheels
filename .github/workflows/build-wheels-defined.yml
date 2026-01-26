@@ -40,6 +40,11 @@ on:
         type: boolean
         required: false
         default: true
+      os_linux_armv7_legacy:
+        description: Build on linux armv7 legacy (bullseye, glibc 2.31)
+        type: boolean
+        required: false
+        default: false
 
 env:
   GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
@@ -86,7 +91,7 @@ jobs:
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-ubuntu-${{ matrix.python-version }}
+          name: wheels-download-directory-linux-x86_64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
 
@@ -123,7 +128,7 @@ jobs:
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-windows-${{ matrix.python-version }}
+          name: wheels-download-directory-windows-x86_64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
 
@@ -165,7 +170,7 @@ jobs:
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-macos-x86-${{ matrix.python-version }}
+          name: wheels-download-directory-macos-x86_64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
 
@@ -246,6 +251,7 @@ jobs:
             -w /work \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
@@ -262,7 +268,7 @@ jobs:
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-download-directory-linux-arm7-${{ matrix.python-version }}
+          name: wheels-download-directory-linux-armv7-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
 
@@ -301,17 +307,76 @@ jobs:
           name: wheels-download-directory-linux-arm64-${{ matrix.python-version }}
           path: ./downloaded_wheels
 
+
+  linux-armv7-legacy:
+    needs: get-supported-versions
+    name: linux aarch32 (armv7 legacy)
+    if: ${{ inputs.os_linux_armv7_legacy }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+        exclude:
+          # Python 3.14 doesn't have bullseye images for ARM
+          - python-version: '3.14'
+    steps:
+      - name: Set up QEMU for ARMv7
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build wheels - ARMv7 Legacy (in Docker)
+        # Build on Bullseye (glibc 2.31) for compatibility with older systems
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            -e GH_TOKEN="${GH_TOKEN}" \
+            -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
+            python:${{ matrix.python-version }}-bullseye \
+            bash -c "
+              set -e
+              python --version
+              # Install pip packages without cache to reduce memory usage
+              python -m pip install --no-cache-dir --upgrade pip
+              python -m pip install --no-cache-dir -r build_requirements.txt
+              bash os_dependencies/linux_arm.sh
+              # Source Rust environment after installation
+              . \$HOME/.cargo/env
+              python build_wheels_from_file.py --requirements '${{ inputs.packages }}'
+            "
+
+      - name: Upload artifacts of downloaded_wheels directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-download-directory-linux-armv7legacy-${{ matrix.python-version }}
+          path: ./downloaded_wheels
+
   # Repair wheels for dynamically linked libraries on all platforms
   # https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
   repair-wheels:
     if: ${{ always() }}
-    needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64]
+    needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64, linux-armv7-legacy]
     name: Repair wheels
     uses: ./.github/workflows/wheels-repair.yml
 
+  # Test that all wheels can be installed on all supported platforms
+  test-wheels:
+    if: ${{ always() }}
+    needs: [get-supported-versions, repair-wheels]
+    name: Test wheels installation
+    uses: ./.github/workflows/test-wheels-install.yml
+    with:
+      supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
+
   upload-python-wheels:
     if: ${{ always() }}
-    needs: [repair-wheels]
+    needs: [test-wheels]
     name: Upload Python wheels
-    uses: espressif/idf-python-wheels/.github/workflows/upload-python-wheels.yml@main
+    uses: ./.github/workflows/upload-python-wheels.yml
     secrets: inherit
