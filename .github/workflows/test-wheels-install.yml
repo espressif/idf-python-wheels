@@ -2,6 +2,7 @@ name: Test wheels installation
 
 # Test that all built wheels are valid and platform-compatible
 # This workflow runs after repair-wheels and before upload to catch any issues
+# Uses test_wheels_install.py for consistent testing across all platforms
 
 on:
   workflow_call:
@@ -55,6 +56,9 @@ jobs:
             os: Linux ARMv7 Legacy
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up QEMU for ARMv7
         if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
         uses: docker/setup-qemu-action@v3
@@ -67,110 +71,18 @@ jobs:
           name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
 
-      - name: List downloaded wheels
-        if: matrix.os != 'Windows'
-        run: |
-          echo "Downloaded wheels:"
-          find ./downloaded_wheels -name "*.whl" | head -50
-          echo "Total wheel count:"
-          find ./downloaded_wheels -name "*.whl" | wc -l
-
-      - name: List downloaded wheels - Windows
-        if: matrix.os == 'Windows'
-        run: |
-          echo "Downloaded wheels:"
-          Get-ChildItem -Path ./downloaded_wheels -Recurse -Filter "*.whl" | Select-Object -First 50 | ForEach-Object { $_.FullName }
-          echo "Total wheel count:"
-          (Get-ChildItem -Path ./downloaded_wheels -Recurse -Filter "*.whl").Count
-
       - name: Setup Python
         if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Test wheel installation - Linux/macOS
-        if: matrix.os != 'Windows' && matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
-        run: |
-          set -e
-          python --version
-          python -m pip install --upgrade pip
-
-          # Get Python version tag (e.g., "311" for Python 3.11)
-          PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
-          echo "Testing wheels for Python version: cp${PY_VER}"
-
-          # Find wheels compatible with this Python version
-          # Include: cpXY (exact match), py3/py2.py3 (universal), abi3 (stable ABI)
-          WHEELS=$(find ./downloaded_wheels -name "*.whl" \( \
-            -name "*-cp${PY_VER}-*" -o \
-            -name "*-py3-*" -o \
-            -name "*-py2.py3-*" -o \
-            -name "*-abi3-*" \
-          \))
-          WHEEL_COUNT=$(echo "$WHEELS" | grep -c . || echo "0")
-          echo "Found $WHEEL_COUNT compatible wheels to test"
-
-          # Install each wheel with --no-deps to verify wheel validity and platform compatibility
-          # This tests that the wheel files are valid and manylinux tags are correct
-          # without running into dependency resolution issues between unrelated packages
-          echo "Installing wheels (--no-deps to test wheel validity only)..."
-          FAILED=0
-          INSTALLED=0
-          for wheel in $WHEELS; do
-            if pip install --no-deps --no-index --find-links ./downloaded_wheels "$wheel" 2>/dev/null; then
-              ((INSTALLED++))
-            else
-              echo "Warning: Failed to install $(basename "$wheel")"
-              ((FAILED++))
-            fi
-          done
-
-          # Write results to file for summary step
-          echo "INSTALLED=$INSTALLED" > test_results.txt
-          echo "FAILED=$FAILED" >> test_results.txt
-
-          echo ""
-          echo "Results: $INSTALLED installed successfully, $FAILED failed"
-
-      - name: Test wheel installation - Windows
-        if: matrix.os == 'Windows'
+      - name: Test wheel installation
+        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         run: |
           python --version
           python -m pip install --upgrade pip
-
-          # Get Python version tag (e.g., "311" for Python 3.11)
-          $pyVer = python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')"
-          echo "Testing wheels for Python version: cp$pyVer"
-
-          # Find wheels compatible with this Python version
-          # Include: cpXY (exact match), py3/py2.py3 (universal), abi3 (stable ABI)
-          $wheels = Get-ChildItem -Path ./downloaded_wheels -Filter "*.whl" | Where-Object {
-            $_.Name -match "-cp$pyVer-|-py3-|-py2\.py3-|-abi3-"
-          }
-          echo "Found $($wheels.Count) compatible wheels to test"
-
-          # Install each wheel with --no-deps to verify wheel validity and platform compatibility
-          # This tests that the wheel files are valid without dependency resolution issues
-          echo "Installing wheels (--no-deps to test wheel validity only)..."
-          $installed = 0
-          $failed = 0
-          foreach ($wheel in $wheels) {
-            $result = pip install --no-deps --no-index --find-links ./downloaded_wheels $wheel.FullName 2>&1
-            if ($LASTEXITCODE -eq 0) {
-              $installed++
-            } else {
-              echo "Warning: Failed to install $($wheel.Name)"
-              $failed++
-            }
-          }
-
-          # Write results to file for summary step
-          "INSTALLED=$installed" | Out-File -FilePath test_results.txt -Encoding utf8
-          "FAILED=$failed" | Out-File -FilePath test_results.txt -Append -Encoding utf8
-
-          echo ""
-          echo "Results: $installed installed successfully, $failed failed"
+          python test/test_wheels_install.py
 
       - name: Test wheel installation - ARMv7 (in Docker)
         if: matrix.os == 'Linux ARMv7'
@@ -180,43 +92,9 @@ jobs:
             -w /work \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
-              set -e
               python --version
               python -m pip install --upgrade pip
-
-              # Get Python version tag (e.g., '311' for Python 3.11)
-              PY_VER=\$(python -c \"import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')\")
-              echo \"Testing wheels for Python version: cp\${PY_VER}\"
-
-              # Find wheels compatible with this Python version
-              WHEELS=\$(find ./downloaded_wheels -name '*.whl' \( \
-                -name \"*-cp\${PY_VER}-*\" -o \
-                -name '*-py3-*' -o \
-                -name '*-py2.py3-*' -o \
-                -name '*-abi3-*' \
-              \))
-              WHEEL_COUNT=\$(echo \"\$WHEELS\" | grep -c . || echo '0')
-              echo \"Found \$WHEEL_COUNT compatible wheels to test\"
-
-              # Install each wheel with --no-deps to verify wheel validity
-              echo 'Installing wheels (--no-deps to test wheel validity only)...'
-              FAILED=0
-              INSTALLED=0
-              for wheel in \$WHEELS; do
-                if pip install --no-deps --no-index --find-links ./downloaded_wheels \"\$wheel\" 2>/dev/null; then
-                  ((INSTALLED++))
-                else
-                  echo \"Warning: Failed to install \$(basename \"\$wheel\")\"
-                  ((FAILED++))
-                fi
-              done
-
-              # Write results to file for summary step
-              echo \"INSTALLED=\$INSTALLED\" > test_results.txt
-              echo \"FAILED=\$FAILED\" >> test_results.txt
-
-              echo ''
-              echo \"Results: \$INSTALLED installed successfully, \$FAILED failed\"
+              python test/test_wheels_install.py
             "
 
       - name: Test wheel installation - ARMv7 Legacy (in Docker)
@@ -227,62 +105,7 @@ jobs:
             -w /work \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
-              set -e
               python --version
               python -m pip install --upgrade pip
-
-              # Get Python version tag (e.g., '311' for Python 3.11)
-              PY_VER=\$(python -c \"import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')\")
-              echo \"Testing wheels for Python version: cp\${PY_VER}\"
-
-              # Find wheels compatible with this Python version
-              WHEELS=\$(find ./downloaded_wheels -name '*.whl' \( \
-                -name \"*-cp\${PY_VER}-*\" -o \
-                -name '*-py3-*' -o \
-                -name '*-py2.py3-*' -o \
-                -name '*-abi3-*' \
-              \))
-              WHEEL_COUNT=\$(echo \"\$WHEELS\" | grep -c . || echo '0')
-              echo \"Found \$WHEEL_COUNT compatible wheels to test\"
-
-              # Install each wheel with --no-deps to verify wheel validity
-              echo 'Installing wheels (--no-deps to test wheel validity only)...'
-              FAILED=0
-              INSTALLED=0
-              for wheel in \$WHEELS; do
-                if pip install --no-deps --no-index --find-links ./downloaded_wheels \"\$wheel\" 2>/dev/null; then
-                  ((INSTALLED++))
-                else
-                  echo \"Warning: Failed to install \$(basename \"\$wheel\")\"
-                  ((FAILED++))
-                fi
-              done
-
-              # Write results to file for summary step
-              echo \"INSTALLED=\$INSTALLED\" > test_results.txt
-              echo \"FAILED=\$FAILED\" >> test_results.txt
-
-              echo ''
-              echo \"Results: \$INSTALLED installed successfully, \$FAILED failed\"
+              python test/test_wheels_install.py
             "
-
-      - name: Test Summary
-        shell: bash
-        run: |
-          echo "=== Test Summary ==="
-          if [ -f test_results.txt ]; then
-            cat test_results.txt
-            source test_results.txt
-            echo ""
-            echo "Installed: $INSTALLED"
-            echo "Failed: $FAILED"
-            echo ""
-            if [ "$FAILED" -gt 0 ]; then
-              echo "ERROR: $FAILED wheel(s) failed to install!"
-              exit 1
-            fi
-            echo "All wheels installed successfully!"
-          else
-            echo "ERROR: test_results.txt not found!"
-            exit 1
-          fi
