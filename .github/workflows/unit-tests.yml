@@ -1,0 +1,38 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  get-supported-versions:
+    name: Get Supported Versions
+    uses: ./.github/workflows/get-supported-versions.yml
+    secrets: inherit
+
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install packaging pyyaml colorama requests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s test -v

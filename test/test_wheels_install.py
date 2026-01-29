@@ -9,6 +9,8 @@ This script finds and installs wheels compatible with the current Python version
 verifying that wheel files are valid and platform-compatible.
 """
 
+from __future__ import annotations
+
 import re
 import subprocess
 import sys
