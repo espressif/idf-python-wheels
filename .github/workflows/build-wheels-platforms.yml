@@ -213,8 +213,16 @@ jobs:
     name: Repair wheels
     uses: ./.github/workflows/wheels-repair.yml
 
+  # Test that all wheels can be installed on all supported platforms
+  test-wheels:
+    needs: [get-supported-versions, repair-wheels]
+    name: Test wheels installation
+    uses: ./.github/workflows/test-wheels-install.yml
+    with:
+      supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
+
   upload-python-wheels:
-    needs: [repair-wheels]
+    needs: [test-wheels]
     name: Upload Python wheels
     uses: ./.github/workflows/upload-python-wheels.yml
     secrets: inherit
