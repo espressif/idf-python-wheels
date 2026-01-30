@@ -10,6 +10,21 @@ on:
         type: string
         required: true
 
+      platform:
+        description: Build only for this architecture (or "all" to use checkboxes below)
+        type: choice
+        required: false
+        default: all
+        options:
+          - all
+          - linux_x86_64
+          - windows
+          - macos_x86_64
+          - macos_arm64
+          - linux_arm64
+          - linux_armv7
+          - linux_armv7_legacy
+
       os_ubuntu_latest:
         description: Build on ubuntu-latest(x86_64)
         type: boolean
@@ -58,7 +73,7 @@ jobs:
   ubuntu-latest:
     needs: get-supported-versions
     name: linux x86_64
-    if: ${{ inputs.os_ubuntu_latest }}
+    if: ${{ inputs.platform == 'all' && inputs.os_ubuntu_latest || inputs.platform == 'linux_x86_64' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -121,6 +136,9 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install -r build_requirements.txt
 
+      - name: Install additional OS dependencies - Windows
+        run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
+
       - name: Build wheels
         run: |
           python build_wheels_from_file.py --requirements ${{ inputs.packages }}
@@ -135,7 +153,7 @@ jobs:
   macos-latest:
     needs: get-supported-versions
     name: macos x86_64
-    if: ${{ inputs.os_macos_latest }}
+    if: ${{ inputs.platform == 'all' && inputs.os_macos_latest || inputs.platform == 'macos_x86_64' }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -229,7 +247,7 @@ jobs:
   linux-armv7:
     needs: get-supported-versions
     name: linux aarch32 (armv7)
-    if: ${{ inputs.os_linux_armv7 }}
+    if: ${{ inputs.platform == 'all' && inputs.os_linux_armv7 || inputs.platform == 'linux_armv7' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -311,7 +329,7 @@ jobs:
   linux-armv7-legacy:
     needs: get-supported-versions
     name: linux aarch32 (armv7 legacy)
-    if: ${{ inputs.os_linux_armv7_legacy }}
+    if: ${{ inputs.platform == 'all' && inputs.os_linux_armv7_legacy || inputs.platform == 'linux_armv7_legacy' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

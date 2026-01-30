@@ -3,15 +3,36 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+from __future__ import annotations
+
 import re
+
+from typing import List
+from typing import Optional
+from typing import Set
 
 import yaml
 
 from colorama import Fore
 from packaging.requirements import Requirement
 
+from _helper_functions import exclude_entry_applies_to_platform
 from _helper_functions import merge_requirements
 from _helper_functions import print_color
+
+# Map runner platforms to sys.platform (pip markers only know win32/linux/darwin)
+SYS_PLATFORM_MAP = {
+    "linux_armv7": "linux",
+    "linux_arm64": "linux",
+    "linux_x86_64": "linux",
+    "macos_arm64": "darwin",
+    "macos_x86_64": "darwin",
+}
+
+
+def _platform_for_marker(platform):
+    """Normalize platform to sys_platform value for pip markers."""
+    return SYS_PLATFORM_MAP.get(platform, platform)
 
 
 class YAMLListAdapter:
@@ -63,13 +84,17 @@ class YAMLListAdapter:
     exclude: bool = False
     requirements: set = set()
 
-    def __init__(self, yaml_file: str, exclude: bool = False) -> None:
+    def __init__(self, yaml_file: str, exclude: bool = False, current_platform: Optional[str] = None) -> None:
         try:
             with open(yaml_file, "r") as f:
                 self._yaml_list = yaml.load(f, yaml.Loader)
         except FileNotFoundError:
             print_color(f"File not found, please check the file: {yaml_file}", Fore.RED)
         self.exclude = exclude
+
+        # When building wheels: only exclude entries that apply to this platform
+        if current_platform and self._yaml_list:
+            self._yaml_list = [e for e in self._yaml_list if exclude_entry_applies_to_platform(e, current_platform)]
 
         # Assemble duplicates of requirements/packages with the same name and remove them from the YAML list
         _requirement_duplicates = self._assemble_requirements_duplicates()
@@ -145,7 +170,7 @@ class YAMLListAdapter:
         """
         yaml_list: list = yaml
 
-        requirements_set: set[Requirement] = set()
+        requirements_set: Set[Requirement] = set()
 
         if not yaml_list:
             return requirements_set
@@ -153,7 +178,14 @@ class YAMLListAdapter:
         for package in yaml_list:
             # get attributes of the package if defined to reduce unnecessary complexity
             package_version = package["version"] if "version" in package else ""
-            package_platform = package["platform"] if "platform" in package else ""
+            raw_platform = package["platform"] if "platform" in package else ""
+            # Normalize to list and map linux_armv7/arm64/x86_64 to "linux" for pip markers
+            package_platform: List[str]
+            if raw_platform:
+                plfs = [raw_platform] if isinstance(raw_platform, str) else raw_platform
+                package_platform = list(dict.fromkeys(_platform_for_marker(p) for p in plfs))
+            else:
+                package_platform = []
             package_python = package["python"] if "python" in package else ""
 
             requirement_str_list = [f"{package['package_name']}"]

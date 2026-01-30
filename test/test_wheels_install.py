@@ -21,6 +21,7 @@ from pathlib import Path
 from colorama import Fore
 
 from _helper_functions import EXCLUDE_LIST_PATH
+from _helper_functions import get_current_platform
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel
 from yaml_list_adapter import YAMLListAdapter
@@ -129,8 +130,10 @@ def main() -> int:
     print_color(f"---------- TEST WHEELS INSTALL (Python {python_version}) ----------")
     print(f"Platform: {sys.platform}\n")
 
-    # Load exclude list using YAMLListAdapter (exclude=True for runtime filtering)
-    exclude_requirements = YAMLListAdapter(EXCLUDE_LIST_PATH, exclude=True).requirements
+    # Load exclude list for current platform (exclude=True for runtime filtering)
+    exclude_requirements = YAMLListAdapter(
+        EXCLUDE_LIST_PATH, exclude=True, current_platform=get_current_platform()
+    ).requirements
     print(f"Loaded {len(exclude_requirements)} exclude requirements from {EXCLUDE_LIST_PATH}\n")
 
     # Find compatible wheels
