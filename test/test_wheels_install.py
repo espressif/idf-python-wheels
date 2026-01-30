@@ -19,83 +19,18 @@ import sys
 from pathlib import Path
 
 from colorama import Fore
-from packaging.utils import canonicalize_name
-from packaging.version import Version
 
+from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import print_color
+from _helper_functions import should_exclude_wheel
 from yaml_list_adapter import YAMLListAdapter
 
 WHEELS_DIR = Path("./downloaded_wheels")
-EXCLUDE_LIST_PATH = Path("exclude_list.yaml")
 
 
 def get_python_version_tag() -> str:
     """Get the Python version tag (e.g., '311' for Python 3.11)."""
     return f"{sys.version_info.major}{sys.version_info.minor}"
-
-
-def parse_wheel_name(wheel_name: str) -> tuple[str, str] | None:
-    """
-    Parse wheel filename to extract package name and version.
-
-    Wheel format: {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
-    """
-    pattern = re.compile(r"^([A-Za-z0-9_.-]+)-(\d+(?:\.\d+)*(?:[a-zA-Z0-9.]+)?)-")
-    match = pattern.match(wheel_name)
-    if match:
-        pkg_name = match.group(1)
-        version = match.group(2)
-        return pkg_name, version
-    return None
-
-
-def load_exclude_requirements() -> set:
-    """Load exclude_list.yaml using YAMLListAdapter and return requirements set."""
-    adapter = YAMLListAdapter(str(EXCLUDE_LIST_PATH), exclude=True)
-    return adapter.requirements
-
-
-def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:
-    """
-    Check if a wheel should be excluded based on exclude_list.yaml rules.
-
-    Uses YAMLListAdapter with exclude=True, so the logic is inverted:
-    - If marker evaluates to True -> wheel satisfies "keep" condition, skip
-    - If version is in the (inverted) specifier -> wheel satisfies "keep" condition, skip
-    - Otherwise -> wheel should be excluded
-
-    Returns:
-        tuple: (should_exclude: bool, reason: str)
-    """
-    parsed = parse_wheel_name(wheel_name)
-    if not parsed:
-        return False, ""
-
-    pkg_name, wheel_version = parsed
-    canonical_name = canonicalize_name(pkg_name)
-
-    for req in exclude_requirements:
-        # Check if package name matches (using canonical names)
-        if canonicalize_name(req.name) != canonical_name:
-            continue
-
-        # With exclude=True, if marker evaluates to True -> KEEP the wheel
-        if req.marker and req.marker.evaluate():
-            continue
-
-        # With exclude=True, if version is in the (inverted) specifier -> KEEP the wheel
-        if req.specifier:
-            try:
-                if Version(wheel_version) in req.specifier:
-                    continue
-            except Exception:
-                pass
-
-        # Name matches, and marker is False (or absent), and version not in specifier (or absent)
-        # -> EXCLUDE the wheel
-        return True, f"matches exclude rule: {req}"
-
-    return False, ""
 
 
 def get_platform_patterns() -> list[str]:
@@ -194,8 +129,8 @@ def main() -> int:
     print_color(f"---------- TEST WHEELS INSTALL (Python {python_version}) ----------")
     print(f"Platform: {sys.platform}\n")
 
-    # Load exclude list using YAMLListAdapter
-    exclude_requirements = load_exclude_requirements()
+    # Load exclude list using YAMLListAdapter (exclude=True for runtime filtering)
+    exclude_requirements = YAMLListAdapter(EXCLUDE_LIST_PATH, exclude=True).requirements
     print(f"Loaded {len(exclude_requirements)} exclude requirements from {EXCLUDE_LIST_PATH}\n")
 
     # Find compatible wheels

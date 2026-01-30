@@ -175,12 +175,11 @@ class TestWheelCompatibility(unittest.TestCase):
 
 
 class TestParseWheelName(unittest.TestCase):
-    """Test the parse_wheel_name function from test_wheels_install.py."""
+    """Test the parse_wheel_name function from _helper_functions.py."""
 
     def setUp(self):
         """Import the function to test."""
-        sys.path.insert(0, str(Path(__file__).parent))
-        from test_wheels_install import parse_wheel_name
+        from _helper_functions import parse_wheel_name
 
         self.parse_wheel_name = parse_wheel_name
 
@@ -206,7 +205,7 @@ class TestParseWheelName(unittest.TestCase):
 
 
 class TestShouldExcludeWheel(unittest.TestCase):
-    """Test the should_exclude_wheel function from test_wheels_install.py.
+    """Test the should_exclude_wheel function from _helper_functions.py.
 
     Note: The function expects requirements created with exclude=True from YAMLListAdapter,
     which inverts the logic (e.g., ==1.5.0 becomes !=1.5.0).
@@ -214,8 +213,7 @@ class TestShouldExcludeWheel(unittest.TestCase):
 
     def setUp(self):
         """Import the function to test."""
-        sys.path.insert(0, str(Path(__file__).parent))
-        from test_wheels_install import should_exclude_wheel
+        from _helper_functions import should_exclude_wheel
 
         self.should_exclude_wheel = should_exclude_wheel
 
