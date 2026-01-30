@@ -69,9 +69,9 @@ jobs:
       - name: Verify S3 wheels
         run: python verify_s3_wheels.py ${{ secrets.DL_BUCKET }} ${{ needs.get-supported-versions.outputs.oldest_supported_python }}
 
-  # Test building excluded packages on Linux
+  # Test building excluded packages on Linux x86_64
   test-exclude-linux:
-    name: Test exclude builds - Linux (Python ${{ matrix.python-version }})
+    name: Test exclude builds - Linux x86_64 (Python ${{ matrix.python-version }})
     needs: get-supported-versions
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -99,7 +99,7 @@ jobs:
       - name: Get packages to test
         id: packages
         run: |
-          PACKAGES=$(python extract_exclude_packages.py linux ${{ matrix.python-version }})
+          PACKAGES=$(python extract_exclude_packages.py linux_x86_64 ${{ matrix.python-version }})
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
           echo "Packages to test: $PACKAGES"
 
@@ -182,7 +182,7 @@ jobs:
 
   # Test building excluded packages on Linux ARM64
   test-exclude-linux-arm64:
-    name: Test exclude builds - Linux ARM64 (Python ${{ matrix.python-version }})
+    name: Test exclude builds - Linux arm64 (Python ${{ matrix.python-version }})
     needs: get-supported-versions
     runs-on: ubuntu-24.04-arm
     container: python:${{ matrix.python-version }}-bookworm
@@ -206,7 +206,7 @@ jobs:
       - name: Get packages to test
         id: packages
         run: |
-          PACKAGES=$(python extract_exclude_packages.py linux ${{ matrix.python-version }})
+          PACKAGES=$(python extract_exclude_packages.py linux_arm64 ${{ matrix.python-version }})
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
           echo "Packages to test: $PACKAGES"
 
@@ -216,7 +216,7 @@ jobs:
 
   # Test building excluded packages on Linux ARMv7
   test-exclude-linux-armv7:
-    name: Test exclude builds - Linux ARMv7 (Python ${{ matrix.python-version }})
+    name: Test exclude builds - Linux armv7 (Python ${{ matrix.python-version }})
     needs: get-supported-versions
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -236,8 +236,8 @@ jobs:
       - name: Get packages to test
         id: packages
         run: |
-          pip install pyyaml
-          PACKAGES=$(python extract_exclude_packages.py linux ${{ matrix.python-version }})
+          pip install pyyaml packaging
+          PACKAGES=$(python extract_exclude_packages.py linux_armv7 ${{ matrix.python-version }})
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
           echo "Packages to test: $PACKAGES"
 

@@ -7,6 +7,8 @@
 """Extract excluded packages for a platform/python combination.
 
 Usage: python extract_exclude_packages.py [platform] [python_version]
+
+Platform can be: windows, macos, linux, linux_x86_64, linux_arm64, linux_armv7
 """
 
 import sys
@@ -15,8 +17,7 @@ import yaml
 
 from packaging.specifiers import SpecifierSet
 
-PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
-ALL_PLATFORMS = ["linux", "windows", "macos"]
+from _helper_functions import exclude_entry_applies_to_platform
 
 
 def get_excluded_packages(platform=None, python_version=None):
@@ -27,11 +28,7 @@ def get_excluded_packages(platform=None, python_version=None):
         data = yaml.safe_load(f)
 
     for entry in data:
-        platforms = entry.get("platform", [])
-        platforms = [platforms] if isinstance(platforms, str) else platforms
-        platforms = [PLATFORM_MAP.get(p, p) for p in platforms] or ALL_PLATFORMS
-
-        if platform and platform not in platforms:
+        if platform and not exclude_entry_applies_to_platform(entry, platform):
             continue
 
         pythons = entry.get("python", [])
