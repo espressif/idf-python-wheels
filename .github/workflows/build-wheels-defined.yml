@@ -375,7 +375,6 @@ jobs:
       supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
 
   upload-python-wheels:
-    if: ${{ always() }}
     needs: [test-wheels]
     name: Upload Python wheels
     uses: ./.github/workflows/upload-python-wheels.yml

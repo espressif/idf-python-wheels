@@ -195,3 +195,27 @@ jobs:
           path: ./downloaded_wheels
           overwrite: true
           retention-days: 1
+
+  merge-all-wheels:
+    name: Merge all repaired wheels
+    needs: repair-wheels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all repaired wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-repaired-*
+          path: ./all_wheels
+          merge-multiple: true
+
+      - name: List merged wheels
+        run: |
+          echo "Total merged wheels:"
+          find ./all_wheels -name "*.whl" | wc -l
+
+      - name: Upload merged wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-repaired-all
+          path: ./all_wheels
+          retention-days: 1
