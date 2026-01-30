@@ -111,6 +111,10 @@ jobs:
         if: matrix.os == 'Linux ARM64'
         run: os_dependencies/linux_arm.sh
 
+      - name: Install additional OS dependencies - Windows
+        if: matrix.os == 'Windows'
+        run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:

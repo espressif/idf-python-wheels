@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import platform
 import re
+import sys
 
 from colorama import Fore
 from colorama import Style
@@ -29,6 +30,51 @@ FORCE_SOURCE_BUILD_PACKAGES_LINUX = [
 ]
 
 EXCLUDE_LIST_PATH = "exclude_list.yaml"
+
+# Platform names for exclude_list.yaml (YAML -> runner name)
+PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
+ALL_PLATFORMS = ["linux", "windows", "macos"]
+LINUX_ARCHS = ["linux_x86_64", "linux_arm64", "linux_armv7"]
+MACOS_ARCHS = ["macos_x86_64", "macos_arm64"]
+
+
+def get_current_platform() -> str:
+    """Return current runner platform:
+    windows, macos, linux, linux_x86_64, linux_arm64, linux_armv7, macos_x86_64, macos_arm64
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "linux":
+        if machine in ("x86_64", "amd64"):
+            return "linux_x86_64"
+        if machine == "aarch64":
+            return "linux_arm64"
+        if machine == "armv7l":
+            return "linux_armv7"
+        return "linux"
+    if system == "darwin":
+        if machine in ("x86_64", "amd64"):
+            return "macos_x86_64"
+        if machine == "arm64":
+            return "macos_arm64"
+        return "macos"
+    if system == "windows":
+        return "windows"
+    return sys.platform
+
+
+def exclude_entry_applies_to_platform(entry: dict, current_platform: str) -> bool:
+    """True if this exclude_list entry applies to current_platform (so we should exclude from build)."""
+    platforms = entry.get("platform", [])
+    platforms = [platforms] if isinstance(platforms, str) else platforms
+    platforms = [PLATFORM_MAP.get(p, p) for p in platforms] or ALL_PLATFORMS
+    if current_platform in platforms:
+        return True
+    if current_platform in LINUX_ARCHS and "linux" in platforms:
+        return True
+    if current_platform in MACOS_ARCHS and "macos" in platforms:
+        return True
+    return False
 
 
 def get_no_binary_args(requirement_name: str) -> list:
@@ -211,7 +257,7 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
             continue
 
         # Evaluate python_version markers with wheel's target Python
-        # If marker is False → exclusion doesn't apply → KEEP (continue)
+        # If marker is False -> exclusion doesn't apply -> KEEP (continue)
         if req.marker:
             env = {"python_version": wheel_python} if wheel_python else {}
             if not req.marker.evaluate(environment=env if env else None):

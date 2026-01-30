@@ -20,6 +20,7 @@ from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
 from _helper_functions import print_color
@@ -389,7 +390,9 @@ def main() -> int:
 
     requirements = assemble_requirements(idf_branches, idf_constraints, True)
 
-    exclude_list = YAMLListAdapter("exclude_list.yaml", exclude=True).requirements
+    exclude_list = YAMLListAdapter(
+        "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
+    ).requirements
 
     after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
 
