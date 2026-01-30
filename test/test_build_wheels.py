@@ -174,6 +174,90 @@ class TestWheelCompatibility(unittest.TestCase):
         self.assertTrue(self.is_wheel_compatible("cryptography-41.0.0-cp39-abi3-linux_x86_64.whl", "39"))
 
 
+class TestParseWheelName(unittest.TestCase):
+    """Test the parse_wheel_name function from test_wheels_install.py."""
+
+    def setUp(self):
+        """Import the function to test."""
+        sys.path.insert(0, str(Path(__file__).parent))
+        from test_wheels_install import parse_wheel_name
+
+        self.parse_wheel_name = parse_wheel_name
+
+    def test_parse_simple_wheel(self):
+        """Test parsing a simple wheel name."""
+        result = self.parse_wheel_name("numpy-1.24.0-cp311-cp311-linux_x86_64.whl")
+        self.assertEqual(result, ("numpy", "1.24.0"))
+
+    def test_parse_wheel_with_underscores(self):
+        """Test parsing wheel name with underscores (preserved, canonicalization done later)."""
+        result = self.parse_wheel_name("ruamel_yaml_clib-0.2.8-cp311-cp311-linux_x86_64.whl")
+        self.assertEqual(result, ("ruamel_yaml_clib", "0.2.8"))
+
+    def test_parse_wheel_with_pre_release(self):
+        """Test parsing wheel name with pre-release version."""
+        result = self.parse_wheel_name("package-1.0.0a1-py3-none-any.whl")
+        self.assertEqual(result, ("package", "1.0.0a1"))
+
+    def test_parse_universal_wheel(self):
+        """Test parsing universal wheel name."""
+        result = self.parse_wheel_name("six-1.16.0-py2.py3-none-any.whl")
+        self.assertEqual(result, ("six", "1.16.0"))
+
+
+class TestShouldExcludeWheel(unittest.TestCase):
+    """Test the should_exclude_wheel function from test_wheels_install.py.
+
+    Note: The function expects requirements created with exclude=True from YAMLListAdapter,
+    which inverts the logic (e.g., ==1.5.0 becomes !=1.5.0).
+    """
+
+    def setUp(self):
+        """Import the function to test."""
+        sys.path.insert(0, str(Path(__file__).parent))
+        from test_wheels_install import should_exclude_wheel
+
+        self.should_exclude_wheel = should_exclude_wheel
+
+    def test_exclude_by_package_name_only(self):
+        """Test excluding a package by name only (no inversion needed)."""
+        # Package name only - same for both exclude=True and exclude=False
+        exclude_requirements = {Requirement("esptool")}
+        result, reason = self.should_exclude_wheel("esptool-4.0.0-py3-none-any.whl", exclude_requirements)
+        self.assertTrue(result)
+        self.assertIn("esptool", reason)
+
+    def test_exclude_by_version(self):
+        """Test excluding a package by version constraint (inverted specifier)."""
+        # With exclude=True, ==1.5.0 becomes !=1.5.0
+        # So version 1.5.0 is NOT in !=1.5.0 -> should EXCLUDE
+        # And version 2.0.0 IS in !=1.5.0 -> should KEEP
+        exclude_requirements = {Requirement("gevent!=1.5.0")}
+        # Should exclude 1.5.0 (not in !=1.5.0)
+        result, _ = self.should_exclude_wheel("gevent-1.5.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        self.assertTrue(result)
+        # Should not exclude 2.0.0 (is in !=1.5.0)
+        result, _ = self.should_exclude_wheel("gevent-2.0.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        self.assertFalse(result)
+
+    def test_no_match_returns_false(self):
+        """Test that non-matching packages return False."""
+        exclude_requirements = {Requirement("esptool")}
+        result, _ = self.should_exclude_wheel("numpy-1.24.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        self.assertFalse(result)
+
+    def test_exclude_with_version_range(self):
+        """Test excluding a package with version range (inverted specifier)."""
+        # With exclude=True, ==9.5.0 becomes !=9.5.0
+        exclude_requirements = {Requirement("pillow!=9.5.0")}
+        # Should exclude 9.5.0 (not in !=9.5.0)
+        result, _ = self.should_exclude_wheel("Pillow-9.5.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        self.assertTrue(result)
+        # Should not exclude 10.0.0 (is in !=9.5.0)
+        result, _ = self.should_exclude_wheel("Pillow-10.0.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        self.assertFalse(result)
+
+
 class TestGetUsedIdfBranches(unittest.TestCase):
     """Test the get_used_idf_branches function."""
 

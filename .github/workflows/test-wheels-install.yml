@@ -65,10 +65,10 @@ jobs:
         with:
           platforms: linux/arm/v7
 
-      - name: Download repaired wheels
+      - name: Download all repaired wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-repaired-${{ matrix.arch }}
+          name: wheels-repaired-all
           path: ./downloaded_wheels
 
       - name: Setup Python
@@ -82,6 +82,7 @@ jobs:
         run: |
           python --version
           python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
           python test/test_wheels_install.py
 
       - name: Test wheel installation - ARMv7 (in Docker)
@@ -94,6 +95,7 @@ jobs:
             bash -c "
               python --version
               python -m pip install --upgrade pip
+              pip install -r build_requirements.txt
               python test/test_wheels_install.py
             "
 
@@ -107,5 +109,13 @@ jobs:
             bash -c "
               python --version
               python -m pip install --upgrade pip
+              pip install -r build_requirements.txt
               python test/test_wheels_install.py
             "
+
+      - name: Upload tested wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-tested-${{ matrix.arch }}-${{ matrix.python-version }}
+          path: ./downloaded_wheels/*.whl
+          if-no-files-found: warn
