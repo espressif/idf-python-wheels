@@ -82,37 +82,50 @@ jobs:
           path: ./downloaded_wheels
           merge-multiple: true
 
+      - name: Check for wheels
+        id: check-wheels
+        run: |
+          if [ -d "./downloaded_wheels" ] && [ -n "$(find ./downloaded_wheels -name '*.whl' 2>/dev/null)" ]; then
+            echo "has_wheels=true" >> $GITHUB_OUTPUT
+            echo "Found wheels to repair"
+          else
+            echo "has_wheels=false" >> $GITHUB_OUTPUT
+            echo "No wheels found for ${{ matrix.platform }} - skipping repair"
+          fi
+        shell: bash
+
       - name: Setup Python
+        if: steps.check-wheels.outputs.has_wheels == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Set up QEMU
-        if: matrix.setup_qemu
+        if: matrix.setup_qemu && steps.check-wheels.outputs.has_wheels == 'true'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: ${{ matrix.qemu_platform }}
 
       - name: Install repair tool - Windows
-        if: matrix.tool == 'delvewheel'
+        if: matrix.tool == 'delvewheel' && steps.check-wheels.outputs.has_wheels == 'true'
         run: python -m pip install delvewheel
 
       - name: Install repair tool - macOS
-        if: matrix.tool == 'delocate'
+        if: matrix.tool == 'delocate' && steps.check-wheels.outputs.has_wheels == 'true'
         run: python -m pip install delocate
 
       - name: Install OS dependencies - macOS
-        if: matrix.tool == 'delocate'
+        if: matrix.tool == 'delocate' && steps.check-wheels.outputs.has_wheels == 'true'
         run: bash os_dependencies/macos.sh
 
       - name: Install dependencies and repair - Windows/macOS
-        if: matrix.tool != 'auditwheel'
+        if: matrix.tool != 'auditwheel' && steps.check-wheels.outputs.has_wheels == 'true'
         run: |
           python -m pip install -r build_requirements.txt
           python repair_wheels.py
 
       - name: Repair Linux x86_64 wheels in manylinux container
-        if: matrix.platform == 'Linux x86_64'
+        if: matrix.platform == 'Linux x86_64' && steps.check-wheels.outputs.has_wheels == 'true'
         run: |
           docker run --rm \
             -v $(pwd):/work \
@@ -127,7 +140,7 @@ jobs:
             "
 
       - name: Repair Linux ARM64 wheels in manylinux container
-        if: matrix.platform == 'Linux ARM64'
+        if: matrix.platform == 'Linux ARM64' && steps.check-wheels.outputs.has_wheels == 'true'
         run: |
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
@@ -144,7 +157,7 @@ jobs:
 
       - name: Repair Linux ARMv7 wheels in manylinux container
         # Using --break-system-packages and --ignore-installed to avoid conflicts with system packages
-        if: matrix.platform == 'Linux ARMv7'
+        if: matrix.platform == 'Linux ARMv7' && steps.check-wheels.outputs.has_wheels == 'true'
         run: |
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
@@ -160,7 +173,7 @@ jobs:
 
       - name: Repair Linux ARMv7 Legacy wheels in manylinux container
         # Using --break-system-packages and --ignore-installed to avoid conflicts with system packages
-        if: matrix.platform == 'Linux ARMv7 Legacy'
+        if: matrix.platform == 'Linux ARMv7 Legacy' && steps.check-wheels.outputs.has_wheels == 'true'
         run: |
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
@@ -175,9 +188,34 @@ jobs:
             "
 
       - name: Re-upload artifacts with repaired wheels
+        if: steps.check-wheels.outputs.has_wheels == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
           overwrite: true
+          retention-days: 1
+
+  merge-all-wheels:
+    name: Merge all repaired wheels
+    needs: repair-wheels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all repaired wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-repaired-*
+          path: ./all_wheels
+          merge-multiple: true
+
+      - name: List merged wheels
+        run: |
+          echo "Total merged wheels:"
+          find ./all_wheels -name "*.whl" | wc -l
+
+      - name: Upload merged wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-repaired-all
+          path: ./all_wheels
           retention-days: 1

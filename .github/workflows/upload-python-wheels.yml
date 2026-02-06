@@ -22,10 +22,12 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r build_requirements.txt
 
-      - name: Download artifacts
+      - name: Download tested wheels
         uses: actions/download-artifact@v4
         with:
+          pattern: wheels-tested-*
           path: ./downloaded_wheels
+          merge-multiple: true
 
       - name: Upload release asset to S3 bucket
         run: |

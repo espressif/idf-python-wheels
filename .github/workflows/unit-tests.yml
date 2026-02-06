@@ -1,0 +1,300 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  get-supported-versions:
+    name: Get Supported Versions
+    uses: ./.github/workflows/get-supported-versions.yml
+    secrets: inherit
+
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install packaging pyyaml colorama requests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s test -v
+
+  verify-s3-wheels:
+    name: Verify S3 wheels against exclude list
+    needs: get-supported-versions
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest Python version
+        id: python-version
+        run: |
+          VERSIONS='${{ needs.get-supported-versions.outputs.supported_python }}'
+          LATEST=$(echo "$VERSIONS" | jq -r '.[0]')
+          echo "version=$LATEST" >> $GITHUB_OUTPUT
+
+      - name: Setup Python ${{ steps.python-version.outputs.version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.python-version.outputs.version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Verify S3 wheels
+        run: python verify_s3_wheels.py ${{ secrets.DL_BUCKET }} ${{ needs.get-supported-versions.outputs.oldest_supported_python }}
+
+  # Test building excluded packages on Linux x86_64
+  test-exclude-linux:
+    name: Test exclude builds - Linux x86_64 (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Install OS dependencies
+        run: os_dependencies/ubuntu.sh
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          PACKAGES=$(python extract_exclude_packages.py linux_x86_64 ${{ matrix.python-version }})
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages
+        if: steps.packages.outputs.packages != ''
+        run: python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+
+  # Test building excluded packages on Windows
+  test-exclude-windows:
+    name: Test exclude builds - Windows (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: windows-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          $PACKAGES = python extract_exclude_packages.py windows ${{ matrix.python-version }}
+          echo "packages=$PACKAGES" >> $env:GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages
+        if: steps.packages.outputs.packages != ''
+        run: python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+
+  # Test building excluded packages on macOS
+  test-exclude-macos:
+    name: Test exclude builds - macOS (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: macos-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Install OS dependencies
+        run: os_dependencies/macos.sh
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          PLATFORM=$(python -c "from _helper_functions import get_current_platform; print(get_current_platform())")
+          PACKAGES=$(python extract_exclude_packages.py "$PLATFORM" ${{ matrix.python-version }})
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages
+        if: steps.packages.outputs.packages != ''
+        run: python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+
+  # Test building excluded packages on macOS ARM64 (Apple Silicon)
+  test-exclude-macos-arm64:
+    name: Test exclude builds - macOS arm64 (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: macos-latest-xlarge
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Install OS dependencies
+        run: os_dependencies/macos.sh
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          PACKAGES=$(python extract_exclude_packages.py macos_arm64 ${{ matrix.python-version }})
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages
+        if: steps.packages.outputs.packages != ''
+        run: python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+
+  # Test building excluded packages on Linux ARM64
+  test-exclude-linux-arm64:
+    name: Test exclude builds - Linux arm64 (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: ubuntu-24.04-arm
+    container: python:${{ matrix.python-version }}-bookworm
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Install OS dependencies
+        run: os_dependencies/linux_arm.sh
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          PACKAGES=$(python extract_exclude_packages.py linux_arm64 ${{ matrix.python-version }})
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages
+        if: steps.packages.outputs.packages != ''
+        run: python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+
+  # Test building excluded packages on Linux ARMv7
+  test-exclude-linux-armv7:
+    name: Test exclude builds - Linux armv7 (Python ${{ matrix.python-version }})
+    needs: get-supported-versions
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
+    steps:
+      - name: Set up QEMU for ARMv7
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get packages to test
+        id: packages
+        run: |
+          pip install pyyaml packaging
+          PACKAGES=$(python extract_exclude_packages.py linux_armv7 ${{ matrix.python-version }})
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "Packages to test: $PACKAGES"
+
+      - name: Test building excluded packages (in Docker)
+        if: steps.packages.outputs.packages != ''
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v $(pwd):/work \
+            -w /work \
+            -e PIP_NO_CACHE_DIR=1 \
+            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
+            python:${{ matrix.python-version }}-bookworm \
+            bash -c "
+              set -e
+              python --version
+              python -m pip install --no-cache-dir --upgrade pip
+              python -m pip install --no-cache-dir -r build_requirements.txt
+              bash os_dependencies/linux_arm.sh
+              . \$HOME/.cargo/env 2>/dev/null || true
+              python build_wheels_from_file.py --ci-tests --requirements ${{ steps.packages.outputs.packages }}
+            "

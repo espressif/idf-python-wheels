@@ -213,8 +213,46 @@ jobs:
     name: Repair wheels
     uses: ./.github/workflows/wheels-repair.yml
 
+  # Test that all wheels can be installed on all supported platforms
+  test-wheels:
+    needs: [get-supported-versions, repair-wheels]
+    name: Test wheels installation
+    uses: ./.github/workflows/test-wheels-install.yml
+    with:
+      supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
+
   upload-python-wheels:
-    needs: [repair-wheels]
+    needs: [test-wheels]
     name: Upload Python wheels
     uses: ./.github/workflows/upload-python-wheels.yml
     secrets: inherit
+
+  verify-s3-wheels:
+    needs: [get-supported-versions, upload-python-wheels]
+    name: Verify S3 wheels against exclude list
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get oldest Python version
+        id: python-version
+        run: |
+          echo "version=${{ needs.get-supported-versions.outputs.oldest_supported_python }}" >> $GITHUB_OUTPUT
+
+      - name: Setup Python ${{ steps.python-version.outputs.version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.python-version.outputs.version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r build_requirements.txt
+
+      - name: Verify S3 wheels
+        run: python verify_s3_wheels.py ${{ secrets.DL_BUCKET }} ${{ needs.get-supported-versions.outputs.oldest_supported_python }}

@@ -31,6 +31,11 @@ parser.add_argument(
     nargs="*",
     help="requirement(s) to be build wheel(s) for",
 )
+parser.add_argument(
+    "--ci-tests",
+    action="store_true",
+    help="CI exclude-tests mode: fail if all wheels succeed (expect some to fail, e.g. excluded packages)",
+)
 
 args = parser.parse_args()
 
@@ -83,7 +88,11 @@ if requirements_dir:
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
 
-    if failed_wheels != 0:
+    if args.ci_tests:
+        total = succeeded_wheels + failed_wheels
+        if total > 0 and failed_wheels == 0:
+            raise SystemExit("CI: expected some builds to fail (excluded packages)")
+    elif failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")
 
 # Build wheels from passed requirements
@@ -122,5 +131,9 @@ else:
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
 
-    if failed_wheels != 0:
+    if args.ci_tests:
+        total = succeeded_wheels + failed_wheels
+        if total > 0 and failed_wheels == 0:
+            raise SystemExit("CI: expected some builds to fail (excluded packages)")
+    elif failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")
