@@ -138,7 +138,6 @@ jobs:
             -e PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
-            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
@@ -162,7 +161,6 @@ jobs:
             -e PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
-            -e LDFLAGS="-Wl,-z,max-page-size=0x1000" \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
               set -e

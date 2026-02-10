@@ -15,10 +15,11 @@ $SUDO apt-get install -y -q --no-install-recommends awscli
 
 $SUDO apt-get install -y cmake build-essential
 
-# PyGObject needs build dependecies https://pygobject.readthedocs.io/en/latest/getting_started.html
+# PyGObject needs build dependencies https://pygobject.readthedocs.io/en/latest/getting_started.html
+# Install both dev packages (for building) and runtime libraries (for auditwheel repair)
 $SUDO apt-get install -y libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev gir1.2-gtk-4.0 libglib2.0-dev
-# Try to install girepository-2.0-dev if available (may not exist in older distros)
-$SUDO apt-get install -y libgirepository-2.0-dev
+# Try to install girepository-2.0 packages if available (may not exist in older distros)
+$SUDO apt-get install -y libgirepository-2.0-dev libgirepository-2.0-0 libcairo-gobject2 || true
 
 # dbus-python needs build dependecies
 $SUDO apt-get install -y dbus libdbus-1-dev libdbus-glib-1-dev libdbus-1-3

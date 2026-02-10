@@ -83,7 +83,7 @@ jobs:
           python --version
           python -m pip install --upgrade pip
           pip install -r build_requirements.txt
-          python test/test_wheels_install.py
+          python test_wheels_install.py
 
       - name: Test wheel installation - ARMv7 (in Docker)
         if: matrix.os == 'Linux ARMv7'
@@ -96,7 +96,7 @@ jobs:
               python --version
               python -m pip install --upgrade pip
               pip install -r build_requirements.txt
-              python test/test_wheels_install.py
+              python test_wheels_install.py
             "
 
       - name: Test wheel installation - ARMv7 Legacy (in Docker)
@@ -110,7 +110,7 @@ jobs:
               python --version
               python -m pip install --upgrade pip
               pip install -r build_requirements.txt
-              python test/test_wheels_install.py
+              python test_wheels_install.py
             "
 
       - name: Upload tested wheels

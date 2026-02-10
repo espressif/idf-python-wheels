@@ -29,7 +29,9 @@
 # PyGObject is difficult to build from source on Windows due to MSYS2/pkg-config issues
 - package_name: 'pygobject'
   platform: ['win32']
-
+# PyGObject has issue repairing wheels on Linux due to girepository dependency issues
+- package_name: 'pygobject'
+  platform: ['linux_x86_64', 'linux_arm64']
 # PyGObject has persistent girepository dependency issues on ARMv7
 - package_name: 'pygobject'
   platform: ['linux_armv7']
