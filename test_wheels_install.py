@@ -53,22 +53,35 @@ def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
     Check if a wheel is compatible with the given Python version AND current platform.
 
     Python version compatibility:
-    - cpXY: exact Python version match (e.g., cp311 for Python 3.11)
+    - cpXY-cpXY: exact Python version match (e.g., cp311-cp311 for Python 3.11 only)
+    - cpXY-abi3: stable ABI wheels (compatible with Python >= XY)
     - py3: universal Python 3 wheels
     - py2.py3: universal Python 2/3 wheels
-    - abi3: stable ABI wheels (compatible with Python >= base version)
 
     Platform compatibility:
     - Windows: win32, win_amd64, any
     - macOS: macosx_*, any
     - Linux: manylinux*, linux*, any
     """
-    # Check Python version compatibility
+    current_version = int(python_version)  # e.g., 311 for Python 3.11
+
+    # Check for abi3 wheels first - they have a minimum Python version requirement
+    abi3_match = re.search(r"-cp(\d+)-abi3-", wheel_name)
+    if abi3_match:
+        base_version = int(abi3_match.group(1))  # e.g., 38 or 311 (not 3.8 or 3.11)
+        # abi3 wheels work on Python >= base_version (using these integer tags)
+        if current_version >= base_version:
+            # Check platform compatibility
+            platform_patterns = get_platform_patterns()
+            return any(re.search(pattern, wheel_name) for pattern in platform_patterns)
+        return False
+
+    # Check Python version compatibility for non-abi3 wheels
     python_patterns = [
-        rf"-cp{python_version}-",  # Exact version match
+        rf"-cp{python_version}-cp{python_version}-",  # Exact version match (cpXY-cpXY)
+        rf"-cp{python_version}-",  # Fallback for other cpXY patterns
         r"-py3-",  # Universal Python 3
         r"-py2\.py3-",  # Universal Python 2/3
-        r"-abi3-",  # Stable ABI
     ]
     if not any(re.search(pattern, wheel_name) for pattern in python_patterns):
         return False
@@ -118,9 +131,14 @@ def install_wheel(wheel_path: Path) -> tuple[bool, str]:
     return False, (result.stderr or result.stdout).strip()
 
 
-def is_python_version_error(error_message: str) -> bool:
-    """Check if the error is due to Python version constraints in package metadata."""
-    return "requires a different Python" in error_message
+def is_compatibility_error(error_message: str) -> bool:
+    """Check if the error is due to Python version or platform constraints."""
+    compatibility_errors = [
+        "requires a different Python",
+        "not a supported wheel on this platform",
+        "is not a supported wheel",
+    ]
+    return any(err in error_message for err in compatibility_errors)
 
 
 def main() -> int:
@@ -179,13 +197,13 @@ def main() -> int:
 
         if success:
             installed += 1
-        elif is_python_version_error(error_message):
-            # Wheel is valid but has Python version constraints in metadata
-            # Delete it as it's incompatible with this Python version
+        elif is_compatibility_error(error_message):
+            # Wheel is valid but has Python version or platform constraints
+            # Delete it as it's incompatible with this environment
             deleted += 1
             deleted_wheels.append(wheel_path.name)
             wheel_path.unlink()
-            print_color(f"-- {wheel_path.name} (Python version constraint)", Fore.YELLOW)
+            print_color(f"-- {wheel_path.name} (compatibility constraint)", Fore.YELLOW)
         else:
             failed += 1
             failed_wheels.append((wheel_path.name, error_message))
@@ -202,7 +220,7 @@ def main() -> int:
     if excluded > 0:
         print_color(f"Excluded {excluded} wheels (exclude_list.yaml)", Fore.YELLOW)
     if deleted > 0:
-        print_color(f"Deleted {deleted} wheels (Python version constraint)", Fore.YELLOW)
+        print_color(f"Deleted {deleted} wheels (compatibility constraint)", Fore.YELLOW)
     if failed > 0:
         print_color(f"Failed {failed} wheels", Fore.RED)
 

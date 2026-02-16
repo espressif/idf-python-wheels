@@ -12,7 +12,9 @@ import sys
 from colorama import Fore
 from colorama import Style
 from packaging.requirements import Requirement
+from packaging.utils import InvalidWheelFilename
 from packaging.utils import canonicalize_name
+from packaging.utils import parse_wheel_filename
 from packaging.version import Version
 
 # Packages that should be built from source on Linux to ensure correct library linking
@@ -147,16 +149,17 @@ def parse_wheel_name(wheel_name: str) -> tuple[str, str] | None:
     """
     Parse wheel filename to extract package name and version.
 
-    Wheel format: {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
+    Uses packaging.utils.parse_wheel_filename for PEP 440–compliant parsing
+    (epochs, local versions, post/dev releases, etc.).
 
     Returns:
-        tuple: (package_name, version) or None if parsing fails
+        tuple: (normalized_package_name, version_str) or None if parsing fails
     """
-    pattern = re.compile(r"^([A-Za-z0-9_.-]+)-(\d+(?:\.\d+)*(?:[a-zA-Z0-9.]+)?)-")
-    match = pattern.match(wheel_name)
-    if match:
-        return match.group(1), match.group(2)
-    return None
+    try:
+        name, version, _build, _tags = parse_wheel_filename(wheel_name)
+        return name, str(version)
+    except InvalidWheelFilename:
+        return None
 
 
 def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:
@@ -222,6 +225,43 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
     return None
 
 
+# Wheel platform tag prefix/suffix -> sys_platform for PEP 508 marker evaluation
+_WHEEL_PLATFORM_TO_SYS = (
+    (("win_amd64", "win32"), "win32"),
+    (("manylinux", "linux_"), "linux"),  # manylinux_*, linux_*
+    (("macosx_",), "darwin"),
+)
+
+
+def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
+    """
+    Derive sys_platform value(s) from the wheel filename for marker evaluation.
+
+    Uses the wheel's platform tag(s) from parse_wheel_filename. For universal
+    wheels (platform tag "any"), returns all three so platform-specific
+    exclusions can be checked against every platform the wheel targets.
+
+    Returns:
+        List of sys_platform values ("win32", "linux", "darwin"), or None
+        if the filename cannot be parsed.
+    """
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        return None
+    platforms: set[str] = set()
+    for tag in tags:
+        pt = tag.platform
+        if pt == "any":
+            platforms.update(("linux", "win32", "darwin"))
+            continue
+        for prefixes, sys_plat in _WHEEL_PLATFORM_TO_SYS:
+            if any(pt.startswith(p) for p in prefixes):
+                platforms.add(sys_plat)
+                break
+    return list(platforms) if platforms else None
+
+
 def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:
     """
     Check if a wheel should be excluded for S3 verification.
@@ -231,7 +271,10 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
     - If marker is False → exclusion doesn't apply → KEEP
     - If version matches specifier → EXCLUDE
 
-    Skips sys_platform markers (can't evaluate cross-platform).
+    Derives the wheel's target platform from its filename (e.g. win_amd64
+    -> win32, manylinux_* -> linux) and evaluates sys_platform markers
+    against that instead of skipping them, so platform-only exclusions
+    in exclude_list.yaml are reported as S3 violations when applicable.
 
     Args:
         wheel_name: The wheel filename
@@ -247,21 +290,30 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
     pkg_name, wheel_version = parsed
     canonical_name = canonicalize_name(pkg_name)
     wheel_python = get_wheel_python_version(wheel_name)
+    wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
 
     for req in exclude_requirements:
         if canonicalize_name(req.name) != canonical_name:
             continue
 
-        # Skip rules with sys_platform - can't evaluate cross-platform
-        if req.marker and "sys_platform" in str(req.marker):
-            continue
-
-        # Evaluate python_version markers with wheel's target Python
-        # If marker is False -> exclusion doesn't apply -> KEEP (continue)
+        # Evaluate markers (including sys_platform) using wheel's target platform and Python
         if req.marker:
-            env = {"python_version": wheel_python} if wheel_python else {}
-            if not req.marker.evaluate(environment=env if env else None):
-                continue  # Exclusion condition not met → keep
+            if "sys_platform" in str(req.marker):
+                if not wheel_sys_platforms:
+                    continue  # Cannot derive platform from filename → skip rule
+                env_base = {"python_version": wheel_python} if wheel_python else {}
+                marker_matches = False
+                for sys_plat in wheel_sys_platforms:
+                    env = {**env_base, "sys_platform": sys_plat}
+                    if req.marker.evaluate(environment=env):
+                        marker_matches = True
+                        break
+                if not marker_matches:
+                    continue  # Exclusion condition not met for this wheel's platform(s)
+            else:
+                env = {"python_version": wheel_python} if wheel_python else {}
+                if not req.marker.evaluate(environment=env if env else None):
+                    continue  # Exclusion condition not met → keep
 
         # If we get here, marker is True (or no marker)
         # Check version specifier - if version matches, EXCLUDE

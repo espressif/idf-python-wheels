@@ -143,6 +143,17 @@ class TestYAMLListAdapterIntegration(unittest.TestCase):
             self.skipTest("exclude_list.yaml not found")
 
 
+def _current_platform_wheel_tag():
+    """Return a wheel platform tag matching the current OS for is_wheel_compatible tests."""
+    if sys.platform == "win32":
+        return "win_amd64"
+    if sys.platform == "darwin":
+        return "macosx_11_0_arm64"
+    if sys.platform == "linux":
+        return "manylinux_2_17_x86_64"
+    return "any"
+
+
 class TestWheelCompatibility(unittest.TestCase):
     """Test the is_wheel_compatible function from test_wheels_install.py."""
 
@@ -155,8 +166,9 @@ class TestWheelCompatibility(unittest.TestCase):
 
     def test_exact_python_version_match(self):
         """Test that cpXY wheels match the exact Python version."""
-        self.assertTrue(self.is_wheel_compatible("numpy-1.0.0-cp311-cp311-linux_x86_64.whl", "311"))
-        self.assertFalse(self.is_wheel_compatible("numpy-1.0.0-cp310-cp310-linux_x86_64.whl", "311"))
+        tag = _current_platform_wheel_tag()
+        self.assertTrue(self.is_wheel_compatible(f"numpy-1.0.0-cp311-cp311-{tag}.whl", "311"))
+        self.assertFalse(self.is_wheel_compatible(f"numpy-1.0.0-cp310-cp310-{tag}.whl", "311"))
 
     def test_universal_py3_wheel(self):
         """Test that py3 wheels are compatible with any Python 3."""
@@ -170,8 +182,9 @@ class TestWheelCompatibility(unittest.TestCase):
 
     def test_abi3_wheel(self):
         """Test that abi3 wheels are compatible."""
-        self.assertTrue(self.is_wheel_compatible("cryptography-41.0.0-cp39-abi3-linux_x86_64.whl", "311"))
-        self.assertTrue(self.is_wheel_compatible("cryptography-41.0.0-cp39-abi3-linux_x86_64.whl", "39"))
+        tag = _current_platform_wheel_tag()
+        self.assertTrue(self.is_wheel_compatible(f"cryptography-41.0.0-cp39-abi3-{tag}.whl", "311"))
+        self.assertTrue(self.is_wheel_compatible(f"cryptography-41.0.0-cp39-abi3-{tag}.whl", "39"))
 
 
 class TestParseWheelName(unittest.TestCase):
@@ -189,9 +202,9 @@ class TestParseWheelName(unittest.TestCase):
         self.assertEqual(result, ("numpy", "1.24.0"))
 
     def test_parse_wheel_with_underscores(self):
-        """Test parsing wheel name with underscores (preserved, canonicalization done later)."""
+        """Test parsing wheel name with underscores (name is normalized to canonical form)."""
         result = self.parse_wheel_name("ruamel_yaml_clib-0.2.8-cp311-cp311-linux_x86_64.whl")
-        self.assertEqual(result, ("ruamel_yaml_clib", "0.2.8"))
+        self.assertEqual(result, ("ruamel-yaml-clib", "0.2.8"))
 
     def test_parse_wheel_with_pre_release(self):
         """Test parsing wheel name with pre-release version."""
@@ -202,6 +215,16 @@ class TestParseWheelName(unittest.TestCase):
         """Test parsing universal wheel name."""
         result = self.parse_wheel_name("six-1.16.0-py2.py3-none-any.whl")
         self.assertEqual(result, ("six", "1.16.0"))
+
+    def test_parse_wheel_pep440_epoch(self):
+        """Test parsing wheel with PEP 440 epoch (e.g. 1!1.0)."""
+        result = self.parse_wheel_name("pkg-1!1.0-py3-none-any.whl")
+        self.assertEqual(result, ("pkg", "1!1.0"))
+
+    def test_parse_wheel_pep440_local_version(self):
+        """Test parsing wheel with PEP 440 local version (e.g. 1.0+cpu)."""
+        result = self.parse_wheel_name("pkg-1.0+cpu-py3-none-any.whl")
+        self.assertEqual(result, ("pkg", "1.0+cpu"))
 
 
 class TestShouldExcludeWheel(unittest.TestCase):

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 
-from typing import List
 from typing import Optional
 from typing import Set
 
@@ -179,13 +178,13 @@ class YAMLListAdapter:
             # get attributes of the package if defined to reduce unnecessary complexity
             package_version = package["version"] if "version" in package else ""
             raw_platform = package["platform"] if "platform" in package else ""
-            # Normalize to list and map linux_armv7/arm64/x86_64 to "linux" for pip markers
-            package_platform: List[str]
-            if raw_platform:
-                plfs = [raw_platform] if isinstance(raw_platform, str) else raw_platform
-                package_platform = list(dict.fromkeys(_platform_for_marker(p) for p in plfs))
+            # Map linux_armv7/arm64/x86_64 to "linux" for pip markers, preserving str | list[str]
+            if isinstance(raw_platform, str) and raw_platform:
+                package_platform = _platform_for_marker(raw_platform)
+            elif isinstance(raw_platform, list) and raw_platform:
+                package_platform = list(dict.fromkeys(_platform_for_marker(p) for p in raw_platform))
             else:
-                package_platform = []
+                package_platform = ""
             package_python = package["python"] if "python" in package else ""
 
             requirement_str_list = [f"{package['package_name']}"]

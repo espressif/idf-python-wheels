@@ -48,30 +48,44 @@ print(f"Found {len(existing_wheels)} existing wheels on S3\n")
 
 print_color("---------- UPLOADING WHEELS ----------")
 
-wheels_subdirs = os.listdir(WHEELS_DIR)
+
+def collect_wheel_paths():
+    """Collect (full_path, wheel_filename) for all .whl files in WHEELS_DIR.
+    Handles both flat layout (wheels directly in dir) and nested (wheels in subdirs).
+    """
+    collected = []
+    for item in os.listdir(WHEELS_DIR):
+        path = os.path.join(WHEELS_DIR, item)
+        if os.path.isfile(path) and item.endswith(".whl"):
+            collected.append((path, item))
+        elif os.path.isdir(path):
+            for wheel in os.listdir(path):
+                if wheel.endswith(".whl"):
+                    collected.append((os.path.join(path, wheel), wheel))
+    return collected
+
+
+wheel_paths = collect_wheel_paths()
 new_wheels = 0
 existing_count = 0
 
-for subdir in wheels_subdirs:
-    wheel_files = os.listdir(f"{WHEELS_DIR}{os.sep}{subdir}")
+for full_path, wheel in wheel_paths:
+    pattern = re.compile(r"^(.+?)-(\d+)")
+    match = pattern.search(wheel)
+    if match:
+        wheel_name = match.group(1)
+        wheel_name = normalize(wheel_name)
 
-    for wheel in wheel_files:
-        pattern = re.compile(r"^(.+?)-(\d+)")
-        match = pattern.search(wheel)
-        if match:
-            wheel_name = match.group(1)
-            wheel_name = normalize(wheel_name)
+        is_new = f"pypi/{wheel_name}/{wheel}" not in existing_wheels
 
-            is_new = f"pypi/{wheel_name}/{wheel}" not in existing_wheels
+        BUCKET.upload_file(full_path, f"pypi/{wheel_name}/{wheel}")
 
-            BUCKET.upload_file(f"{WHEELS_DIR}{os.sep}{subdir}{os.sep}{wheel}", f"pypi/{wheel_name}/{wheel}")
-
-            if is_new:
-                new_wheels += 1
-                print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
-            else:
-                existing_count += 1
-                print(f"   {wheel_name}/{wheel}")
+        if is_new:
+            new_wheels += 1
+            print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
+        else:
+            existing_count += 1
+            print(f"   {wheel_name}/{wheel}")
 
 print_color("---------- END UPLOADING ----------")
 

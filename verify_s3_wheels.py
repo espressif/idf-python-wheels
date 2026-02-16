@@ -9,6 +9,8 @@ Checks all wheels on S3, extracting Python version from wheel filename
 to evaluate python_version markers correctly.
 """
 
+from __future__ import annotations
+
 import re
 import sys
 
@@ -26,7 +28,11 @@ from yaml_list_adapter import YAMLListAdapter
 def is_unsupported_python(wheel_name: str, oldest_supported: str) -> tuple[bool, str]:
     """Check if wheel is for Python 2 or older than oldest_supported_python."""
     # Check for Python 2 only wheels (not py2.py3 which supports Python 3)
-    if re.search(r"-cp2\d-|-py2-|-py2\.", wheel_name) and "-py2.py3-" not in wheel_name:
+    if (
+        re.search(r"-cp2\d-|-py2-|-py2\.", wheel_name)
+        and "-py2.py3-" not in wheel_name
+        and "-py2.py3." not in wheel_name
+    ):
         return True, "Python 2 wheel"
 
     # Get wheel's Python version

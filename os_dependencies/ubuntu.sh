@@ -14,7 +14,7 @@ sudo apt install -y \
     python3-dev \
     gir1.2-gtk-4.0
 
-# dbus-python needs build dependecies
+# dbus-python needs build dependencies
 sudo apt-get install cmake build-essential libdbus-1-dev libdbus-glib-1-dev -y
 
 # Pillow needs comprehensive image processing libraries
