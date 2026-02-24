@@ -85,7 +85,7 @@ for full_path, wheel in wheel_paths:
             print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
         else:
             existing_count += 1
-            print(f"   {wheel_name}/{wheel}")
+            print(f"  <- {wheel_name}/{wheel}")
 
 print_color("---------- END UPLOADING ----------")
 
