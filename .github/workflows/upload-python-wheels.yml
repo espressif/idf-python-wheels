@@ -2,10 +2,22 @@ name: upload-python-wheels
 
 on:
   workflow_call:
+    inputs:
+      supported_python_versions:
+        description: 'JSON array of supported Python versions'
+        required: true
+        type: string
 
 jobs:
+  test-wheels:
+    name: Test wheels installation
+    uses: ./.github/workflows/test-wheels-install.yml
+    with:
+      supported_python_versions: ${{ inputs.supported_python_versions }}
+
   triage:
     name: Upload Python wheels
+    needs: [test-wheels]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
