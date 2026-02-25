@@ -111,7 +111,7 @@ jobs:
 
       - name: Install additional OS dependencies - Linux ARM64
         if: matrix.os == 'Linux ARM64'
-        run: os_dependencies/linux_arm.sh
+        run: sudo bash os_dependencies/linux_arm.sh
 
       - name: Install additional OS dependencies - Windows
         if: matrix.os == 'Windows'

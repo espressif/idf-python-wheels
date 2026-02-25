@@ -297,7 +297,7 @@ jobs:
         run: python -m pip install -r build_requirements.txt
 
       - name: Install additional OS dependencies - Linux ARM
-        run: os_dependencies/linux_arm.sh
+        run: sudo bash os_dependencies/linux_arm.sh
 
       - name: Build wheels
         run: |
