@@ -21,7 +21,7 @@ apt-get install -y gir1.2-gtk-4.0 || true
 # Try to install girepository-2.0 packages if available (may not exist in older distros)
 apt-get install -y libgirepository-2.0-dev libgirepository-2.0-0 libcairo-gobject2 || true
 
-# dbus-python needs build dependecies
+# dbus-python needs build dependencies
 apt-get install -y dbus libdbus-1-dev libdbus-glib-1-dev libdbus-1-3
 apt-get install -y --no-install-recommends dbus-tests
 
