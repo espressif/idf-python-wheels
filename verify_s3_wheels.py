@@ -24,6 +24,14 @@ from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel_s3
 from yaml_list_adapter import YAMLListAdapter
 
+# Temporary: regex patterns for violations to ignore (wheel name is matched)
+VIOLATION_EXCLUSION_REGEXES = [
+    # re.compile(r"example-.*\.whl"),
+    re.compile(r"cryptography-.*-cp38-.*\.whl"),  # Can be removed after dropping Python 3.8
+    re.compile(r"gevent-.*-cp39-.*-win_amd64.whl"),  # Can be removed after dropping Python 3.9
+    re.compile(r"gevent-.*-cp310-.*-win_amd64.whl"),  # Can be removed after dropping Python 3.10
+]
+
 
 def is_unsupported_python(wheel_name: str, oldest_supported: str) -> tuple[bool, str]:
     """Check if wheel is for Python 2 or older than oldest_supported_python."""
@@ -97,6 +105,8 @@ def main():
         # Check against exclude_list (actual violations)
         should_exclude, reason = should_exclude_wheel_s3(wheel, exclude_requirements)
         if should_exclude:
+            if any(rx.search(wheel) for rx in VIOLATION_EXCLUSION_REGEXES):
+                continue
             violations.append((wheel, reason))
             print_color(f"-- {wheel}", Fore.RED)
             print(f"   {reason}")
