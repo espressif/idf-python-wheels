@@ -4,8 +4,20 @@
 # Update package manager
 yum update -y
 
-# PyGObject needs build dependencies
-yum install -y cairo-devel pkg-config gobject-introspection-devel
+# PyGObject needs build dependencies and runtime libraries (for auditwheel repair)
+yum install -y \
+    cairo-devel \
+    cairo-gobject \
+    cairo-gobject-devel \
+    pkg-config \
+    gobject-introspection \
+    gobject-introspection-devel \
+    glib2-devel
+
+# Try to install girepository 2.0 packages (may not exist in older manylinux images)
+# libgirepository-2.0.so.0 is provided by different packages depending on the distro version
+yum install -y girepository2 girepository2-devel || true
+yum install -y libgirepository || true
 
 # dbus-python needs build dependencies
 yum install -y cmake dbus-devel dbus-glib-devel

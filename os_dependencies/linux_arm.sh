@@ -1,25 +1,32 @@
 #!/bin/bash
+# Expects to run as root (workflow uses 'sudo bash' on the runner; Docker runs as root).
 
+set -e
 arch=$(uname -m)
 
-sudo apt-get update
+apt-get update
 
-# AWS
-sudo apt-get install -y -q --no-install-recommends awscli
+# AWS CLI (apt package not available on Ubuntu 24.04 ARM64; fall back to pip)
+apt-get install -y -q --no-install-recommends awscli || \
+    python3 -m pip install --break-system-packages awscli 2>/dev/null || \
+    python3 -m pip install awscli 2>/dev/null || true
 
-sudo apt-get install -y cmake build-essential
+apt-get install -y cmake build-essential
 
-# PyGObject needs build dependecies https://pygobject.readthedocs.io/en/latest/getting_started.html
-sudo apt-get install -y libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev gir1.2-gtk-4.0 libglib2.0-dev
-# Try to install girepository-2.0-dev if available (may not exist in older distros)
-sudo apt-get install -y libgirepository-2.0-dev
+# PyGObject needs build dependencies https://pygobject.readthedocs.io/en/latest/getting_started.html
+# Install both dev packages (for building) and runtime libraries (for auditwheel repair)
+apt-get install -y libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev libglib2.0-dev
+# gir1.2-gtk-4.0 not available on all distros/architectures (e.g. Debian armhf)
+apt-get install -y gir1.2-gtk-4.0 || true
+# Try to install girepository-2.0 packages if available (may not exist in older distros)
+apt-get install -y libgirepository-2.0-dev libgirepository-2.0-0 libcairo-gobject2 || true
 
 # dbus-python needs build dependecies
-sudo apt-get install -y dbus libdbus-1-dev libdbus-glib-1-dev libdbus-1-3
-sudo apt-get install -y --no-install-recommends dbus-tests
+apt-get install -y dbus libdbus-1-dev libdbus-glib-1-dev libdbus-1-3
+apt-get install -y --no-install-recommends dbus-tests
 
 # Pillow needs comprehensive image processing libraries
-sudo apt-get install -y \
+apt-get install -y \
     libjpeg-dev \
     libpng-dev \
     libtiff5-dev \
@@ -45,37 +52,39 @@ fi
 #Only ARMv7
 if [ "$arch" == "armv7l" ]; then
     # pip cache permissions to avoid warnings
-    sudo mkdir -p /github/home/.cache/pip || true
-    sudo chown -R $USER:$USER /github/home/.cache/pip || true
+    mkdir -p /github/home/.cache/pip || true
+    chown -R $USER:$USER /github/home/.cache/pip || true
 
     # ARMv7 specific packages (not already installed globally)
-    sudo apt-get install -y gobject-introspection
+    apt-get install -y gobject-introspection
 
-    # Install additional GObject introspection packages if available
-    sudo apt-get install -y gobject-introspection-dev
+    # Optional GObject introspection extras: names vary by distro (e.g. gobject-introspection-dev
+    # is Ubuntu; Debian uses libgirepository1.0-dev only, already installed above). Install when
+    # available so we don't fail on Debian (Docker) where these packages do not exist.
+    apt-get install -y gobject-introspection-dev 2>/dev/null || true
+    apt-get install -y libgirepository-dev 2>/dev/null || true
+    apt-get install -y gobject-introspection-1.0-dev 2>/dev/null || true
 
     # Install GIR (GObject Introspection Repository) packages that might provide girepository-2.0
-    sudo apt-get install -y gir1.2-glib-2.0 gir1.2-gtk-3.0
+    # May not be available on all Debian/ARMv7 images
+    apt-get install -y gir1.2-glib-2.0 gir1.2-gtk-3.0 || true
 
-    # Try alternative package names for girepository-2.0 that might exist in newer repos
-    sudo apt-get install -y libgirepository-dev
-    sudo apt-get install -y gobject-introspection-1.0-dev
-
-
-    # Additional dbus packages for ARMv7
-    sudo apt-get install -y --reinstall dbus-1-dev dbus-1-doc libdbus-1-dev pkg-config
+    # Additional dbus packages for ARMv7 (Debian uses libdbus-1-dev, not dbus-1-dev/dbus-1-doc)
+    apt-get install -y --reinstall libdbus-1-dev pkg-config || true
+    apt-get install -y dbus-1-dev dbus-1-doc 2>/dev/null || true
 
     # Try to install additional dbus development packages
-    sudo apt-get install -y libdbus-glib-1-dev
+    apt-get install -y libdbus-glib-1-dev || true
 
     # Force update pkg-config cache
-    sudo ldconfig
+    ldconfig
 
     # cryptography needs Rust
     # clean the container Rust installation to be sure right interpreter is used
-    sudo apt remove --auto-remove --purge rust-gdb rustc libstd-rust-dev libstd-rust-1.48
+    # Package names/versions vary by image (e.g. libstd-rust-1.48 may not exist)
+    apt remove --auto-remove --purge rust-gdb rustc libstd-rust-dev libstd-rust-1.48 2>/dev/null || true
     # install Rust dependencies
-    sudo apt-get install -y libssl-dev libffi-dev gcc musl-dev
+    apt-get install -y libssl-dev libffi-dev gcc musl-dev
     # install Rust
     curl --proto '=https' --tlsv1.3 -sSf https://sh.rustup.rs | bash -s -- -y
     . $HOME/.cargo/env

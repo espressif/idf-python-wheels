@@ -145,5 +145,7 @@ The main file is `build-wheels-platforms.yml` which is scheduled to run periodic
 Docker files are in its own repository where there are build and published from. https://github.com/espressif/github-esp-dockerfiles
 - ARMv7 runner - [manylinux_armv7](https://github.com/espressif/github-esp-dockerfiles/pkgs/container/github-esp-dockerfiles%2Fidf-python-wheels-armv7l)
 - ARMv7 runner (older OSes) - [manylinux_armv7_legacy](https://github.com/espressif/github-esp-dockerfiles/pkgs/container/github-esp-dockerfiles%2Fidf-python-wheels-armv7l-legacy)
+    - For older ARMv7 operating systems
+    - For packages requiring glibc 2.31
 
 [ESP-IDF]: https://github.com/espressif/esp-idf

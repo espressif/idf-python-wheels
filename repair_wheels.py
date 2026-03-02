@@ -141,8 +141,9 @@ def main() -> None:
     wheels: list[Path] = list(wheels_dir.rglob("*.whl"))
 
     if not wheels:
-        print_color(f"No wheels found in {wheels_dir}", Fore.RED)
-        raise SystemExit("No wheels found in downloaded_wheels directory")
+        print_color(f"No wheels found in {wheels_dir} - nothing to repair", Fore.YELLOW)
+        print("Exiting successfully (no wheels to process)")
+        return
 
     print_color(f"Found {len(wheels)} wheels\n")
 
