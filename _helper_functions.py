@@ -262,7 +262,11 @@ def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
     return list(platforms) if platforms else None
 
 
-def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:
+def should_exclude_wheel_s3(
+    wheel_name: str,
+    exclude_requirements: set,
+    supported_python_versions: list[str] | None = None,
+) -> tuple[bool, str]:
     """
     Check if a wheel should be excluded for S3 verification.
 
@@ -276,9 +280,16 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
     against that instead of skipping them, so platform-only exclusions
     in exclude_list.yaml are reported as S3 violations when applicable.
 
+    For universal wheels (no cpXY tag, e.g. py3-none-any), python_version
+    markers are evaluated against supported_python_versions when provided,
+    so exclusions that apply only to older supported versions are not missed.
+
     Args:
         wheel_name: The wheel filename
         exclude_requirements: Set of Requirement objects from YAMLListAdapter (exclude=False)
+        supported_python_versions: When the wheel has no cpXY tag, evaluate
+            python_version markers against these versions (e.g. ["3.8", "3.9", "3.10", ...]).
+            If None, falls back to the runner's Python (may miss version-specific exclusions).
 
     Returns:
         tuple: (should_exclude: bool, reason: str)
@@ -292,6 +303,15 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
     wheel_python = get_wheel_python_version(wheel_name)
     wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
 
+    # For universal wheels (no cpXY), evaluate python_version against these if provided
+    python_versions_to_try: list[str | None] = []
+    if wheel_python is not None:
+        python_versions_to_try.append(wheel_python)
+    elif supported_python_versions:
+        python_versions_to_try.extend(supported_python_versions)
+    else:
+        python_versions_to_try.append(None)
+
     for req in exclude_requirements:
         if canonicalize_name(req.name) != canonical_name:
             continue
@@ -301,18 +321,27 @@ def should_exclude_wheel_s3(wheel_name: str, exclude_requirements: set) -> tuple
             if "sys_platform" in str(req.marker):
                 if not wheel_sys_platforms:
                     continue  # Cannot derive platform from filename → skip rule
-                env_base = {"python_version": wheel_python} if wheel_python else {}
                 marker_matches = False
                 for sys_plat in wheel_sys_platforms:
-                    env = {**env_base, "sys_platform": sys_plat}
-                    if req.marker.evaluate(environment=env):
-                        marker_matches = True
+                    for pv in python_versions_to_try:
+                        env = {"sys_platform": sys_plat}
+                        if pv is not None:
+                            env["python_version"] = pv
+                        if req.marker.evaluate(environment=env):
+                            marker_matches = True
+                            break
+                    if marker_matches:
                         break
                 if not marker_matches:
                     continue  # Exclusion condition not met for this wheel's platform(s)
             else:
-                env = {"python_version": wheel_python} if wheel_python else {}
-                if not req.marker.evaluate(environment=env if env else None):
+                marker_matches = False
+                for pv in python_versions_to_try:
+                    env = {"python_version": pv} if pv is not None else {}
+                    if req.marker.evaluate(environment=env if env else None):
+                        marker_matches = True
+                        break
+                if not marker_matches:
                     continue  # Exclusion condition not met → keep
 
         # If we get here, marker is True (or no marker)

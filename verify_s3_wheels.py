@@ -11,6 +11,7 @@ to evaluate python_version markers correctly.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 
@@ -20,6 +21,7 @@ from colorama import Fore
 
 from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import get_wheel_python_version
+from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel_s3
 from yaml_list_adapter import YAMLListAdapter
@@ -30,7 +32,19 @@ VIOLATION_EXCLUSION_REGEXES = [
     re.compile(r"cryptography-.*-cp38-.*\.whl"),  # Can be removed after dropping Python 3.8
     re.compile(r"gevent-.*-cp39-.*-win_amd64.whl"),  # Can be removed after dropping Python 3.9
     re.compile(r"gevent-.*-cp310-.*-win_amd64.whl"),  # Can be removed after dropping Python 3.10
+    re.compile(r"gdbgui-0.13.2.0-py3-none-any.whl"),  # Maybe not uploaded by the CI, so keep it for now
 ]
+
+
+def get_supported_python_versions(supported_python_json: str) -> list[str]:
+    """Parse supported_python from get-supported-versions output (jq -c .supported_python)."""
+    try:
+        versions = json.loads(supported_python_json.strip())
+        if isinstance(versions, list) and all(isinstance(v, str) for v in versions):
+            return versions
+    except json.JSONDecodeError:
+        pass
+    raise SystemExit("Invalid supported_python (3rd argument): expected JSON array from get-supported-versions output.")
 
 
 def is_unsupported_python(wheel_name: str, oldest_supported: str) -> tuple[bool, str]:
@@ -63,14 +77,21 @@ def is_unsupported_python(wheel_name: str, oldest_supported: str) -> tuple[bool,
 
 
 def main():
-    if len(sys.argv) < 3:
-        raise SystemExit("Usage: verify_s3_wheels.py <bucket_name> <oldest_supported_python>")
+    if len(sys.argv) < 4:
+        raise SystemExit(
+            "Usage: verify_s3_wheels.py <bucket_name> <oldest_supported_python> <supported_python_json>\n"
+            "  supported_python_json: output from get-supported-versions (jq -c .supported_python)"
+        )
 
     bucket_name = sys.argv[1]
     oldest_supported_python = sys.argv[2]
+    supported_python_json = sys.argv[3]
 
     print_color("---------- VERIFY S3 WHEELS AGAINST EXCLUDE LIST ----------")
     print(f"Oldest supported Python: {oldest_supported_python}\n")
+
+    supported_python_versions = get_supported_python_versions(supported_python_json)
+    print(f"Supported Python versions (for universal wheels): {supported_python_versions}\n")
 
     # Connect to S3
     s3 = boto3.resource("s3")
@@ -103,7 +124,9 @@ def main():
             continue
 
         # Check against exclude_list (actual violations)
-        should_exclude, reason = should_exclude_wheel_s3(wheel, exclude_requirements)
+        should_exclude, reason = should_exclude_wheel_s3(
+            wheel, exclude_requirements, supported_python_versions=supported_python_versions
+        )
         if should_exclude:
             if any(rx.search(wheel) for rx in VIOLATION_EXCLUSION_REGEXES):
                 continue
@@ -120,9 +143,11 @@ def main():
         print_color(f"Old Python wheels: {len(old_python_wheels)} (warning only)", Fore.YELLOW)
     if violations:
         print_color(f"Violations: {len(violations)}", Fore.RED)
-        print_color("\nWheels that should be deleted:", Fore.RED)
+        print_color("\nWheel paths that should be deleted:", Fore.RED)
         for wheel, _ in violations:
-            print(f"  - {wheel}")
+            parsed = parse_wheel_name(wheel)
+            pkg = parsed[0] if parsed else wheel.replace(".whl", "")
+            print(f'"/pypi/{pkg}/{wheel}"')
         print_color("---------- END STATISTICS ----------")
         return 1
     else:
