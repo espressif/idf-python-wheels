@@ -78,7 +78,7 @@ for full_path, wheel in wheel_paths:
 
         is_new = f"pypi/{wheel_name}/{wheel}" not in existing_wheels
 
-        BUCKET.upload_file(full_path, f"pypi/{wheel_name}/{wheel}")
+        BUCKET.upload_file(full_path, f"pypi/{wheel_name}/{wheel}", ExtraArgs={"ACL": "public-read"})
 
         if is_new:
             new_wheels += 1

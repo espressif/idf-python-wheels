@@ -101,3 +101,13 @@ for name, filenames in packages_new.items():
         f"pypi/{name}/index.html",
         ExtraArgs={"ACL": "public-read", "ContentType": "text/html"},
     )
+
+# Clean up stale per-package index pages for packages removed from the main index
+for name in packages:
+    if name not in packages_new:
+        s3.upload_fileobj(
+            BytesIO("\n".join([HTML_HEADER, HTML_FOOTER]).encode("utf-8")),
+            DL_BUCKET,
+            f"pypi/{name}/index.html",
+            ExtraArgs={"ACL": "public-read", "ContentType": "text/html"},
+        )
