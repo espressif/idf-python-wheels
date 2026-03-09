@@ -17,7 +17,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from packaging.requirements import Requirement
 
 from _helper_functions import get_no_binary_args
+from _helper_functions import get_wheel_runner_platform
+from _helper_functions import get_wheel_sys_platforms
 from _helper_functions import merge_requirements
+from _helper_functions import should_exclude_wheel_s3
 from build_wheels import _add_into_requirements
 from build_wheels import get_used_idf_branches
 from yaml_list_adapter import YAMLListAdapter
@@ -277,6 +280,67 @@ class TestShouldExcludeWheel(unittest.TestCase):
         # Should not exclude 10.0.0 (is in !=9.5.0)
         result, _ = self.should_exclude_wheel("Pillow-10.0.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
         self.assertFalse(result)
+
+
+class TestGetWheelSysPlatforms(unittest.TestCase):
+    """Test get_wheel_sys_platforms includes arch-specific value for marker matching."""
+
+    def test_linux_armv7_wheel_includes_linux_armv7(self):
+        platforms = get_wheel_sys_platforms("PyYAML-6.0.3-cp38-cp38-manylinux2014_armv7l.manylinux_2_17_armv7l.whl")
+        self.assertIn("linux_armv7", platforms)
+        self.assertIn("linux", platforms)
+
+    def test_linux_x86_64_wheel_includes_linux_x86_64(self):
+        platforms = get_wheel_sys_platforms("PyYAML-6.0.3-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl")
+        self.assertIn("linux_x86_64", platforms)
+        self.assertIn("linux", platforms)
+
+
+class TestGetWheelRunnerPlatform(unittest.TestCase):
+    """Test get_wheel_runner_platform for runner-style platform from wheel name."""
+
+    def test_linux_armv7(self):
+        self.assertEqual(
+            get_wheel_runner_platform("PyYAML-6.0.3-cp38-cp38-manylinux2014_armv7l.manylinux_2_17_armv7l.whl"),
+            "linux_armv7",
+        )
+
+    def test_linux_x86_64(self):
+        self.assertEqual(
+            get_wheel_runner_platform(
+                "PyYAML-6.0.3-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+            ),
+            "linux_x86_64",
+        )
+
+    def test_linux_aarch64(self):
+        self.assertEqual(
+            get_wheel_runner_platform("PyYAML-6.0.3-cp38-cp38-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"),
+            "linux_arm64",
+        )
+
+
+class TestShouldExcludeWheelS3(unittest.TestCase):
+    """Test should_exclude_wheel_s3 with arch-specific marker (preserve_arch_in_markers)."""
+
+    def test_arch_specific_marker_matches_only_that_arch(self):
+        # Requirement with sys_platform == 'linux_armv7' (from preserve_arch_in_markers) matches only armv7l wheel
+        req = Requirement('pyyaml==6.0.3; sys_platform == "linux_armv7" and python_version == "3.8"')
+        exclude_requirements = {req}
+
+        excluded, _ = should_exclude_wheel_s3(
+            "PyYAML-6.0.3-cp38-cp38-manylinux2014_armv7l.manylinux_2_17_armv7l.whl",
+            exclude_requirements,
+            supported_python_versions=["3.8", "3.9"],
+        )
+        self.assertTrue(excluded)
+
+        not_excluded, _ = should_exclude_wheel_s3(
+            "PyYAML-6.0.3-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+            exclude_requirements,
+            supported_python_versions=["3.8", "3.9"],
+        )
+        self.assertFalse(not_excluded)
 
 
 class TestGetUsedIdfBranches(unittest.TestCase):

@@ -29,8 +29,13 @@ SYS_PLATFORM_MAP = {
 }
 
 
-def _platform_for_marker(platform):
-    """Normalize platform to sys_platform value for pip markers."""
+def _platform_for_marker(platform: str, preserve_arch: bool = False) -> str:
+    """Normalize platform to sys_platform value for pip markers.
+    When preserve_arch is True (S3 verification), keep arch-specific values so
+    e.g. linux_armv7 stays linux_armv7 and only that wheel arch matches.
+    """
+    if preserve_arch and platform in SYS_PLATFORM_MAP:
+        return platform
     return SYS_PLATFORM_MAP.get(platform, platform)
 
 
@@ -83,13 +88,20 @@ class YAMLListAdapter:
     exclude: bool = False
     requirements: set = set()
 
-    def __init__(self, yaml_file: str, exclude: bool = False, current_platform: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        yaml_file: str,
+        exclude: bool = False,
+        current_platform: Optional[str] = None,
+        preserve_arch_in_markers: bool = False,
+    ) -> None:
         try:
             with open(yaml_file, "r") as f:
                 self._yaml_list = yaml.load(f, yaml.Loader)
         except FileNotFoundError:
             print_color(f"File not found, please check the file: {yaml_file}", Fore.RED)
         self.exclude = exclude
+        self.preserve_arch_in_markers = preserve_arch_in_markers
 
         # When building wheels: only exclude entries that apply to this platform
         if current_platform and self._yaml_list:
@@ -178,13 +190,15 @@ class YAMLListAdapter:
             # get attributes of the package if defined to reduce unnecessary complexity
             package_version = package["version"] if "version" in package else ""
             raw_platform = package["platform"] if "platform" in package else ""
-            # Map linux_armv7/arm64/x86_64 to "linux" for pip markers, preserving str | list[str]
+            preserve = getattr(self, "preserve_arch_in_markers", False)
+            # Map linux_armv7/arm64/x86_64 to "linux" for pip markers unless preserve_arch_in_markers
+            package_platform: str | list[str] = ""
             if isinstance(raw_platform, str) and raw_platform:
-                package_platform = _platform_for_marker(raw_platform)
+                package_platform = _platform_for_marker(raw_platform, preserve_arch=preserve)
             elif isinstance(raw_platform, list) and raw_platform:
-                package_platform = list(dict.fromkeys(_platform_for_marker(p) for p in raw_platform))
-            else:
-                package_platform = ""
+                package_platform = list(
+                    dict.fromkeys(_platform_for_marker(p, preserve_arch=preserve) for p in raw_platform)
+                )
             package_python = package["python"] if "python" in package else ""
 
             requirement_str_list = [f"{package['package_name']}"]

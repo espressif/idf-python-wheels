@@ -97,8 +97,8 @@ def main():
     s3 = boto3.resource("s3")
     bucket = s3.Bucket(bucket_name)
 
-    # Load exclude requirements (direct logic, no inversion)
-    exclude_requirements = YAMLListAdapter(EXCLUDE_LIST_PATH, exclude=False).requirements
+    # preserve_arch_in_markers=True so rules like linux_armv7-only match only that arch
+    exclude_requirements = YAMLListAdapter(EXCLUDE_LIST_PATH, exclude=False, preserve_arch_in_markers=True).requirements
     print(f"Loaded {len(exclude_requirements)} exclude rules\n")
 
     # Get all wheels from S3
@@ -123,7 +123,7 @@ def main():
             old_python_wheels.append((wheel, reason))
             continue
 
-        # Check against exclude_list (actual violations)
+        # Check against exclude_list (merged requirements; arch preserved for platform-specific rules)
         should_exclude, reason = should_exclude_wheel_s3(
             wheel, exclude_requirements, supported_python_versions=supported_python_versions
         )

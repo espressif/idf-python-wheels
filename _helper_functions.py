@@ -237,13 +237,13 @@ def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
     """
     Derive sys_platform value(s) from the wheel filename for marker evaluation.
 
-    Uses the wheel's platform tag(s) from parse_wheel_filename. For universal
-    wheels (platform tag "any"), returns all three so platform-specific
-    exclusions can be checked against every platform the wheel targets.
+    Returns generic ("win32", "linux", "darwin") and, when detectable from the
+    tag, the runner-specific platform (e.g. linux_armv7, linux_x86_64) so
+    exclude_list rules that target a single arch (with preserve_arch_in_markers)
+    match only the intended wheels.
 
     Returns:
-        List of sys_platform values ("win32", "linux", "darwin"), or None
-        if the filename cannot be parsed.
+        List of sys_platform values, or None if the filename cannot be parsed.
     """
     try:
         _name, _version, _build, tags = parse_wheel_filename(wheel_name)
@@ -258,8 +258,61 @@ def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
         for prefixes, sys_plat in _WHEEL_PLATFORM_TO_SYS:
             if any(pt.startswith(p) for p in prefixes):
                 platforms.add(sys_plat)
+                # Add runner-style platform for arch-specific marker matching (S3 verification)
+                if "armv7l" in pt:
+                    platforms.add("linux_armv7")
+                elif "aarch64" in pt:
+                    platforms.add("linux_arm64")
+                elif ("x86_64" in pt or "amd64" in pt) and ("manylinux" in pt or pt.startswith("linux_")):
+                    platforms.add("linux_x86_64")
+                elif "macosx" in pt and "arm64" in pt:
+                    platforms.add("macos_arm64")
+                elif "macosx" in pt and ("x86_64" in pt or "amd64" in pt):
+                    platforms.add("macos_x86_64")
                 break
     return list(platforms) if platforms else None
+
+
+def get_wheel_runner_platform(wheel_name: str) -> str | None:
+    """
+    Derive the runner-style platform from the wheel filename for exclude_list matching.
+
+    Returns the same convention as get_current_platform(): linux_armv7, linux_arm64,
+    linux_x86_64, linux, windows, darwin, macos_arm64, macos_x86_64, macos.
+    Used so S3 verification can apply platform-specific exclude rules (e.g. only
+    linux_armv7) instead of all Linux wheels.
+
+    Returns:
+        Platform string or None if the filename cannot be parsed.
+    """
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        return None
+    for tag in tags:
+        pt = tag.platform
+        if pt == "any":
+            return None  # Universal wheel, no single platform
+        if "armv7l" in pt:
+            return "linux_armv7"
+        if "aarch64" in pt:
+            return "linux_arm64"
+        if "x86_64" in pt or "amd64" in pt:
+            if "manylinux" in pt or pt.startswith("linux_"):
+                return "linux_x86_64"
+            if "macosx" in pt:
+                return "macos_x86_64"
+            if "win" in pt:
+                return "windows"
+        if "win_amd64" in pt or "win32" in pt:
+            return "windows"
+        if "macosx" in pt:
+            if "arm64" in pt:
+                return "macos_arm64"
+            return "macos_x86_64"  # or generic "macos" for older tags
+        if pt.startswith("manylinux") or pt.startswith("linux_"):
+            return "linux"
+    return None
 
 
 def should_exclude_wheel_s3(
@@ -270,29 +323,10 @@ def should_exclude_wheel_s3(
     """
     Check if a wheel should be excluded for S3 verification.
 
-    Uses DIRECT exclusion logic (not inverted):
-    - If marker is True → exclusion applies → EXCLUDE
-    - If marker is False → exclusion doesn't apply → KEEP
-    - If version matches specifier → EXCLUDE
-
-    Derives the wheel's target platform from its filename (e.g. win_amd64
-    -> win32, manylinux_* -> linux) and evaluates sys_platform markers
-    against that instead of skipping them, so platform-only exclusions
-    in exclude_list.yaml are reported as S3 violations when applicable.
-
-    For universal wheels (no cpXY tag, e.g. py3-none-any), python_version
-    markers are evaluated against supported_python_versions when provided,
-    so exclusions that apply only to older supported versions are not missed.
-
-    Args:
-        wheel_name: The wheel filename
-        exclude_requirements: Set of Requirement objects from YAMLListAdapter (exclude=False)
-        supported_python_versions: When the wheel has no cpXY tag, evaluate
-            python_version markers against these versions (e.g. ["3.8", "3.9", "3.10", ...]).
-            If None, falls back to the runner's Python (may miss version-specific exclusions).
-
-    Returns:
-        tuple: (should_exclude: bool, reason: str)
+    Uses merged requirements from YAMLListAdapter. When the adapter is loaded with
+    preserve_arch_in_markers=True, rules that target a single arch (e.g. linux_armv7)
+    are preserved and get_wheel_sys_platforms() returns that arch so only matching
+    wheels are flagged.
     """
     parsed = parse_wheel_name(wheel_name)
     if not parsed:
@@ -303,7 +337,6 @@ def should_exclude_wheel_s3(
     wheel_python = get_wheel_python_version(wheel_name)
     wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
 
-    # For universal wheels (no cpXY), evaluate python_version against these if provided
     python_versions_to_try: list[str | None] = []
     if wheel_python is not None:
         python_versions_to_try.append(wheel_python)
@@ -316,11 +349,10 @@ def should_exclude_wheel_s3(
         if canonicalize_name(req.name) != canonical_name:
             continue
 
-        # Evaluate markers (including sys_platform) using wheel's target platform and Python
         if req.marker:
             if "sys_platform" in str(req.marker):
                 if not wheel_sys_platforms:
-                    continue  # Cannot derive platform from filename → skip rule
+                    continue
                 marker_matches = False
                 for sys_plat in wheel_sys_platforms:
                     for pv in python_versions_to_try:
@@ -333,7 +365,7 @@ def should_exclude_wheel_s3(
                     if marker_matches:
                         break
                 if not marker_matches:
-                    continue  # Exclusion condition not met for this wheel's platform(s)
+                    continue
             else:
                 marker_matches = False
                 for pv in python_versions_to_try:
@@ -342,17 +374,14 @@ def should_exclude_wheel_s3(
                         marker_matches = True
                         break
                 if not marker_matches:
-                    continue  # Exclusion condition not met → keep
+                    continue
 
-        # If we get here, marker is True (or no marker)
-        # Check version specifier - if version matches, EXCLUDE
         if req.specifier and wheel_version:
             try:
                 if Version(wheel_version) not in req.specifier:
-                    continue  # Version doesn't match exclusion → keep
+                    continue
             except Exception:
                 pass
 
         return True, f"matches exclude rule: {req}"
-
     return False, ""
