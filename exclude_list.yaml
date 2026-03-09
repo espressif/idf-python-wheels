@@ -140,3 +140,10 @@
 # https://pypi.org/project/mcp/
 - package_name: 'mcp'
   python: ['==3.8', '==3.9']
+
+# PyYAML 6.0.3 wheel is invalid on Linux ARMv7 + Python 3.8 (BadZipFile: could not read WHEEL)
+# https://github.com/espressif/idf-python-wheels/actions/runs/22810198979/job/66174320073
+- package_name: 'pyyaml'
+  version: '==6.0.3'
+  platform: ['linux_armv7']
+  python: '==3.8'
