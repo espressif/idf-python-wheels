@@ -10,7 +10,6 @@ ci:
   autofix_prs: true
   autoupdate_commit_msg: 'ci: Bump pre-commit hooks'
   autoupdate_schedule: quarterly
-  skip: ['mypy']
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
