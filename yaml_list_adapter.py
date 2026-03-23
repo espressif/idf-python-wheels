@@ -138,11 +138,28 @@ class YAMLListAdapter:
                 break
         return (new_ver_spec, text, ver_specifier)
 
+    def _python_version_marker_fragment_no_package_version(self, package_python, exclude: bool) -> str:
+        """Build ``python_version ...`` marker fragment from YAML ``python`` when there is no package ``version``."""
+        if not isinstance(package_python, list):
+            new_spec, text_after, old_spec = self._change_specifier_logic(package_python)
+            spec = new_spec if exclude else old_spec
+            return f"python_version {spec} '{text_after}'"
+        parts = []
+        for elem in package_python:
+            new_spec, text_after, old_spec = self._change_specifier_logic(elem)
+            spec = new_spec if exclude else old_spec
+            parts.append(f"python_version {spec} '{text_after}'")
+        return " and ".join(parts)
+
     def _yaml_to_requirement(self, yaml: list, exclude: bool = False) -> set:
         """Converts YAML defined requirement into packaging.requirements Requirement
         which can be directly used with pip.
 
         Markers (platform and python) are ANDed between and multiple values of the marker are ORed between.
+        For exclude=True **without** a package ``version``, platform + python mean “exclude on this OS **and**
+        this Python” (intersection): the keep-marker is ``(sys_platform != p or <inverted python>)`` per
+        platform, ANDed across listed platforms (De Morgan). Rows **with** a package version keep the
+        split-requirement behaviour documented below.
 
         When exclude is set to True, the logic of the Requirement is changed to be excluded by pip.
         To preserve the logic, another requirement needs to be added
@@ -186,6 +203,15 @@ class YAMLListAdapter:
             else:
                 package_platform = ""
             package_python = package["python"] if "python" in package else ""
+
+            # Intersection exclude: "drop on (platform ∈ P) ∧ (python matches)" without a package version.
+            # Previous AND of inverted markers wrongly dropped e.g. Linux + same Python.
+            if exclude and package_platform and package_python and not package_version:
+                py_frag = self._python_version_marker_fragment_no_package_version(package_python, exclude=True)
+                plfs = list(package_platform) if isinstance(package_platform, list) else [package_platform]
+                terms = [f"(sys_platform != '{plf}' or ({py_frag}))" for plf in plfs]
+                requirements_set.add(Requirement(f"{package['package_name']}; " + " and ".join(terms)))
+                continue
 
             requirement_str_list = [f"{package['package_name']}"]
 
@@ -254,26 +280,9 @@ class YAMLListAdapter:
 
             # if package has python markers defined, add it to the requirement
             if package_python and not package_version:
-                if not isinstance(package_python, list):
-                    new_spec, text_after, old_spec = self._change_specifier_logic(package_python)
-                    requirement_str_list.append(
-                        (
-                            f"python_version {new_spec} '{text_after}'"
-                            if exclude
-                            else f"python_version {old_spec} '{text_after}'"
-                        )
-                    )
-
-                else:  # list of python versions defined
-                    python_list = []
-                    for elem in package_python:
-                        new_spec, text_after, old_spec = self._change_specifier_logic(elem)
-                        if exclude:
-                            python_list.append(f"python_version {new_spec} '{text_after}'")
-                        else:
-                            python_list.append(f"python_version {old_spec} '{text_after}'")
-
-                    requirement_str_list.append(" and ".join(python_list))
+                requirement_str_list.append(
+                    self._python_version_marker_fragment_no_package_version(package_python, exclude)
+                )
 
             if package_python and package_version:
                 if not isinstance(package_python, list):
