@@ -126,15 +126,15 @@ class TestYAMLtoRequirement(unittest.TestCase):
         """exclude + platform + python (no package version) = drop only on that OS ∩ Python."""
         yaml_list = [{"package_name": "pydantic_core", "platform": "win32", "python": "==3.14"}]
         result = self.adapter._yaml_to_requirement(yaml_list, exclude=True)
-        expected = Requirement('pydantic_core; (sys_platform != "win32" or (python_version != "3.14"))')
+        expected = Requirement("pydantic_core; (sys_platform != 'win32' or (python_version != '3.14'))")
         self.assertEqual(result, {expected})
 
     def test_exclude_platform_and_python_intersection_two_os(self):
         yaml_list = [{"package_name": "pydantic_core", "platform": ["win32", "darwin"], "python": "==3.14"}]
         result = self.adapter._yaml_to_requirement(yaml_list, exclude=True)
         expected = Requirement(
-            'pydantic_core; (sys_platform != "win32" or (python_version != "3.14")) and '
-            '(sys_platform != "darwin" or (python_version != "3.14"))'
+            "pydantic_core; (sys_platform != 'win32' or (python_version != '3.14')) and "
+            "(sys_platform != 'darwin' or (python_version != '3.14'))"
         )
         self.assertEqual(result, {expected})
 

@@ -8,6 +8,9 @@ from __future__ import annotations
 import platform
 import re
 import sys
+import zipfile
+
+from pathlib import Path
 
 from colorama import Fore
 from colorama import Style
@@ -63,6 +66,22 @@ def get_current_platform() -> str:
     if system == "windows":
         return "windows"
     return sys.platform
+
+
+def wheel_archive_is_readable(path: Path) -> bool:
+    """True if the file is a zip with a readable central directory (valid wheel container).
+
+    ``zipfile.is_zipfile()`` only checks the leading magic; truncated or corrupt wheels can
+    still fail with ``BadZipFile`` when reading the central directory (pip, delocate, etc.).
+    """
+    if not zipfile.is_zipfile(path):
+        return False
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            zf.namelist()
+    except zipfile.BadZipFile:
+        return False
+    return True
 
 
 def exclude_entry_applies_to_platform(entry: dict, current_platform: str) -> bool:

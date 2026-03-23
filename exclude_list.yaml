@@ -150,7 +150,7 @@
 - package_name: 'mcp'
   python: ['==3.8', '==3.9']
 
-# idf-component-manager v3.0.0is not supported by Python <= 3.10
+# idf-component-manager v3.0.0 is not supported by Python <= 3.10
 # https://pypi.org/project/idf-component-manager/3.0.0/
 - package_name: 'idf-component-manager'
   version: '==3.0.0'

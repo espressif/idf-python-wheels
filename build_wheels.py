@@ -159,14 +159,18 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
             requirements_txt += res.text.splitlines()
             print(f"Added ESP-IDF {feature['name']} requirements")
 
-    # Download esptool requirements from pyproject.toml file
+    return requirements_txt
+
+
+def _download_esptool_requirements() -> List[str]:
+    """Download esptool requirements from pyproject.toml file"""
+    requirements_txt: List[str] = []
     res = requests.get(ESPTOOL_PYPROJECT_URL, headers=AUTH_HEADER, timeout=10)
     if check_response(res, "Failed to download esptool pyproject.toml file"):
         pyproject_content = tomllib.loads(res.text)
         esptool_deps = pyproject_content.get("project", {}).get("dependencies", [])
         requirements_txt += [dep for dep in esptool_deps if dep not in requirements_txt]
         print("Added esptool requirements")
-
     return requirements_txt
 
 
@@ -216,6 +220,8 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
 
         requirements_txt += _download_branch_requirements(branch, idf_requirements_json)
         requirements_txt += _download_branch_constraints(constraint_file_url, branch, idf_constraints[i])
+
+    requirements_txt += _download_esptool_requirements()
 
     if make_txt_file:
         # TXT file from all downloaded requirements and constraints files

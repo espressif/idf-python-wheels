@@ -139,7 +139,10 @@ class YAMLListAdapter:
         return (new_ver_spec, text, ver_specifier)
 
     def _python_version_marker_fragment_no_package_version(self, package_python, exclude: bool) -> str:
-        """Build ``python_version ...`` marker fragment from YAML ``python`` when there is no package ``version``."""
+        """Build ``python_version ...`` marker fragment from YAML ``python`` when there is no package ``version``.
+
+        If ``python`` is a list, each element becomes a fragment and fragments are joined with **and**.
+        """
         if not isinstance(package_python, list):
             new_spec, text_after, old_spec = self._change_specifier_logic(package_python)
             spec = new_spec if exclude else old_spec
@@ -155,7 +158,9 @@ class YAMLListAdapter:
         """Converts YAML defined requirement into packaging.requirements Requirement
         which can be directly used with pip.
 
-        Markers (platform and python) are ANDed between and multiple values of the marker are ORed between.
+        Within one YAML row, ``platform`` and ``python`` are combined with **and**. Multiple entries in a
+        **platform** list are **or**ed (match any listed platform). Multiple entries in a **python** list
+        are **and**ed (all listed python constraints must hold).
         For exclude=True **without** a package ``version``, platform + python mean “exclude on this OS **and**
         this Python” (intersection): the keep-marker is ``(sys_platform != p or <inverted python>)`` per
         platform, ANDed across listed platforms (De Morgan). Rows **with** a package version keep the
