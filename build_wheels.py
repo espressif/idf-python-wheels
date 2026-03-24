@@ -16,6 +16,11 @@ from typing import Union
 
 import requests
 
+try:
+    import tomllib
+except ImportError:  # Python < 3.11 does not have tomllib built-in module
+    import tomli as tomllib
+
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
@@ -35,6 +40,8 @@ IDF_CONSTRAINTS_URL = "https://dl.espressif.com/dl/esp-idf/espidf.constraints."
 IDF_RESOURCES_URL = "https://raw.githubusercontent.com/espressif/esp-idf/"
 # URL for IDF master CMAKE version file
 IDF_MASTER_VERSION_URL = f"{IDF_RESOURCES_URL}master/tools/cmake/version.cmake"
+# URL for esptool pyproject.toml file
+ESPTOOL_PYPROJECT_URL = "https://raw.githubusercontent.com/espressif/esptool/master/pyproject.toml"
 
 # Minimal IDF release version to take requirements from (v{MAJOR}.{MINOR})
 # Requirements from all release branches and master equal or above this will be considered
@@ -151,6 +158,15 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
         if check_response(res, f"Failed to download feature (requirement group) '{feature['name']}'"):
             requirements_txt += res.text.splitlines()
             print(f"Added ESP-IDF {feature['name']} requirements")
+
+    # Download esptool requirements from pyproject.toml file
+    res = requests.get(ESPTOOL_PYPROJECT_URL, headers=AUTH_HEADER, timeout=10)
+    if check_response(res, "Failed to download esptool pyproject.toml file"):
+        pyproject_content = tomllib.loads(res.text)
+        esptool_deps = pyproject_content.get("project", {}).get("dependencies", [])
+        requirements_txt += [dep for dep in esptool_deps if dep not in requirements_txt]
+        print("Added esptool requirements")
+
     return requirements_txt
 
 

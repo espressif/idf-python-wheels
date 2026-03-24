@@ -181,6 +181,10 @@ jobs:
         if: matrix.os == 'Windows'
         run: python build_wheels.py
 
+      - name: Fix permissions on downloaded_wheels (ARMv7 Docker builds)
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
+        run: sudo chown -R $USER:$USER ./downloaded_wheels
+
       - name: Upload artifacts of downloaded_wheels directory
         uses: actions/upload-artifact@v4
         with:

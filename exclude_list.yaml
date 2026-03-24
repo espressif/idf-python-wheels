@@ -117,9 +117,9 @@
   version: '<2.35.0'
   python: '>=3.14'
 
-# pydantic_core on CPython 3.14 + Windows/macOS: maturin sdist fails (PyO3 limited API / abi3). Linux 3.14 OK.
+# pydantic_core: maturin sdist on CPython 3.14 + macOS/Windows fails in CI (PyO3 limited API); Linux 3.14 still built
 - package_name: 'pydantic_core'
-  platform: ['win32', 'darwin']
+  platform: ['darwin', 'win32']
   python: '==3.14'
 
 # rpds_py supports Python 3.14 from version >= 0.26.0 (pyo3 compatibility)

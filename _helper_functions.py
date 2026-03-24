@@ -107,11 +107,23 @@ def get_no_binary_args(requirement_name: str) -> list:
     return []
 
 
+def _safe_text_for_stdout(text: str) -> str:
+    """Avoid UnicodeEncodeError when printing pip/tool output on Windows (e.g. cp1252 console)."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    if encoding.lower() in ("utf-8", "utf8"):
+        return text
+    try:
+        text.encode(encoding)
+        return text
+    except UnicodeEncodeError:
+        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
 def print_color(text: str, color: str = Fore.BLUE):
     """Print colored text specified by color argument based on colorama
     - default color BLUE
     """
-    print(f"{color}", f"{text}", Style.RESET_ALL)
+    print(f"{color}", f"{_safe_text_for_stdout(text)}", Style.RESET_ALL)
 
 
 def merge_requirements(requirement: Requirement, another_req: Requirement) -> Requirement:

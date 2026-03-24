@@ -3,15 +3,64 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+from __future__ import annotations
+
 import argparse
 import os
+import platform
 import subprocess
 import sys
 
 from colorama import Fore
+from packaging.requirements import InvalidRequirement
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from _helper_functions import get_no_binary_args
 from _helper_functions import print_color
+
+# Do not pass --no-binary for these in --force-interpreter-binary mode:
+# - sdists whose legacy setup breaks under PEP 517 isolation (pkg_resources in isolated env).
+# - sdists that fail to compile on CI when a usable wheel exists (e.g. ruamel.yaml.clib + clang).
+# - PyObjC: all pyobjc / pyobjc-framework-* use pyobjc_setup.py + pkg_resources (macOS).
+# - cryptography: abi3 wheels; avoid PyO3 max-Python / heavy Rust rebuilds in dependent jobs.
+# - pydantic-core: maturin + jiter + PyO3 can fail from sdist on some CI combos (e.g. ARM64 3.9:
+#   jiter vs pyo3-ffi PyUnicode_* / extract API). Prefer compatible wheels from find-links or PyPI.
+_FORCE_INTERPRETER_BINARY_SKIP_EXACT = frozenset(
+    {
+        canonicalize_name("cryptography"),
+        canonicalize_name("pydantic-core"),
+        canonicalize_name("protobuf"),
+        canonicalize_name("ruamel.yaml.clib"),
+    }
+)
+
+
+def _force_interpreter_skip_package(canonical_dist_name: str) -> bool:
+    if canonical_dist_name in _FORCE_INTERPRETER_BINARY_SKIP_EXACT:
+        return True
+    # PyObjC meta and framework bindings (pyobjc-framework-corebluetooth, etc.)
+    return canonical_dist_name == "pyobjc" or canonical_dist_name.startswith("pyobjc-")
+
+
+def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:
+    """Return pip --no-binary for this package so pip cannot reuse e.g. cp311-abi3 wheels on 3.13."""
+    line = requirement_line.strip()
+    if not line:
+        return []
+    try:
+        req = Requirement(line)
+    except InvalidRequirement:
+        return []
+    if _force_interpreter_skip_package(canonicalize_name(req.name)):
+        return []
+    return ["--no-binary", req.name]
+
+
+def _apply_force_interpreter_binary(cli_flag: bool) -> bool:
+    """Linux/macOS only: forcing sdist builds for cryptography etc. is unreliable on Windows CI."""
+    return cli_flag and platform.system() != "Windows"
+
 
 parser = argparse.ArgumentParser(description="Process build arguments.")
 parser.add_argument(
@@ -36,6 +85,16 @@ parser.add_argument(
     action="store_true",
     help="CI exclude-tests mode: fail if all wheels succeed (expect some to fail, e.g. excluded packages)",
 )
+parser.add_argument(
+    "--force-interpreter-binary",
+    action="store_true",
+    help=(
+        "For each requirement, pass --no-binary <pkg> so pip builds a wheel for the current "
+        "interpreter instead of reusing a compatible abi3 / older cpXY wheel from --find-links. "
+        "Ignored on Windows (source builds for e.g. cryptography are not used in CI there). "
+        "Some packages are always skipped (e.g. cryptography, pydantic-core, protobuf, PyObjC, ruamel.yaml.clib)."
+    ),
+)
 
 args = parser.parse_args()
 
@@ -55,8 +114,16 @@ if requirements_dir:
         raise SystemExit(f"Python version dependent requirements directory or file not found ({e})")
 
     for requirement in requirements:
+        requirement = requirement.strip()
+        if not requirement or requirement.startswith("#"):
+            continue
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
+        force_interpreter_args = (
+            _force_interpreter_no_binary_args(requirement)
+            if _apply_force_interpreter_binary(args.force_interpreter_binary)
+            else []
+        )
 
         out = subprocess.run(
             [
@@ -64,13 +131,14 @@ if requirements_dir:
                 "-m",
                 "pip",
                 "wheel",
-                f"{requirement}",
+                requirement,
                 "--find-links",
                 "downloaded_wheels",
                 "--wheel-dir",
                 "downloaded_wheels",
             ]
-            + no_binary_args,
+            + no_binary_args
+            + force_interpreter_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -100,6 +168,11 @@ else:
     for requirement in in_requirements:
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
+        force_interpreter_args = (
+            _force_interpreter_no_binary_args(requirement)
+            if _apply_force_interpreter_binary(args.force_interpreter_binary)
+            else []
+        )
 
         out = subprocess.run(
             [
@@ -113,7 +186,8 @@ else:
                 "--wheel-dir",
                 "downloaded_wheels",
             ]
-            + no_binary_args,
+            + no_binary_args
+            + force_interpreter_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
