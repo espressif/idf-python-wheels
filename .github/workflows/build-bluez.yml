@@ -1,0 +1,82 @@
+name: multi-arch-bluez-build
+
+on: pull_request
+
+jobs:
+  build-bluez:
+    name: Build BlueZ ${{ matrix.version }} for ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        version: ["5.50", "5.83"]
+        arch: ["amd64", "arm64", "armv7"]
+        include:
+          - arch: "amd64"
+            runner: ["self-hosted", "Linux", "X64"]
+          - arch: "arm64"
+            runner: ["self-hosted", "Linux", "ARM64"]
+          - arch: "armv7"
+            runner: ["self-hosted", "Linux", "ARM"]
+    container:
+      image: debian:bullseye
+      options: --privileged
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update && apt-get install -y -q --fix-missing --no-install-recommends \
+            wget \
+            build-essential \
+            libglib2.0-dev \
+            libdbus-1-dev \
+            libdbus-glib-1-dev \
+            libudev-dev \
+            libreadline-dev \
+            libical-dev \
+            libsystemd-dev \
+            udev \
+            network-manager \
+            python3-docutils \
+            awscli
+
+      - name: Download BlueZ
+        run: |
+          wget https://www.kernel.org/pub/linux/bluetooth/bluez-${{ matrix.version }}.tar.xz
+          tar -xf bluez-${{ matrix.version }}.tar.xz
+          rm bluez-${{ matrix.version }}.tar.xz
+
+      - name: Build BlueZ
+        working-directory: bluez-${{ matrix.version }}
+        run: |
+          ./configure --enable-deprecated
+          make
+          make install DESTDIR=$(pwd)/installdir
+
+      - name: Generate archive
+        working-directory: bluez-${{ matrix.version }}
+        run: |
+          tar -czf "bluez-${{ matrix.version }}-${{ matrix.arch }}.tar.gz" -C installdir .
+
+      - name: Upload to S3
+        working-directory: bluez-${{ matrix.version }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+        run: |
+          FILENAME="bluez-${{ matrix.version }}-${{ matrix.arch }}.tar.gz"
+          aws s3 cp --acl=public-read --no-progress "$FILENAME" "s3://$AWS_BUCKET/dl/bluez/${{ matrix.version }}/$FILENAME"
+
+      - name: Drop AWS cache
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} \
+            --paths "/dl/bluez/${{ matrix.version }}/*"
