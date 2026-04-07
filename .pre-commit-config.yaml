@@ -23,14 +23,15 @@ repos:
       - id: check-yaml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.9
     hooks:
       - id: ruff-check
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
+  # pre-commit.ci: skip
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2  # frozen: minimum Python version compatibility (newer versions require Python 3.9+)
+    rev: 9f70dc58c23dfcca1b97af99eaeee3140a807c7e  # frozen: v1.18.2 - minimum Python version compatibility (Python 3.8)
     hooks:
     -   id: mypy
         additional_dependencies: ['types-all-latest']
