@@ -5,10 +5,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+import os
 import sys
 import unittest
 
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 # Add parent directory to path for imports
@@ -16,11 +18,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from packaging.requirements import Requirement
 
+from _helper_functions import current_interpreter_satisfies_requires_python
+from _helper_functions import filter_requirements_by_pypi_requires_python
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
+from _helper_functions import pypi_requires_python_preflight_skip
 from build_wheels import _add_into_requirements
 from build_wheels import get_used_idf_branches
 from yaml_list_adapter import YAMLListAdapter
+
+
+def requirement_exact_pin_version(req: Requirement) -> Optional[str]:
+    """Mirror of former production helper: single non-wildcard ``==`` pin only (used by tests)."""
+    specs = list(req.specifier)
+    if len(specs) != 1:
+        return None
+    spec = specs[0]
+    if spec.operator != "==":
+        return None
+    ver = str(spec.version)
+    if ver.endswith(".*"):
+        return None
+    return ver
 
 
 class TestChangeSpecifierLogic(unittest.TestCase):
@@ -440,6 +459,98 @@ class TestGetNoBinaryArgs(unittest.TestCase):
         """Test that empty list is returned for packages not in source build list."""
         result = get_no_binary_args("requests")
         self.assertEqual(result, [])
+
+
+class TestPypiRequiresPythonPreflight(unittest.TestCase):
+    """PyPI Requires-Python preflight (specifier + project index)."""
+
+    def setUp(self):
+        import _helper_functions
+
+        _helper_functions._PYPI_REQUIRES_PYTHON_CACHE.clear()
+        _helper_functions._PYPI_PROJECT_JSON_CACHE.clear()
+        self._saved_skip_check = os.environ.pop("SKIP_PYPI_REQUIRES_PYTHON_CHECK", None)
+
+    def tearDown(self):
+        if self._saved_skip_check is not None:
+            os.environ["SKIP_PYPI_REQUIRES_PYTHON_CHECK"] = self._saved_skip_check
+
+    def test_requirement_exact_pin_version(self):
+        self.assertEqual(requirement_exact_pin_version(Requirement("foo==1.0")), "1.0")
+        self.assertIsNone(requirement_exact_pin_version(Requirement("foo>=1.0")))
+        self.assertIsNone(requirement_exact_pin_version(Requirement("foo==1.*")))
+        self.assertIsNone(requirement_exact_pin_version(Requirement("foo>1,<2")))
+
+    def test_current_interpreter_satisfies_requires_python(self):
+        self.assertTrue(current_interpreter_satisfies_requires_python(None))
+        self.assertTrue(current_interpreter_satisfies_requires_python(""))
+        self.assertTrue(current_interpreter_satisfies_requires_python(">=3.8"))
+        self.assertFalse(current_interpreter_satisfies_requires_python(">999.0.0"))
+
+    @patch.dict(os.environ, {"SKIP_PYPI_REQUIRES_PYTHON_CHECK": "1"}, clear=False)
+    def test_preflight_disabled_by_env(self):
+        req = Requirement("idf-component-manager==3.0.0")
+        skip, reason = pypi_requires_python_preflight_skip(req)
+        self.assertFalse(skip)
+        self.assertEqual(reason, "")
+
+    @patch.dict(os.environ, {"SKIP_PYPI_REQUIRES_PYTHON_CHECK": "1"}, clear=False)
+    @patch("_helper_functions.print_color")
+    def test_filter_noop_when_env_disabled(self, _mock_print):
+        s = {Requirement("a==1"), Requirement("b==2")}
+        self.assertEqual(filter_requirements_by_pypi_requires_python(s), s)
+
+    @patch("_helper_functions.fetch_pypi_project_json", return_value={"releases": {"3.0.0": []}})
+    @patch("_helper_functions.current_interpreter_satisfies_requires_python", return_value=False)
+    @patch("_helper_functions.fetch_pypi_release_requires_python", return_value=">=3.10")
+    def test_preflight_skips_when_requires_python_excludes(self, _mock_rel, _mock_sat, _mock_proj):
+        req = Requirement("idf-component-manager==3.0.0")
+        skip, reason = pypi_requires_python_preflight_skip(req)
+        self.assertTrue(skip)
+        self.assertIn("3.0.0", reason)
+
+    @patch("_helper_functions.fetch_pypi_project_json", return_value={"releases": {"3.0.0": []}})
+    @patch("_helper_functions.current_interpreter_satisfies_requires_python", return_value=True)
+    @patch("_helper_functions.fetch_pypi_release_requires_python", return_value=">=3.10")
+    def test_preflight_keeps_when_compatible(self, _mock_rel, _mock_sat, _mock_proj):
+        req = Requirement("idf-component-manager==3.0.0")
+        skip, _ = pypi_requires_python_preflight_skip(req)
+        self.assertFalse(skip)
+
+    @patch("_helper_functions.fetch_pypi_project_json", return_value=None)
+    @patch("_helper_functions.fetch_pypi_release_requires_python")
+    def test_preflight_no_skip_when_project_json_unavailable(self, mock_release, _mock_proj):
+        skip, _ = pypi_requires_python_preflight_skip(Requirement("idf-component-manager>=2"))
+        self.assertFalse(skip)
+        mock_release.assert_not_called()
+
+    @patch("_helper_functions.fetch_pypi_project_json", return_value={"releases": {"3.0.0": [], "2.4.9": []}})
+    @patch("_helper_functions.current_interpreter_satisfies_requires_python", return_value=False)
+    @patch("_helper_functions.fetch_pypi_release_requires_python", return_value=">=3.10")
+    def test_preflight_skips_compatible_release_spec(self, _mock_rel, _mock_sat, _mock_proj):
+        skip, reason = pypi_requires_python_preflight_skip(Requirement("idf-component-manager~=3.0"))
+        self.assertTrue(skip)
+        self.assertIn("3.0.0", reason)
+
+    @patch("_helper_functions.fetch_pypi_project_json", return_value={"releases": {"1.0.0": []}})
+    @patch("_helper_functions.fetch_pypi_release_requires_python", return_value=None)
+    def test_preflight_keeps_when_pypi_has_no_requires_python(self, _mock_fetch, _mock_proj):
+        skip, _ = pypi_requires_python_preflight_skip(Requirement("somepkg==1.0.0"))
+        self.assertFalse(skip)
+
+    @patch("_helper_functions.print_color")
+    def test_filter_requirements_drops_one(self, _mock_print):
+        r_bad = Requirement("idf-component-manager==3.0.0")
+        r_good = Requirement("requests==2.0.0")
+
+        def _skip(req):
+            if req.name == "idf-component-manager":
+                return (True, "incompatible")
+            return (False, "")
+
+        with patch("_helper_functions.pypi_requires_python_preflight_skip", side_effect=_skip):
+            out = filter_requirements_by_pypi_requires_python({r_bad, r_good})
+        self.assertEqual(out, {r_good})
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from packaging.utils import canonicalize_name
 
 from _helper_functions import get_no_binary_args
 from _helper_functions import print_color
+from _helper_functions import pypi_requires_python_preflight_skip
 
 # Do not pass --no-binary for these in --force-interpreter-binary mode:
 # - sdists whose legacy setup breaks under PEP 517 isolation (pkg_resources in isolated env).
@@ -62,6 +63,18 @@ def _apply_force_interpreter_binary(cli_flag: bool) -> bool:
     return cli_flag and platform.system() != "Windows"
 
 
+def _pypi_preflight_skip_line(requirement_line: str) -> bool:
+    """Print and return True if this line should be skipped (PyPI Requires-Python)."""
+    try:
+        req = Requirement(requirement_line)
+    except InvalidRequirement:
+        return False
+    skip, reason = pypi_requires_python_preflight_skip(req)
+    if skip:
+        print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+    return skip
+
+
 parser = argparse.ArgumentParser(description="Process build arguments.")
 parser.add_argument(
     "requirements_path",
@@ -104,6 +117,7 @@ in_requirements = args.requirements
 
 failed_wheels = 0
 succeeded_wheels = 0
+skipped_wheels = 0
 
 # Build wheels for requirements in file
 if requirements_dir:
@@ -116,6 +130,9 @@ if requirements_dir:
     for requirement in requirements:
         requirement = requirement.strip()
         if not requirement or requirement.startswith("#"):
+            continue
+        if _pypi_preflight_skip_line(requirement):
+            skipped_wheels += 1
             continue
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
@@ -155,10 +172,11 @@ if requirements_dir:
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
+    if skipped_wheels:
+        print_color(f"Skipped {skipped_wheels} wheels (PyPI Requires-Python)", Fore.YELLOW)
 
     if args.ci_tests:
-        total = succeeded_wheels + failed_wheels
-        if total > 0 and failed_wheels == 0:
+        if succeeded_wheels > 0 and failed_wheels == 0:
             raise SystemExit("CI: expected some builds to fail (excluded packages)")
     elif failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")
@@ -166,6 +184,9 @@ if requirements_dir:
 # Build wheels from passed requirements
 else:
     for requirement in in_requirements:
+        if _pypi_preflight_skip_line(requirement):
+            skipped_wheels += 1
+            continue
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
         force_interpreter_args = (
@@ -204,10 +225,11 @@ else:
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
+    if skipped_wheels:
+        print_color(f"Skipped {skipped_wheels} wheels (PyPI Requires-Python)", Fore.YELLOW)
 
     if args.ci_tests:
-        total = succeeded_wheels + failed_wheels
-        if total > 0 and failed_wheels == 0:
+        if succeeded_wheels > 0 and failed_wheels == 0:
             raise SystemExit("CI: expected some builds to fail (excluded packages)")
     elif failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")

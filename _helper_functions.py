@@ -5,20 +5,37 @@
 #
 from __future__ import annotations
 
+import json
+import os
 import platform
 import re
 import sys
 import zipfile
 
 from pathlib import Path
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Set
+from typing import Tuple
+from typing import cast
+from urllib.error import HTTPError
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import Request
+from urllib.request import urlopen
 
 from colorama import Fore
 from colorama import Style
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import InvalidWheelFilename
 from packaging.utils import canonicalize_name
 from packaging.utils import parse_wheel_filename
+from packaging.version import InvalidVersion
 from packaging.version import Version
+from packaging.version import parse as parse_version
 
 # Packages that should be built from source on Linux to ensure correct library linking
 # These packages often have pre-built wheels on PyPI that link against different library versions
@@ -82,6 +99,146 @@ def wheel_archive_is_readable(path: Path) -> bool:
     except zipfile.BadZipFile:
         return False
     return True
+
+
+# PyPI JSON API: cache (project canonical name, version) -> requires_python or None if unset/unknown
+_PYPI_REQUIRES_PYTHON_CACHE: Dict[Tuple[str, str], Optional[str]] = {}
+# Full project JSON per canonical package name; None means fetch failed (cached)
+_PYPI_PROJECT_JSON_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
+
+
+def _pypi_user_agent() -> str:
+    return "idf-python-wheels (https://github.com/espressif/idf-python-wheels)"
+
+
+def current_interpreter_satisfies_requires_python(requires_python: Optional[str]) -> bool:
+    """True if this interpreter satisfies PyPI ``Requires-Python`` (PEP 345 / PEP 566), or if unset."""
+    if requires_python is None or not requires_python.strip():
+        return True
+    try:
+        spec = SpecifierSet(requires_python)
+    except ValueError:
+        return True
+    py_ver = Version(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    return bool(spec.contains(py_ver, prereleases=True))
+
+
+def fetch_pypi_release_requires_python(project_name: str, version: str, timeout: float = 20.0) -> Optional[str]:
+    """Return ``info.requires_python`` for a release, or None if unknown (missing, error, or no field)."""
+    key = (canonicalize_name(project_name), version)
+    if key in _PYPI_REQUIRES_PYTHON_CACHE:
+        return _PYPI_REQUIRES_PYTHON_CACHE[key]
+    pkg = canonicalize_name(project_name)
+    url = f"https://pypi.org/pypi/{quote(pkg)}/{quote(version)}/json"
+    try:
+        request = Request(url, headers={"User-Agent": _pypi_user_agent()})
+        with urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode())
+    except HTTPError as e:
+        if e.code == 404:
+            _PYPI_REQUIRES_PYTHON_CACHE[key] = None
+            return None
+        _PYPI_REQUIRES_PYTHON_CACHE[key] = None
+        return None
+    except (URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        _PYPI_REQUIRES_PYTHON_CACHE[key] = None
+        return None
+    rp = data.get("info", {}).get("requires_python")
+    if rp is None or (isinstance(rp, str) and not rp.strip()):
+        _PYPI_REQUIRES_PYTHON_CACHE[key] = None
+        return None
+    _PYPI_REQUIRES_PYTHON_CACHE[key] = str(rp).strip()
+    return _PYPI_REQUIRES_PYTHON_CACHE[key]
+
+
+def fetch_pypi_project_json(project_name: str, timeout: float = 20.0) -> Optional[Dict[str, Any]]:
+    """Return PyPI ``/pypi/{name}/json`` payload, or None on error."""
+    pkg = canonicalize_name(project_name)
+    if pkg in _PYPI_PROJECT_JSON_CACHE:
+        return _PYPI_PROJECT_JSON_CACHE[pkg]
+    url = f"https://pypi.org/pypi/{quote(pkg)}/json"
+    try:
+        request = Request(url, headers={"User-Agent": _pypi_user_agent()})
+        with urlopen(request, timeout=timeout) as response:
+            # Use typing.Dict in cast(): dict[str, Any] is evaluated at runtime and breaks on Python 3.8.
+            data = cast(Dict[str, Any], json.loads(response.read().decode()))
+    except (HTTPError, URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        _PYPI_PROJECT_JSON_CACHE[pkg] = None
+        return None
+    _PYPI_PROJECT_JSON_CACHE[pkg] = data
+    return data
+
+
+def matching_release_version_strings(req: Requirement) -> Optional[List[str]]:
+    """List PyPI release version strings that satisfy ``req.specifier``, newest first.
+
+    Returns None if project metadata could not be fetched (caller should not skip the build).
+    Returns an empty list if no published release matches the specifier.
+    """
+    data = fetch_pypi_project_json(req.name)
+    if data is None:
+        return None
+    releases = data.get("releases") or {}
+    candidates: List[Tuple[Version, str]] = []
+    for ver_str in releases:
+        try:
+            parsed = parse_version(ver_str)
+        except InvalidVersion:
+            continue
+        if req.specifier.contains(parsed, prereleases=True):
+            candidates.append((parsed, ver_str))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [pair[1] for pair in candidates]
+
+
+def pypi_requires_python_preflight_skip(req: Requirement) -> Tuple[bool, str]:
+    """If True, skip ``pip wheel``: no PyPI release matches the specifier for this interpreter.
+
+    Uses project index + per-release ``Requires-Python`` (covers ``==``, ``~=``, ranges, etc.).
+    Set ``SKIP_PYPI_REQUIRES_PYTHON_CHECK`` to disable.
+    """
+    if os.environ.get("SKIP_PYPI_REQUIRES_PYTHON_CHECK", "").strip().lower() in ("1", "true", "yes"):
+        return False, ""
+    candidates = matching_release_version_strings(req)
+    if candidates is None:
+        return False, ""
+    if not candidates:
+        return True, "no PyPI releases match this requirement specifier"
+
+    for ver_str in candidates:
+        rp = fetch_pypi_release_requires_python(req.name, ver_str)
+        if current_interpreter_satisfies_requires_python(rp):
+            return False, ""
+
+    newest = candidates[0]
+    newest_rp = fetch_pypi_release_requires_python(req.name, newest)
+    py_mm = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if newest_rp:
+        return (
+            True,
+            f"newest matching release {newest!r} requires Python {newest_rp!r}; "
+            f"no installable release for Python {py_mm} ({req.name})",
+        )
+    return True, f"no installable release on PyPI for Python {py_mm} ({req})"
+
+
+def filter_requirements_by_pypi_requires_python(requirements: Set) -> Set:
+    """Drop requirements with no PyPI release installable on this interpreter (``Requires-Python``)."""
+    if os.environ.get("SKIP_PYPI_REQUIRES_PYTHON_CHECK", "").strip().lower() in ("1", "true", "yes"):
+        return set(requirements)
+    kept: Set = set()
+    print_color("---------- PYPI Requires-Python PREFLIGHT ----------", Fore.CYAN)
+    for req in requirements:
+        if not isinstance(req, Requirement):
+            kept.add(req)
+            continue
+        skip, reason = pypi_requires_python_preflight_skip(req)
+        if skip:
+            print_color(f"-- skip {req} ({reason})", Fore.YELLOW)
+            continue
+        kept.add(req)
+    print_color("---------- END PYPI Requires-Python PREFLIGHT ----------", Fore.CYAN)
+    return kept
 
 
 def exclude_entry_applies_to_platform(entry: dict, current_platform: str) -> bool:

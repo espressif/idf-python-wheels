@@ -25,6 +25,7 @@ from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import filter_requirements_by_pypi_requires_python
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
@@ -417,8 +418,10 @@ def main() -> int:
     ).requirements
 
     after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
+    after_exclude_requirements = filter_requirements_by_pypi_requires_python(after_exclude_requirements)
 
     include_list = YAMLListAdapter("include_list.yaml").requirements
+    include_list = filter_requirements_by_pypi_requires_python(include_list)
     print_color("---------- ADDITIONAL REQUIREMENTS ----------")
     for req in include_list:
         print(req)
@@ -446,6 +449,7 @@ def main() -> int:
         f"{os.path.curdir}{(os.sep)}downloaded_wheels", after_exclude_requirements
     )
     after_exclude_dependent_wheels = exclude_from_requirements(dependent_wheels, exclude_list)
+    after_exclude_dependent_wheels = filter_requirements_by_pypi_requires_python(after_exclude_dependent_wheels)
 
     with open("dependent_requirements.txt", "w") as f:
         for wheel in after_exclude_dependent_wheels:

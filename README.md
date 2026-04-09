@@ -105,6 +105,25 @@ This would mean: "From assembled **main requirements** exclude `pyserial` with v
 
 From the example above is clear that the `platform` could be left out (because all main platforms are specified) so the options `platform` or `version` or `python` are optional, one of them or both can be not specified and the key can be erased. When only `package_name` is given the package will be excluded from **main requirements**.
 
+### PyPI `Requires-Python` preflight
+
+Before running `pip wheel`, the build scripts can query the [PyPI JSON API](https://docs.pypi.org/api/json/) so that **no release** matching the requirement’s **version specifier** (including `==`, `~=`, and ranges such as `>=x,<y`) is installable on the **current interpreter** according to each candidate release’s **`Requires-Python`** metadata. In that case the requirement is **skipped** (with a log line) instead of invoking pip, which avoids noisy failures such as “No matching distribution found” when pip hides incompatible versions.
+
+This is implemented in [`_helper_functions.py`](./_helper_functions.py) and wired into:
+
+- [`build_wheels.py`](./build_wheels.py) — after `exclude_list` is applied, for the main graph, [`include_list.yaml`](./include_list.yaml) entries, and lines written to `dependent_requirements.txt`
+- [`build_wheels_from_file.py`](./build_wheels_from_file.py) — each requirement line from `dependent_requirements.txt` or from the CLI
+
+If the **project** JSON cannot be fetched (network error, etc.), preflight does **not** skip; pip runs as usual.
+
+This complements **`exclude_list.yaml`**: the YAML still expresses **platform**, **markers**, and **build/repair** policy where PyPI metadata is not enough. Preflight focuses on **Python version compatibility declared on PyPI** for matching releases.
+
+To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set the environment variable:
+
+| Variable | Effect when set to `1`, `true`, or `yes` (case-insensitive) |
+|----------|--------------------------------------------------------------|
+| `SKIP_PYPI_REQUIRES_PYTHON_CHECK` | Skip all PyPI preflight checks; every requirement is passed through to `pip wheel`. |
+
 
 ### include_list.yaml
 File for additional Python packages to the **main requirements** list. Built separately to not restrict the **main requirements** list.
