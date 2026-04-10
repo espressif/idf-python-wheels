@@ -18,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # PyO3 (cryptography, etc.): allow building against CPython newer than PyO3's declared max when using stable ABI
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +150,7 @@ jobs:
               bash os_dependencies/linux_arm.sh
               # Source Rust environment after installation
               . \$HOME/.cargo/env
-              python build_wheels_from_file.py dependent_requirements_${{ matrix.arch }}
+              python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
             "
 
       - name: Build Python dependent wheels - ARMv7 Legacy (in Docker)
@@ -171,7 +173,7 @@ jobs:
               bash os_dependencies/linux_arm.sh
               # Source Rust environment after installation
               . \$HOME/.cargo/env
-              python build_wheels_from_file.py dependent_requirements_${{ matrix.arch }}
+              python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
             "
 
       - name: Build Python dependent wheels - Linux/macOS
@@ -184,12 +186,15 @@ jobs:
               export ARCHFLAGS="-arch x86_64"
             fi
 
-            python build_wheels_from_file.py dependent_requirements_${{ matrix.arch }}
+            python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
         if: matrix.os == 'Windows'
-        run: python build_wheels_from_file.py dependent_requirements_${{ matrix.arch }}
+        run: python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
 
+      - name: Fix permissions on downloaded_wheels (ARMv7 Docker builds)
+        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
+        run: sudo chown -R $USER:$USER ./downloaded_wheels
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

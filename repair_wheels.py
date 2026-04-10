@@ -16,11 +16,45 @@ import platform
 import subprocess
 
 from pathlib import Path
+from typing import List
+from typing import Set
+from typing import Tuple
 from typing import Union
 
 from colorama import Fore
 
 from _helper_functions import print_color
+from _helper_functions import wheel_archive_is_readable
+
+
+def _stderr_indicates_bad_zip(error_msg: str) -> bool:
+    """True if repair tool output indicates an unreadable/corrupt zip archive."""
+    if not error_msg:
+        return False
+    return (
+        "BadZipFile" in error_msg
+        or "Bad magic number for central directory" in error_msg
+        or "File is not a zip file" in error_msg
+    )
+
+
+def _dedupe_wheel_paths(wheels_dir: Path) -> List[Path]:
+    """Collect *.whl under wheels_dir once per inode (rglob can list the same file twice via symlinks)."""
+    wheels: List[Path] = []
+    seen: Set[Tuple[int, int]] = set()
+    for p in sorted(wheels_dir.rglob("*.whl")):
+        try:
+            if not p.is_file():
+                continue
+            st = p.stat()
+            key = (st.st_dev, st.st_ino)
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        wheels.append(p)
+    return wheels
 
 
 def get_platform() -> str:
@@ -90,7 +124,7 @@ def fix_universal2_wheel_name(wheel_path: Path, error_msg: str) -> Union[Path, s
     if "'arm64,x86_64'" in error_msg or "'x86_64,arm64'" in error_msg:
         # Missing BOTH architectures - wheel is corrupted, delete it
         print_color("  -> Deleting corrupted wheel (missing native binaries for all architectures)", Fore.RED)
-        wheel_path.unlink()
+        wheel_path.unlink(missing_ok=True)
         return "delete"
     elif "'x86_64'" in error_msg:
         # Missing x86_64, so it only has arm64
@@ -137,8 +171,8 @@ def main() -> None:
     temp_dir: Path = Path("./temp_repair")
     temp_dir.mkdir(exist_ok=True)
 
-    # Find all wheel files
-    wheels: list[Path] = list(wheels_dir.rglob("*.whl"))
+    # Find all wheel files (dedupe: same inode can appear twice via symlinks / layout quirks)
+    wheels: list[Path] = _dedupe_wheel_paths(wheels_dir)
 
     if not wheels:
         print_color(f"No wheels found in {wheels_dir} - nothing to repair", Fore.YELLOW)
@@ -186,6 +220,14 @@ def main() -> None:
                 skipped_count += 1
                 continue
 
+        # PEP 427: wheels are zip files; truncated/corrupt CI artifacts may pass is_zipfile
+        # but fail on central directory (delocate: BadZipFile).
+        if not wheel_archive_is_readable(wheel):
+            print_color("  -> Deleting file (not a valid / readable zip wheel archive)", Fore.RED)
+            wheel.unlink(missing_ok=True)
+            deleted_count += 1
+            continue
+
         # Clean temp directory
         for old_wheel in temp_dir.glob("*.whl"):
             old_wheel.unlink()
@@ -209,6 +251,15 @@ def main() -> None:
 
         # Check for errors
         error_msg = result.stderr.strip() if result.stderr else ""
+
+        # Corrupt zip / bad central directory (delocate opens the wheel as a zip)
+        if _stderr_indicates_bad_zip(error_msg):
+            print_color("  -> Deleting file (repair tool reported corrupt zip archive)", Fore.RED)
+            for old_wheel in temp_dir.glob("*.whl"):
+                old_wheel.unlink()
+            wheel.unlink(missing_ok=True)
+            deleted_count += 1
+            continue
 
         # Special handling for incorrectly tagged universal2 wheels on macOS
         if (
@@ -247,7 +298,7 @@ def main() -> None:
             and "This does not look like a platform wheel, no ELF executable" in error_msg
         ):
             print_color("  -> Deleting corrupted wheel", Fore.RED)
-            wheel.unlink()
+            wheel.unlink(missing_ok=True)
             deleted_count += 1
             continue
 
@@ -257,6 +308,12 @@ def main() -> None:
             # manylinux wheel can't find its libraries
             # it means it was already properly repaired
             or ("manylinux" in wheel.name and "could not be located" in error_msg)
+            # ARMv7 CI runs under QEMU; auditwheel may fail libc detection on abi3/native .so
+            or (
+                current_platform == "Linux"
+                and current_arch == "armv7l"
+                and ("InvalidLibc" in error_msg or "couldn't detect libc" in error_msg)
+            )
         )
 
         has_error = (
@@ -278,6 +335,15 @@ def main() -> None:
                 print_color("  -> Keeping original wheel (build issue: needs older toolchain)", Fore.YELLOW)
             elif "manylinux" in wheel.name and "could not be located" in error_msg:
                 print_color("  -> Keeping original wheel (already bundled from PyPI)", Fore.GREEN)
+            elif (
+                current_platform == "Linux"
+                and current_arch == "armv7l"
+                and ("InvalidLibc" in error_msg or "couldn't detect libc" in error_msg)
+            ):
+                print_color(
+                    "  -> Keeping original wheel (auditwheel libc detection failed on ARMv7 runner; often QEMU)",
+                    Fore.YELLOW,
+                )
             skipped_count += 1
         elif has_error:
             # Actual error occurred (even if a wheel was created, it may be broken)
@@ -294,15 +360,22 @@ def main() -> None:
             if repaired:
                 # A repaired wheel was created successfully
                 if repaired.name != wheel.name:
-                    wheel.unlink()  # Remove original
-                    repaired.rename(wheel.parent / repaired.name)
+                    wheel.unlink(missing_ok=True)  # Remove original
+                    final_path = wheel.parent / repaired.name
+                    repaired.rename(final_path)
                     print_color(f"  -> Replaced with repaired wheel: {repaired.name}", Fore.GREEN)
                 else:
                     # Name unchanged
-                    wheel.unlink()
+                    wheel.unlink(missing_ok=True)
                     repaired.rename(wheel)
+                    final_path = wheel
                     print_color(f"  -> Repaired successfully: {repaired.name}", Fore.GREEN)
-                repaired_count += 1
+                if not wheel_archive_is_readable(final_path):
+                    print_color("  -> Deleting repaired output (not a valid / readable zip archive)", Fore.RED)
+                    final_path.unlink(missing_ok=True)
+                    deleted_count += 1
+                else:
+                    repaired_count += 1
             elif result.returncode == 0:
                 # No repaired wheel created, but command succeeded (already compatible)
                 print_color("  -> Keeping original wheel (already compatible)", Fore.GREEN)

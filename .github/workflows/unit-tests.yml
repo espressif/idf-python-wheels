@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install packaging pyyaml colorama requests
+          python -m pip install -r build_requirements.txt
 
       - name: Run unit tests
         run: python -m unittest discover -s . -v

@@ -22,6 +22,10 @@
   platform: 'darwin'
   python: '>3.11'
 
+# dbus-python 1.2.x sdist (e.g. 1.2.18) fails configure link step against CPython on macOS CI (Python 3.11)
+- package_name: 'dbus-python'
+  platform: 'darwin'
+  python: '==3.11'
 
 - package_name: 'pygobject'
   python: '==3.8'
@@ -112,6 +116,11 @@
 - package_name: 'pydantic_core'
   version: '<2.35.0'
   python: '>=3.14'
+
+# pydantic_core: maturin sdist on CPython 3.14 + macOS/Windows fails in CI (PyO3 limited API); Linux 3.14 still built
+- package_name: 'pydantic_core'
+  platform: ['darwin', 'win32']
+  python: '==3.14'
 
 # rpds_py supports Python 3.14 from version >= 0.26.0 (pyo3 compatibility)
 # https://pypi.org/project/rpds-py/#history
