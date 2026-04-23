@@ -161,6 +161,7 @@ jobs:
         run: |
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
+            -e AUDITWHEEL_PLAT=manylinux_2_36_armv7l \
             -v $(pwd):/work \
             -w /work \
             ${{ matrix.docker_image }} \
@@ -177,6 +178,7 @@ jobs:
         run: |
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
+            -e AUDITWHEEL_PLAT=manylinux_2_31_armv7l \
             -v $(pwd):/work \
             -w /work \
             ${{ matrix.docker_image }} \
@@ -201,12 +203,26 @@ jobs:
     needs: repair-wheels
     runs-on: ubuntu-latest
     steps:
-      - name: Download all repaired wheels
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Download each wheels-repaired-* artifact into its own subdirectory so
+      # same-named wheels from ARMv7 vs ARMv7 Legacy are not silently overwritten
+      # before collision detection or S3 upload (see README: ARMv7 wheel collisions).
+      - name: Download all repaired wheels (per-artifact subdirectories)
         uses: actions/download-artifact@v4
         with:
           pattern: wheels-repaired-*
-          path: ./all_wheels
-          merge-multiple: true
+          path: ./all_wheels_staging
+          merge-multiple: false
+
+      - name: Check for duplicate wheel basenames across lineages
+        run: python3 check_wheel_collisions.py ./all_wheels_staging
+
+      - name: Flatten merged wheels directory
+        run: |
+          mkdir -p ./all_wheels
+          find ./all_wheels_staging -type f -name '*.whl' -exec cp -f {} ./all_wheels/ \;
 
       - name: List merged wheels
         run: |

@@ -146,6 +146,18 @@ The repair tools are used after build to link and bundle all the needed librarie
 
 This logic is done by the [repair workflow](./.github/workflows/wheels-repair.yml) and the [`repair_wheels.py` script](./repair_wheels.py)
 
+### ARMv7 vs ARMv7 Legacy: same wheel filename, different binaries
+
+`Linux ARMv7` and `Linux ARMv7 Legacy` can both produce a wheel whose **filename is identical** (same PEP 425 tags) while the **ELF contents differ** (different glibc/OpenSSL/Rust toolchain lineage). Two bad outcomes follow if that is not handled:
+
+1. **Artifact merge / local flatten** — downloading multiple `wheels-repaired-*` artifacts into one directory with `merge-multiple: true` can make the second file **silently overwrite** the first on disk before any upload runs.
+2. **S3 upload** — [`upload_wheels.py`](./upload_wheels.py) publishes to `pypi/<package>/<wheel-filename>`. Uploading a second wheel with the **same key** replaces the object; clients then see whichever build ran last, which can surface as import crashes or segfaults.
+
+Mitigations in this repo:
+
+- Repair sets **`AUDITWHEEL_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) so [`repair_wheels.py`](./repair_wheels.py) runs `auditwheel repair --plat ...` and emitted wheels get **distinct platform tags** when possible.
+- The repair workflow merges repaired artifacts using **per-artifact subdirectories**, then runs [`check_wheel_collisions.py`](./check_wheel_collisions.py) to **fail CI** if the same `*.whl` basename appears with **different contents** across lineages, before flattening for tests/upload.
+
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
 

@@ -15,6 +15,8 @@ import json
 import re
 import sys
 
+from collections import defaultdict
+
 import boto3
 
 from colorama import Fore
@@ -103,25 +105,35 @@ def main():
 
     # Get all wheels from S3
     print_color("---------- SCANNING S3 WHEELS ----------")
-    wheels = []
+    basename_to_keys: defaultdict[str, list[str]] = defaultdict(list)
     for obj in bucket.objects.filter(Prefix="pypi/"):
         if obj.key.endswith(".whl"):
             wheel_name = obj.key.split("/")[-1]
-            wheels.append(wheel_name)
+            basename_to_keys[wheel_name].append(obj.key)
 
-    print(f"Found {len(wheels)} wheels on S3\n")
+    wheel_names = sorted(basename_to_keys.keys())
+    wheels_on_s3_count = sum(len(v) for v in basename_to_keys.values())
+
+    print(f"Found {wheels_on_s3_count} wheel objects ({len(wheel_names)} unique filenames) on S3\n")
 
     # Check each wheel
     print_color("---------- CHECKING WHEELS ----------")
     violations = []
     old_python_wheels = []
 
-    for wheel in wheels:
+    for wheel in wheel_names:
         # Check for unsupported Python versions (warning only, not a violation)
         is_old, reason = is_unsupported_python(wheel, oldest_supported_python)
         if is_old:
             old_python_wheels.append((wheel, reason))
             continue
+
+        keys_for_name = basename_to_keys[wheel]
+        if len(keys_for_name) > 1:
+            reason_dup = "Duplicate wheel basename across multiple S3 keys: " + ", ".join(sorted(keys_for_name))
+            violations.append((wheel, reason_dup))
+            print_color(f"-- {wheel}", Fore.RED)
+            print(f"   {reason_dup}")
 
         # Check against exclude_list (actual violations)
         should_exclude, reason = should_exclude_wheel_s3(
@@ -138,7 +150,7 @@ def main():
 
     # Statistics
     print_color("---------- STATISTICS ----------")
-    print(f"Checked: {len(wheels)} wheels")
+    print(f"Checked: {wheels_on_s3_count} wheel objects ({len(wheel_names)} unique filenames)")
     if old_python_wheels:
         print_color(f"Old Python wheels: {len(old_python_wheels)} (warning only)", Fore.YELLOW)
     if violations:

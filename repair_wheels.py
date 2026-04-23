@@ -12,6 +12,7 @@ See: https://github.com/espressif/idf-python-wheels/blob/main/README.md#universa
 - Linux: auditwheel (bundles SOs)
 """
 
+import os
 import platform
 import subprocess
 
@@ -157,9 +158,17 @@ def repair_wheel_linux(wheel_path: Path, temp_dir: Path) -> subprocess.Completed
 
     Uses --strip option to strip debugging symbols which can help with
     ELF alignment issues on ARM (fixes "ELF load command address/offset not properly aligned" errors).
+
+    If ``AUDITWHEEL_PLAT`` is set (e.g. in CI for ARMv7 vs ARMv7 Legacy), it is passed as
+    ``auditwheel repair --plat ...`` so repaired wheels get distinct PEP 425 platform tags
+    when build lineages would otherwise emit the same filename.
     """
+    plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    cmd = ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir), "--strip"]
+    if plat:
+        cmd.extend(["--plat", plat])
     result = subprocess.run(
-        ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir), "--strip"],
+        cmd,
         capture_output=True,
         text=True,
     )
