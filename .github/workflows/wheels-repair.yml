@@ -162,6 +162,7 @@ jobs:
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
             -e AUDITWHEEL_PLAT=manylinux_2_36_armv7l \
+            -e AUDITWHEEL_ONLY_PLAT=1 \
             -v $(pwd):/work \
             -w /work \
             ${{ matrix.docker_image }} \
@@ -179,6 +180,7 @@ jobs:
           docker run --rm \
             --platform ${{ matrix.docker_platform }} \
             -e AUDITWHEEL_PLAT=manylinux_2_31_armv7l \
+            -e AUDITWHEEL_ONLY_PLAT=1 \
             -v $(pwd):/work \
             -w /work \
             ${{ matrix.docker_image }} \

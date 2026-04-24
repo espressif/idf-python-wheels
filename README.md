@@ -148,14 +148,14 @@ This logic is done by the [repair workflow](./.github/workflows/wheels-repair.ym
 
 ### ARMv7 vs ARMv7 Legacy: same wheel filename, different binaries
 
-`Linux ARMv7` and `Linux ARMv7 Legacy` can both produce a wheel whose **filename is identical** (same PEP 425 tags) while the **ELF contents differ** (different glibc/OpenSSL/Rust toolchain lineage). Two bad outcomes follow if that is not handled:
+`Linux ARMv7` and `Linux ARMv7 Legacy` can both produce a wheel whose **filename is identical** (same PEP 425 tags) while the **ELF contents differ** (different glibc/OpenSSL/Rust toolchain lineage). **Note:** `wheels-download-directory-*` CI artifacts are the **pre-repair** build outputs; comparing those can still show identical names until the [repair workflow](./.github/workflows/wheels-repair.yml) runs. Two bad outcomes follow if that is not handled after repair/merge:
 
 1. **Artifact merge / local flatten** — downloading multiple `wheels-repaired-*` artifacts into one directory with `merge-multiple: true` can make the second file **silently overwrite** the first on disk before any upload runs.
 2. **S3 upload** — [`upload_wheels.py`](./upload_wheels.py) publishes to `pypi/<package>/<wheel-filename>`. Uploading a second wheel with the **same key** replaces the object; clients then see whichever build ran last, which can surface as import crashes or segfaults.
 
 Mitigations in this repo:
 
-- Repair sets **`AUDITWHEEL_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) so [`repair_wheels.py`](./repair_wheels.py) runs `auditwheel repair --plat ...` and emitted wheels get **distinct platform tags** when possible.
+- Repair sets **`AUDITWHEEL_PLAT`** and **`AUDITWHEEL_ONLY_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) so [`repair_wheels.py`](./repair_wheels.py) runs `auditwheel repair --plat ... --only-plat` and emitted wheels get **distinct single-tag filenames** when auditwheel supports it. If **`AUDITWHEEL_PLAT` is set**, ARMv7 “libc detection failed” outcomes are **not** treated as non-fatal skips (that would leave identical filenames across lineages).
 - The repair workflow merges repaired artifacts using **per-artifact subdirectories**, then runs [`check_wheel_collisions.py`](./check_wheel_collisions.py) to **fail CI** if the same `*.whl` basename appears with **different contents** across lineages, before flattening for tests/upload.
 
 ## Activity Diagram

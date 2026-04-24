@@ -95,6 +95,29 @@ def get_wheel_arch(wheel_name: str) -> Union[str, None]:
     return None
 
 
+def _only_plat_env_enabled() -> bool:
+    return os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
+
+
+def _armv7_forced_plat_filename_ok(wheel_name: str, plat: str) -> bool:
+    """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits.
+
+    When ``AUDITWHEEL_ONLY_PLAT`` is set, legacy wheels must not carry a ``manylinux_2_36``
+    tag (auditwheel dual-tag would collide with the standard lineage again).
+    """
+    plat_l = plat.lower()
+    wn = wheel_name.lower()
+    if "manylinux_2_36" in plat_l:
+        return "manylinux_2_36" in wn
+    if "manylinux_2_31" in plat_l and "manylinux_2_36" not in plat_l:
+        if "manylinux_2_31" not in wn:
+            return False
+        if _only_plat_env_enabled() and "manylinux_2_36" in wn:
+            return False
+        return True
+    return True
+
+
 def repair_wheel_windows(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
     """Repair Windows wheel using delvewheel."""
     result = subprocess.run(
@@ -164,14 +187,22 @@ def repair_wheel_linux(wheel_path: Path, temp_dir: Path) -> subprocess.Completed
     when build lineages would otherwise emit the same filename.
     """
     plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    only_plat = os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
+
     cmd = ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir), "--strip"]
     if plat:
         cmd.extend(["--plat", plat])
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-    )
+    if only_plat:
+        cmd.append("--only-plat")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # Older auditwheel versions may not support --only-plat. If requested, retry once without it.
+    combined_err = (result.stderr or "") + (result.stdout or "")
+    if only_plat and result.returncode != 0 and "unrecognized arguments: --only-plat" in combined_err:
+        cmd_no_only = [c for c in cmd if c != "--only-plat"]
+        result = subprocess.run(cmd_no_only, capture_output=True, text=True)
+
     return result
 
 
@@ -259,7 +290,8 @@ def main() -> None:
             print_color(f"  {result.stderr.strip()}", Fore.RED)
 
         # Check for errors
-        error_msg = result.stderr.strip() if result.stderr else ""
+        # auditwheel may log failures on stdout or stderr depending on version / logging.
+        error_msg = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
 
         # Corrupt zip / bad central directory (delocate opens the wheel as a zip)
         if _stderr_indicates_bad_zip(error_msg):
@@ -298,7 +330,7 @@ def main() -> None:
 
                 # Update wheel reference and error message for subsequent checks
                 wheel = Path(renamed_wheel)
-                error_msg = result.stderr.strip() if result.stderr else ""
+                error_msg = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
 
         # Special handling forLinux ARMv7 broken wheels
         if (
@@ -311,16 +343,21 @@ def main() -> None:
             deleted_count += 1
             continue
 
+        plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+
         # Check for non-critical errors (keep original wheel)
         is_noncritical = (
             "too-recent versioned symbols" in error_msg
             # manylinux wheel can't find its libraries
             # it means it was already properly repaired
-            or ("manylinux" in wheel.name and "could not be located" in error_msg)
+            or (("manylinux" in wheel.name and "could not be located" in error_msg) and not plat_env)
             # ARMv7 CI runs under QEMU; auditwheel may fail libc detection on abi3/native .so
+            # When AUDITWHEEL_PLAT is set (ARMv7 vs ARMv7 Legacy), skipping repair would keep
+            # identical wheel filenames across lineages — do not treat libc detection as non-critical.
             or (
                 current_platform == "Linux"
                 and current_arch == "armv7l"
+                and not plat_env
                 and ("InvalidLibc" in error_msg or "couldn't detect libc" in error_msg)
             )
         )
@@ -347,12 +384,28 @@ def main() -> None:
             elif (
                 current_platform == "Linux"
                 and current_arch == "armv7l"
+                and not plat_env
                 and ("InvalidLibc" in error_msg or "couldn't detect libc" in error_msg)
             ):
                 print_color(
                     "  -> Keeping original wheel (auditwheel libc detection failed on ARMv7 runner; often QEMU)",
                     Fore.YELLOW,
                 )
+            if (
+                plat_env
+                and current_platform == "Linux"
+                and current_arch == "armv7l"
+                and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+            ):
+                msg = (
+                    f"Wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r} "
+                    f"after non-fatal repair path: {wheel.name}"
+                )
+                print_color(f"  -> ERROR: {msg}", Fore.RED)
+                errors.append(f"{wheel.name}: {msg}")
+                wheel.unlink(missing_ok=True)
+                error_count += 1
+                continue
             skipped_count += 1
         elif has_error:
             # Actual error occurred (even if a wheel was created, it may be broken)
@@ -383,10 +436,38 @@ def main() -> None:
                     print_color("  -> Deleting repaired output (not a valid / readable zip archive)", Fore.RED)
                     final_path.unlink(missing_ok=True)
                     deleted_count += 1
+                elif (
+                    plat_env
+                    and current_platform == "Linux"
+                    and current_arch == "armv7l"
+                    and not _armv7_forced_plat_filename_ok(final_path.name, plat_env)
+                ):
+                    msg = (
+                        f"Repaired wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r}: {final_path.name}"
+                    )
+                    print_color(f"  -> ERROR: {msg}", Fore.RED)
+                    errors.append(f"{final_path.name}: {msg}")
+                    final_path.unlink(missing_ok=True)
+                    error_count += 1
                 else:
                     repaired_count += 1
             elif result.returncode == 0:
                 # No repaired wheel created, but command succeeded (already compatible)
+                if (
+                    plat_env
+                    and current_platform == "Linux"
+                    and current_arch == "armv7l"
+                    and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+                ):
+                    msg = (
+                        "auditwheel reported success but left the wheel unchanged with a filename "
+                        f"that does not match AUDITWHEEL_PLAT={plat_env!r}: {wheel.name}"
+                    )
+                    print_color(f"  -> ERROR: {msg}", Fore.RED)
+                    errors.append(f"{wheel.name}: {msg}")
+                    wheel.unlink(missing_ok=True)
+                    error_count += 1
+                    continue
                 print_color("  -> Keeping original wheel (already compatible)", Fore.GREEN)
                 skipped_count += 1
             else:
