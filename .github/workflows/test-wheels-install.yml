@@ -113,6 +113,8 @@ jobs:
               python test_wheels_install.py
             "
 
+      # After test_wheels_install.py, ./downloaded_wheels contains only wheels for this
+      # matrix Python + platform (see prune step in test_wheels_install.main).
       - name: Upload tested wheels
         uses: actions/upload-artifact@v4
         with:
