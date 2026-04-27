@@ -99,6 +99,21 @@ def _only_plat_env_enabled() -> bool:
     return os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
 
 
+def _allow_linux_tag_env_enabled() -> bool:
+    """When true, allow keeping linux-tag wheels on ARMv7 even if --plat is set.
+
+    This is useful when resolution prefers piwheels, which may provide wheels
+    tagged as ``linux_armv7l`` that are not repairable to the desired manylinux
+    tag in our repair containers.
+    """
+    return os.environ.get("AUDITWHEEL_ALLOW_LINUX_TAG", "").strip().lower() in ("1", "true", "yes")
+
+
+def _is_linux_tag_wheel(wheel_name: str) -> bool:
+    wn = wheel_name.lower()
+    return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
+
+
 def _armv7_forced_plat_filename_ok(wheel_name: str, plat: str) -> bool:
     """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits.
 
@@ -107,6 +122,8 @@ def _armv7_forced_plat_filename_ok(wheel_name: str, plat: str) -> bool:
     """
     plat_l = plat.lower()
     wn = wheel_name.lower()
+    if _allow_linux_tag_env_enabled() and _is_linux_tag_wheel(wn):
+        return True
     if "manylinux_2_36" in plat_l:
         return "manylinux_2_36" in wn
     if "manylinux_2_31" in plat_l and "manylinux_2_36" not in plat_l:
@@ -344,6 +361,8 @@ def main() -> None:
             continue
 
         plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+        allow_linux_tag = _allow_linux_tag_env_enabled()
+        is_linux_tag = _is_linux_tag_wheel(wheel.name)
 
         # Check for non-critical errors (keep original wheel)
         is_noncritical = (
@@ -351,6 +370,16 @@ def main() -> None:
             # manylinux wheel can't find its libraries
             # it means it was already properly repaired
             or (("manylinux" in wheel.name and "could not be located" in error_msg) and not plat_env)
+            # When allowing linux-tag wheels (piwheels), treat missing graft libs as non-fatal
+            # and keep the original linux-tag wheel rather than failing the whole repair job.
+            or (
+                plat_env
+                and allow_linux_tag
+                and is_linux_tag
+                and (
+                    "Cannot repair wheel, because required library" in error_msg or "could not be located" in error_msg
+                )
+            )
             # ARMv7 CI runs under QEMU; auditwheel may fail libc detection on abi3/native .so
             # When AUDITWHEEL_PLAT is set (ARMv7 vs ARMv7 Legacy), skipping repair would keep
             # identical wheel filenames across lineages — do not treat libc detection as non-critical.
@@ -381,6 +410,11 @@ def main() -> None:
                 print_color("  -> Keeping original wheel (build issue: needs older toolchain)", Fore.YELLOW)
             elif "manylinux" in wheel.name and "could not be located" in error_msg:
                 print_color("  -> Keeping original wheel (already bundled from PyPI)", Fore.GREEN)
+            elif plat_env and allow_linux_tag and is_linux_tag:
+                print_color(
+                    "  -> Keeping original wheel (linux-tag wheel; not forcing manylinux under current policy)",
+                    Fore.YELLOW,
+                )
             elif (
                 current_platform == "Linux"
                 and current_arch == "armv7l"
@@ -396,6 +430,7 @@ def main() -> None:
                 and current_platform == "Linux"
                 and current_arch == "armv7l"
                 and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+                and not (allow_linux_tag and is_linux_tag)
             ):
                 msg = (
                     f"Wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r} "
@@ -441,6 +476,7 @@ def main() -> None:
                     and current_platform == "Linux"
                     and current_arch == "armv7l"
                     and not _armv7_forced_plat_filename_ok(final_path.name, plat_env)
+                    and not (allow_linux_tag and _is_linux_tag_wheel(final_path.name))
                 ):
                     msg = (
                         f"Repaired wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r}: {final_path.name}"
@@ -458,6 +494,7 @@ def main() -> None:
                     and current_platform == "Linux"
                     and current_arch == "armv7l"
                     and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+                    and not (allow_linux_tag and is_linux_tag)
                 ):
                     msg = (
                         "auditwheel reported success but left the wheel unchanged with a filename "

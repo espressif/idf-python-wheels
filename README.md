@@ -179,4 +179,17 @@ Docker files are in its own repository where there are build and published from.
     - For older ARMv7 operating systems
     - For packages requiring glibc 2.31
 
+[!NOTE]
+### ARMv7: prefer piwheels for resolution
+
+For ARMv7 (and ARMv7 Legacy) environments, you may want to prefer [piwheels](https://www.piwheels.org/) as the primary index and use Espressif's index as a secondary source:
+
+```bash
+python -m pip install --index-url https://www.piwheels.org/simple --extra-index-url https://dl.espressif.com/pypi/ <package>
+```
+
+This repository's ARMv7 CI workflows also set these as `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` inside the ARMv7 Docker builds.
+
+**Warning:** piwheels wheels may rely on system-provided shared libraries (i.e. may not bundle `.libs/`). If a target OS is missing those libraries or has an incompatible version, imports may fail at runtime.
+
 [ESP-IDF]: https://github.com/espressif/esp-idf
