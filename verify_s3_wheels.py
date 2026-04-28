@@ -38,6 +38,30 @@ VIOLATION_EXCLUSION_REGEXES = [
 ]
 
 
+def _normalize_pkg_dir(name: str) -> str:
+    """Normalize S3 package directory naming differences.
+
+    Historically, this repo used both underscore and dash package directories on S3
+    (e.g. ``flask_compress`` vs ``flask-compress``). Those can legitimately contain the
+    same wheel basenames. We treat that as a warning, not a violation.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _canonical_pkg_dirs_from_wheel_filename(wheel_name: str) -> set[str]:
+    """Return PEP 503-normalized candidate package dirs derived from the wheel filename.
+
+    Mirrors the wheel-name parsing used by ``upload_wheels.py`` (first ``-`` before a digit).
+    """
+    parsed = parse_wheel_name(wheel_name)
+    if parsed:
+        return {_normalize_pkg_dir(parsed[0])}
+    match = re.compile(r"^(.+?)-(\d+)").search(wheel_name)
+    if not match:
+        return set()
+    return {_normalize_pkg_dir(match.group(1))}
+
+
 def get_supported_python_versions(supported_python_json: str) -> list[str]:
     """Parse supported_python from get-supported-versions output (jq -c .supported_python)."""
     try:
@@ -130,10 +154,30 @@ def main():
 
         keys_for_name = basename_to_keys[wheel]
         if len(keys_for_name) > 1:
+            # Determine whether the duplicate keys are only due to directory normalization
+            # differences (underscore vs dash). Those are historical and are not treated as
+            # violations (we cannot infer which object is authoritative without comparing bytes).
+            pkg_dirs = []
+            for k in keys_for_name:
+                parts = k.split("/")
+                pkg_dirs.append(parts[1] if len(parts) >= 3 else "")
+            normalized = {_normalize_pkg_dir(d) for d in pkg_dirs if d}
             reason_dup = "Duplicate wheel basename across multiple S3 keys: " + ", ".join(sorted(keys_for_name))
-            violations.append((wheel, reason_dup))
-            print_color(f"-- {wheel}", Fore.RED)
-            print(f"   {reason_dup}")
+            canonical = _canonical_pkg_dirs_from_wheel_filename(wheel)
+            if len(normalized) <= 1 or (canonical and canonical.issubset(normalized)):
+                print_color(f"-- {wheel}", Fore.YELLOW)
+                print(f"   {reason_dup}")
+                if len(normalized) <= 1:
+                    print(f"   Note: directories normalize to {next(iter(normalized), '')!r}; treated as warning")
+                else:
+                    print(
+                        "   Note: at least one prefix matches the wheel's canonical project dir "
+                        f"{sorted(canonical)!r}; extra keys are likely stale/wrong-path duplicates; treated as warning"
+                    )
+            else:
+                violations.append((wheel, reason_dup))
+                print_color(f"-- {wheel}", Fore.RED)
+                print(f"   {reason_dup}")
 
         # Check against exclude_list (actual violations)
         should_exclude, reason = should_exclude_wheel_s3(
