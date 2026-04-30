@@ -1,0 +1,7 @@
+# Linux: pip PIP_NO_BINARY / per-wheel --no-binary (ARMv7 Docker + build_wheels on Linux)
+cffi
+pillow
+pyyaml
+brotli
+greenlet
+bitarray

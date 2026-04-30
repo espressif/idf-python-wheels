@@ -146,6 +146,18 @@ The repair tools are used after build to link and bundle all the needed librarie
 
 This logic is done by the [repair workflow](./.github/workflows/wheels-repair.yml) and the [`repair_wheels.py` script](./repair_wheels.py)
 
+### ARMv7 vs ARMv7 Legacy: same wheel filename, different binaries
+
+`Linux ARMv7` and `Linux ARMv7 Legacy` can both produce a wheel whose **filename is identical** (same PEP 425 tags) while the **ELF contents differ** (different glibc/OpenSSL/Rust toolchain lineage). **Note:** `wheels-download-directory-*` CI artifacts are the **pre-repair** build outputs; comparing those can still show identical names until the [repair workflow](./.github/workflows/wheels-repair.yml) runs. Two bad outcomes follow if that is not handled after repair/merge:
+
+1. **Artifact merge / local flatten** — downloading multiple `wheels-repaired-*` artifacts into one directory with `merge-multiple: true` can make the second file **silently overwrite** the first on disk before any upload runs.
+2. **S3 upload** — [`upload_wheels.py`](./upload_wheels.py) publishes to `pypi/<package>/<wheel-filename>`. Uploading a second wheel with the **same key** replaces the object; clients then see whichever build ran last, which can surface as import crashes or segfaults.
+
+Mitigations in this repo:
+
+- Repair sets **`AUDITWHEEL_PLAT`** and **`AUDITWHEEL_ONLY_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) so [`repair_wheels.py`](./repair_wheels.py) runs `auditwheel repair --plat ... --only-plat` and emitted wheels get **distinct single-tag filenames** when auditwheel supports it. If **`AUDITWHEEL_PLAT` is set**, ARMv7 “libc detection failed” outcomes are **not** treated as non-fatal skips (that would leave identical filenames across lineages).
+- The repair workflow merges repaired artifacts using **per-artifact subdirectories**, then runs [`check_wheel_collisions.py`](./check_wheel_collisions.py) to **fail CI** if the same `*.whl` basename appears with **different contents** across lineages, before flattening for tests/upload.
+
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
 
@@ -166,5 +178,18 @@ Docker files are in its own repository where there are build and published from.
 - ARMv7 runner (older OSes) - [manylinux_armv7_legacy](https://github.com/espressif/github-esp-dockerfiles/pkgs/container/github-esp-dockerfiles%2Fidf-python-wheels-armv7l-legacy)
     - For older ARMv7 operating systems
     - For packages requiring glibc 2.31
+
+[!NOTE]
+### ARMv7: prefer piwheels for resolution
+
+For ARMv7 (and ARMv7 Legacy) environments, you may want to prefer [piwheels](https://www.piwheels.org/) as the primary index and use Espressif's index as a secondary source:
+
+```bash
+python -m pip install --index-url https://www.piwheels.org/simple --extra-index-url https://dl.espressif.com/pypi/ <package>
+```
+
+This repository's ARMv7 CI workflows also set these as `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` inside the ARMv7 Docker builds.
+
+**Warning:** piwheels wheels may rely on system-provided shared libraries (i.e. may not bundle `.libs/`). If a target OS is missing those libraries or has an incompatible version, imports may fail at runtime.
 
 [ESP-IDF]: https://github.com/espressif/esp-idf

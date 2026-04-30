@@ -85,6 +85,15 @@ if [ "$arch" == "armv7l" ]; then
     apt remove --auto-remove --purge rust-gdb rustc libstd-rust-dev libstd-rust-1.48 2>/dev/null || true
     # install Rust dependencies
     apt-get install -y libssl-dev libffi-dev gcc musl-dev
+    # Match linux_armv7_docker_prepare.sh: Bookworm armhf has libffi.so.8 only; binary cffi wheels
+    # may still dlopen libffi.so.7 (pip build isolation, piwheels/PyPI manylinux tags).
+    for _ffi_libdir in /usr/lib/arm-linux-gnueabihf /usr/lib/arm-linux-gnueabi; do
+      if [ -d "$_ffi_libdir" ] && [ -f "$_ffi_libdir/libffi.so.8" ] && [ ! -e "$_ffi_libdir/libffi.so.7" ]; then
+        ln -sfn libffi.so.8 "$_ffi_libdir/libffi.so.7"
+        ldconfig 2>/dev/null || true
+        break
+      fi
+    done
     # install Rust
     curl --proto '=https' --tlsv1.3 -sSf https://sh.rustup.rs | bash -s -- -y
     . $HOME/.cargo/env
