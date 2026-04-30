@@ -1,0 +1,9 @@
+# Linux: pip PIP_NO_BINARY / per-wheel --no-binary (ARMv7 Docker + build_wheels on Linux)
+cffi
+# PyPI maturin manylinux wheels need newer glibc than Debian bookworm/bullseye armhf; sdist uses setuptools-rust.
+maturin
+pillow
+pyyaml
+brotli
+greenlet
+bitarray

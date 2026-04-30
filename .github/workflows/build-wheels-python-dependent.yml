@@ -146,7 +146,7 @@ jobs:
             bash -c "
               set -e
               python --version
-              bash os_dependencies/linux_armv7_docker_prepare.sh
+              source os_dependencies/linux_armv7_docker_prepare.sh
               # Install pip packages without cache to reduce memory usage
               python -m pip install --no-cache-dir --upgrade pip
               python -m pip install --no-cache-dir -r build_requirements.txt
@@ -172,7 +172,7 @@ jobs:
             bash -c "
               set -e
               python --version
-              bash os_dependencies/linux_armv7_docker_prepare.sh
+              source os_dependencies/linux_armv7_docker_prepare.sh
               # Install pip packages without cache to reduce memory usage
               python -m pip install --no-cache-dir --upgrade pip
               python -m pip install --no-cache-dir -r build_requirements.txt

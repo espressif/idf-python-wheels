@@ -84,11 +84,21 @@ class YAMLListAdapter:
     requirements: set = set()
 
     def __init__(self, yaml_file: str, exclude: bool = False, current_platform: Optional[str] = None) -> None:
+        self._yaml_list: list = []
         try:
             with open(yaml_file, "r") as f:
-                self._yaml_list = yaml.load(f, yaml.Loader)
+                raw = yaml.load(f, yaml.Loader)
         except FileNotFoundError:
             print_color(f"File not found, please check the file: {yaml_file}", Fore.RED)
+            raw = None
+        if isinstance(raw, dict):
+            # Optional mapping root (e.g. includes under ``includes``); list root is still supported.
+            self._yaml_list = raw.get("includes") or raw.get("include_packages") or []
+        elif isinstance(raw, list):
+            self._yaml_list = raw
+        elif raw is not None:
+            print_color(f"Unexpected YAML root type in {yaml_file}: {type(raw).__name__}", Fore.RED)
+            self._yaml_list = []
         self.exclude = exclude
 
         # When building wheels: only exclude entries that apply to this platform
