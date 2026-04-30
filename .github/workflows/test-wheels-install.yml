@@ -93,7 +93,9 @@ jobs:
             -w /work \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
+              set -e
               python --version
+              bash os_dependencies/linux_armv7_docker_prepare.sh
               python -m pip install --upgrade pip
               pip install -r build_requirements.txt
               python test_wheels_install.py
@@ -107,7 +109,9 @@ jobs:
             -w /work \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
+              set -e
               python --version
+              bash os_dependencies/linux_armv7_docker_prepare.sh
               python -m pip install --upgrade pip
               pip install -r build_requirements.txt
               python test_wheels_install.py
