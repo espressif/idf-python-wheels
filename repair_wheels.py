@@ -363,6 +363,7 @@ def main() -> None:
         plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
         allow_linux_tag = _allow_linux_tag_env_enabled()
         is_linux_tag = _is_linux_tag_wheel(wheel.name)
+        is_std_linux_arch = current_platform == "Linux" and current_arch in ("x86_64", "aarch64")
 
         # Check for non-critical errors (keep original wheel)
         is_noncritical = (
@@ -370,6 +371,16 @@ def main() -> None:
             # manylinux wheel can't find its libraries
             # it means it was already properly repaired
             or (("manylinux" in wheel.name and "could not be located" in error_msg) and not plat_env)
+            # Some upstream manylinux wheels ship with DT_NEEDED entries that reference already-hashed
+            # vendored libs (e.g. libbrotlicommon-<hash>.so.1). When our repair container can't
+            # locate that exact filename, we should keep the original wheel rather than failing
+            # the whole repair workflow (x86_64/aarch64 only; ARMv7 uses forced plat policy).
+            or (
+                is_std_linux_arch
+                and "manylinux" in wheel.name
+                and "Cannot repair wheel, because required library" in error_msg
+                and "could not be located" in error_msg
+            )
             # When allowing linux-tag wheels (piwheels), treat missing graft libs as non-fatal
             # and keep the original linux-tag wheel rather than failing the whole repair job.
             or (
