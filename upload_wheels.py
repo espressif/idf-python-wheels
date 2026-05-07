@@ -7,12 +7,16 @@
 - argument S3 bucket
 """
 
+import hashlib
 import os
 import re
 import sys
 
+from typing import Optional
+
 import boto3
 
+from botocore.exceptions import ClientError
 from colorama import Fore
 
 from _helper_functions import print_color
@@ -30,6 +34,44 @@ if not os.path.exists(WHEELS_DIR):
 
 def normalize(name):
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _file_md5_hex(path: str, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _overwrite_would_hide_different_wheel(s3_key: str, local_path: str) -> Optional[str]:
+    """Return an error message if an existing object differs from local_path; else None."""
+    obj = BUCKET.Object(s3_key)
+    try:
+        obj.load()
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in ("404", "NoSuchKey"):
+            return None
+        raise
+    remote_size = obj.content_length
+    local_size = os.path.getsize(local_path)
+    if remote_size != local_size:
+        return f"Refusing to overwrite {s3_key}: remote size {remote_size} != local size {local_size}"
+    etag = (obj.e_tag or "").strip('"')
+    if not etag or "-" in etag:
+        # Multipart upload ETag is not a raw MD5; size match is the best check here.
+        return None
+    local_md5 = _file_md5_hex(local_path)
+    if etag != local_md5:
+        return (
+            f"Refusing to overwrite {s3_key}: remote ETag {etag!r} != local MD5 {local_md5!r}. "
+            "Same wheel filename would publish different bytes (e.g. ARMv7 vs ARMv7 Legacy collision)."
+        )
+    return None
 
 
 def get_existing_wheels():
@@ -76,9 +118,14 @@ for full_path, wheel in wheel_paths:
         wheel_name = match.group(1)
         wheel_name = normalize(wheel_name)
 
-        is_new = f"pypi/{wheel_name}/{wheel}" not in existing_wheels
+        s3_key = f"pypi/{wheel_name}/{wheel}"
+        is_new = s3_key not in existing_wheels
 
-        BUCKET.upload_file(full_path, f"pypi/{wheel_name}/{wheel}", ExtraArgs={"ACL": "public-read"})
+        conflict = _overwrite_would_hide_different_wheel(s3_key, full_path)
+        if conflict:
+            raise SystemExit(conflict)
+
+        BUCKET.upload_file(full_path, s3_key, ExtraArgs={"ACL": "public-read"})
 
         if is_new:
             new_wheels += 1

@@ -254,10 +254,13 @@ jobs:
             -w /work \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e PIP_INDEX_URL=https://www.piwheels.org/simple \
+            -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
               python --version
+              source os_dependencies/linux_armv7_docker_prepare.sh
               # Install pip packages without cache to reduce memory usage
               python -m pip install --no-cache-dir --upgrade pip
               python -m pip install --no-cache-dir -r build_requirements.txt
@@ -339,10 +342,13 @@ jobs:
             -w /work \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
+            -e PIP_INDEX_URL=https://www.piwheels.org/simple \
+            -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
               set -e
               python --version
+              source os_dependencies/linux_armv7_docker_prepare.sh
               # Install pip packages without cache to reduce memory usage
               python -m pip install --no-cache-dir --upgrade pip
               python -m pip install --no-cache-dir -r build_requirements.txt

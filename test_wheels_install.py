@@ -9,6 +9,10 @@ This script finds and installs wheels compatible with the current Python version
 verifying that wheel files are valid and platform-compatible.
 It also checks wheels against exclude_list.yaml and removes incompatible ones.
 
+After a successful run, wheels that do not match this job's Python version and host
+platform are deleted from ``downloaded_wheels`` so CI ``wheels-tested-*`` artifacts
+do not carry the full multi-Python merge (only ``wheels-repaired-all`` is merged).
+
 Wheels are ZIP archives (PEP 427). pip opens them with the zipfile module; a
 BadZipFile / "Bad magic number" error means the bytes on disk are not a valid
 ZIP (truncated, corrupted, or not a wheel), not that ".whl" was mistaken for ".zip".
@@ -107,6 +111,29 @@ def find_compatible_wheels(python_version: str) -> list[Path]:
             wheels.append(wheel_path)
 
     return sorted(wheels)
+
+
+def prune_wheels_not_for_current_python(
+    python_version_tag: str,
+    wheels_dir: Path | None = None,
+) -> int:
+    """Remove ``*.whl`` files that are not compatible with this Python + platform.
+
+    CI downloads the full merged ``wheels-repaired-all`` tree into ``downloaded_wheels``,
+    then tests only compatible wheels. Without pruning, the subsequent
+    ``wheels-tested-<arch>-<py>`` artifact would still contain every cp/py tag from the
+    merge, which is misleading and huge. ``wheels_dir`` defaults to ``WHEELS_DIR`` for
+    production; tests may pass a temporary directory.
+    """
+    base = wheels_dir if wheels_dir is not None else WHEELS_DIR
+    if not base.exists():
+        return 0
+    removed = 0
+    for wheel_path in base.glob("*.whl"):
+        if not is_wheel_compatible(wheel_path.name, python_version_tag):
+            wheel_path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def install_wheel(wheel_path: Path) -> tuple[bool, str]:
@@ -276,6 +303,14 @@ def main() -> int:
         for wheel_name, _ in failed_wheels:
             print(f"  - {wheel_name}")
         return 1
+
+    pruned = prune_wheels_not_for_current_python(python_version_tag)
+    if pruned:
+        print_color(
+            f"Pruned {pruned} wheel(s) not for this matrix (Python {python_version} / "
+            f"current platform) before artifact upload",
+            Fore.YELLOW,
+        )
 
     print_color("\nAll compatible wheels processed successfully!", Fore.GREEN)
     return 0

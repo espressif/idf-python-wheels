@@ -37,19 +37,10 @@ from packaging.version import InvalidVersion
 from packaging.version import Version
 from packaging.version import parse as parse_version
 
-# Packages that should be built from source on Linux to ensure correct library linking
-# These packages often have pre-built wheels on PyPI that link against different library versions
-# NOTE: This only applies to Linux (especially ARM) - Windows and macOS pre-built wheels work fine
-# NOTE: Do NOT add packages with Rust components (cryptography, pynacl, bcrypt) here
-# as they have complex build requirements and may not support all Python versions
-FORCE_SOURCE_BUILD_PACKAGES_LINUX = [
-    "cffi",
-    "pillow",
-    "pyyaml",
-    "brotli",
-    "greenlet",
-    "bitarray",
-]
+# Linux ``--no-binary`` names: one per line in ``force_no_binary_linux.txt`` (also ``PIP_NO_BINARY`` in ARMv7 Docker).
+
+_REPO_ROOT = Path(__file__).resolve().parent
+FORCE_NO_BINARY_LINUX_FILE = "force_no_binary_linux.txt"
 
 EXCLUDE_LIST_PATH = "exclude_list.yaml"
 
@@ -255,6 +246,20 @@ def exclude_entry_applies_to_platform(entry: dict, current_platform: str) -> boo
     return False
 
 
+def load_force_no_binary_linux_names(repo_root: Path | None = None) -> list[str]:
+    """Package names for Linux ``--no-binary`` / ``PIP_NO_BINARY`` (``force_no_binary_linux.txt``)."""
+    root = repo_root if repo_root is not None else _REPO_ROOT
+    path = root / FORCE_NO_BINARY_LINUX_FILE
+    out: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.append(line)
+    if not out:
+        raise ValueError(f"{path}: need at least one non-comment package name")
+    return out
+
+
 def get_no_binary_args(requirement_name: str) -> list:
     """Get --no-binary arguments if this package should be built from source.
 
@@ -277,7 +282,7 @@ def get_no_binary_args(requirement_name: str) -> list:
         return []
     pkg_name = match.group(1).lower().replace("-", "_")
 
-    for pkg in FORCE_SOURCE_BUILD_PACKAGES_LINUX:
+    for pkg in load_force_no_binary_linux_names(_REPO_ROOT):
         if pkg.lower().replace("-", "_") == pkg_name:
             return ["--no-binary", match.group(1)]
     return []
