@@ -24,6 +24,7 @@ from typing import Union
 
 from colorama import Fore
 
+from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import wheel_archive_is_readable
 
@@ -112,6 +113,38 @@ def _allow_linux_tag_env_enabled() -> bool:
 def _is_linux_tag_wheel(wheel_name: str) -> bool:
     wn = wheel_name.lower()
     return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
+
+
+def _should_skip_armv7_auditwheel(wheel_name: str, current_arch: str) -> bool:
+    """Keep ``linux_armv7l`` wheels (piwheels / local) — do not retag with auditwheel manylinux on ARMv7."""
+    return current_arch == "armv7l" and _is_linux_tag_wheel(wheel_name)
+
+
+def _prune_manylinux_armv7_when_linux_tag_present(wheels_dir: Path) -> int:
+    """Remove manylinux armv7l wheels when a linux_armv7l sibling exists (pip prefers manylinux)."""
+    removed = 0
+    by_dist: dict[str, list[Path]] = {}
+    for path in wheels_dir.rglob("*.whl"):
+        if "armv7l" not in path.name.lower():
+            continue
+        parsed = parse_wheel_name(path.name)
+        if not parsed:
+            continue
+        by_dist.setdefault(parsed[0], []).append(path)
+
+    for dist, paths in by_dist.items():
+        linux_paths = [p for p in paths if _is_linux_tag_wheel(p.name)]
+        manylinux_paths = [p for p in paths if "manylinux" in p.name.lower() and "armv7l" in p.name.lower()]
+        if not linux_paths or not manylinux_paths:
+            continue
+        for path in manylinux_paths:
+            print_color(
+                f"Removing manylinux armv7l wheel (linux_armv7l kept; pip would prefer manylinux): {path.name}",
+                Fore.YELLOW,
+            )
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def _armv7_forced_plat_filename_ok(wheel_name: str, plat: str) -> bool:
@@ -283,6 +316,14 @@ def main() -> None:
             print_color("  -> Deleting file (not a valid / readable zip wheel archive)", Fore.RED)
             wheel.unlink(missing_ok=True)
             deleted_count += 1
+            continue
+
+        if _should_skip_armv7_auditwheel(wheel.name, current_arch):
+            print_color(
+                "  -> Skipping auditwheel (linux_armv7l; keep piwheels/local wheel on ARMv7)",
+                Fore.YELLOW,
+            )
+            skipped_count += 1
             continue
 
         # Clean temp directory
@@ -523,6 +564,11 @@ def main() -> None:
                 print_color(f"  -> ERROR: {error_msg}", Fore.RED)
                 errors.append(f"{wheel.name}: {error_msg}")
                 error_count += 1
+
+    if current_platform == "Linux" and current_arch == "armv7l":
+        pruned = _prune_manylinux_armv7_when_linux_tag_present(wheels_dir)
+        if pruned:
+            print_color(f"Pruned {pruned} manylinux armv7l wheel(s) superseded by linux_armv7l", Fore.YELLOW)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Total wheels: {len(wheels)}")

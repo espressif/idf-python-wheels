@@ -12,6 +12,7 @@ import re
 import sys
 import zipfile
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -26,6 +27,8 @@ from urllib.parse import quote
 from urllib.request import Request
 from urllib.request import urlopen
 
+import yaml
+
 from colorama import Fore
 from colorama import Style
 from packaging.requirements import Requirement
@@ -37,12 +40,14 @@ from packaging.version import InvalidVersion
 from packaging.version import Version
 from packaging.version import parse as parse_version
 
-# Linux ``--no-binary`` names: one per line in ``force_no_binary_linux.txt`` (also ``PIP_NO_BINARY`` in ARMv7 Docker).
+# Linux ``--no-binary`` names: one per line in ``force_no_binary_linux.txt``
+# (x86_64/aarch64 Linux only; ARMv7 uses piwheels).
 
 _REPO_ROOT = Path(__file__).resolve().parent
 FORCE_NO_BINARY_LINUX_FILE = "force_no_binary_linux.txt"
 
 EXCLUDE_LIST_PATH = "exclude_list.yaml"
+NATIVE_IMPORT_GUARD_PATH = "native_import_guard.yaml"
 
 # Platform names for exclude_list.yaml (YAML -> runner name)
 PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
@@ -74,6 +79,11 @@ def get_current_platform() -> str:
     if system == "windows":
         return "windows"
     return sys.platform
+
+
+def is_linux_armv7_runner() -> bool:
+    """True on Linux ARMv7 wheel builds (Docker ``armv7l`` / ``armhf``)."""
+    return platform.system() == "Linux" and platform.machine().lower() in ("armv7l", "armv7", "armhf")
 
 
 def wheel_archive_is_readable(path: Path) -> bool:
@@ -267,6 +277,43 @@ def load_force_no_binary_linux_names(repo_root: Path | None = None) -> list[str]
     return out
 
 
+@dataclass(frozen=True)
+class NativeImportGuardEntry:
+    """Import probes for native ARMv7 wheels (``test_wheels_install.py``)."""
+
+    imports: tuple[str, ...]
+
+
+_NATIVE_IMPORT_GUARD_CACHE: dict[Path, dict[str, NativeImportGuardEntry]] = {}
+
+
+def native_import_guard_by_name(
+    repo_root: Path | None = None,
+) -> dict[str, NativeImportGuardEntry]:
+    """Map canonical distribution name → guard config (``native_import_guard.yaml``)."""
+    root = (repo_root if repo_root is not None else _REPO_ROOT).resolve()
+    cached = _NATIVE_IMPORT_GUARD_CACHE.get(root)
+    if cached is not None:
+        return cached
+    path = root / NATIVE_IMPORT_GUARD_PATH
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    by_name: dict[str, NativeImportGuardEntry] = {}
+    for entry in data.get("packages") or []:
+        if not isinstance(entry, dict):
+            continue
+        name, imports = entry.get("name"), entry.get("imports")
+        if not name or not imports:
+            continue
+        stmts = tuple(str(s).strip() for s in imports if str(s).strip())
+        if not stmts:
+            continue
+        by_name[canonicalize_name(str(name))] = NativeImportGuardEntry(imports=stmts)
+    if not by_name:
+        raise ValueError(f"{path}: no packages with imports defined")
+    _NATIVE_IMPORT_GUARD_CACHE[root] = by_name
+    return by_name
+
+
 def _force_no_binary_linux_normalized(repo_root: Path | None = None) -> frozenset[str]:
     """
     Normalized package names from ``force_no_binary_linux.txt``
@@ -296,6 +343,10 @@ def get_no_binary_args(requirement_name: str) -> list:
     if platform.system() != "Linux":
         return []
 
+    # ARMv7 CI uses piwheels (``linux_armv7l``); do not override with ``force_no_binary_linux.txt``.
+    if is_linux_armv7_runner():
+        return []
+
     # Extract package name from requirement string (e.g., "cffi>=1.0" -> "cffi")
     match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
     if not match:
@@ -305,6 +356,65 @@ def get_no_binary_args(requirement_name: str) -> list:
     if pkg_name in _force_no_binary_linux_normalized(_REPO_ROOT):
         return ["--no-binary", match.group(1)]
     return []
+
+
+# Do not pass ``--no-binary`` for these in ``build_wheels_from_file --force-interpreter-binary``:
+# legacy sdists, PyObjC, heavy Rust/maturin stacks, and ARMv7 CFFI-backed wheels where
+# forced source builds fail under QEMU (libffi / glibc in pip's isolated build env).
+FORCE_INTERPRETER_BINARY_SKIP_EXACT = frozenset(
+    {
+        canonicalize_name("argon2-cffi-bindings"),
+        canonicalize_name("cryptography"),
+        canonicalize_name("protobuf"),
+        canonicalize_name("pydantic-core"),
+        canonicalize_name("pynacl"),
+        canonicalize_name("rpds-py"),
+        canonicalize_name("ruamel.yaml.clib"),
+        canonicalize_name("tibs"),
+    }
+)
+
+
+def force_interpreter_skip_package(canonical_dist_name: str) -> bool:
+    if canonical_dist_name in FORCE_INTERPRETER_BINARY_SKIP_EXACT:
+        return True
+    return canonical_dist_name == "pyobjc" or canonical_dist_name.startswith("pyobjc-")
+
+
+def find_links_wheel_build_skip(
+    req: Requirement,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> Tuple[bool, str]:
+    """Skip ``pip wheel`` when find-links already satisfies the pin or only an sdist would work.
+
+    Merged IDF requirements can list several cryptography pins. Stage-1 may already have
+    ``cryptography-47.0.0`` in ``downloaded_wheels`` while a later line says ``cryptography<45``.
+    Pip then resolves an older sdist (maturin) and fails with ``BackendUnavailable``.
+    """
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return False, ""
+    canonical = canonicalize_name(req.name)
+    versions: list[Version] = []
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if not parsed or parsed[0] != canonical:
+            continue
+        try:
+            versions.append(Version(parsed[1]))
+        except InvalidVersion:
+            continue
+    if not versions:
+        return False, ""
+    matching = [v for v in versions if req.specifier.contains(v, prereleases=True)]
+    if matching:
+        best = max(matching)
+        return True, f"find-links already has {req.name} {best} matching {req.specifier}"
+    newest = max(versions)
+    return (
+        True,
+        f"find-links has {req.name} up to {newest} but none match {req.specifier}",
+    )
 
 
 def get_pip_wheel_extra_args(requirement_name: str) -> list[str]:
@@ -384,11 +494,11 @@ def parse_wheel_name(wheel_name: str) -> tuple[str, str] | None:
     (epochs, local versions, post/dev releases, etc.).
 
     Returns:
-        tuple: (normalized_package_name, version_str) or None if parsing fails
+        tuple: (canonical distribution name, version_str) or None if parsing fails
     """
     try:
         name, version, _build, _tags = parse_wheel_filename(wheel_name)
-        return name, str(version)
+        return canonicalize_name(str(name)), str(version)
     except InvalidWheelFilename:
         return None
 
@@ -415,8 +525,7 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
     if not parsed:
         return False, ""
 
-    pkg_name, wheel_version = parsed
-    canonical_name = canonicalize_name(pkg_name)
+    canonical_name, wheel_version = parsed
 
     for req in exclude_requirements:
         # Check if package name matches (using canonical names)
@@ -448,11 +557,33 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
 
     Examples:
         - "pkg-1.0-cp311-cp311-linux.whl" -> "3.11"
+        - "pkg-1.0-cp39-abi3-manylinux_2_31_armv7l.whl" -> "3.9"
         - "pkg-1.0-py3-none-any.whl" -> None (universal)
     """
     match = re.search(r"-cp(\d)(\d+)-", wheel_name)
     if match:
         return f"{match.group(1)}.{match.group(2)}"
+    match = re.search(r"-cp(\d{2})-abi3-", wheel_name)
+    if match:
+        tag = match.group(1)
+        return f"{int(tag[0])}.{tag[1:]}"
+    return None
+
+
+def get_wheel_linux_arch(wheel_name: str) -> str | None:
+    """Return ``linux_armv7`` / ``linux_arm64`` / ``linux_x86_64`` from platform tags, or None."""
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        return None
+    for tag in tags:
+        pt = tag.platform.lower()
+        if "armv7l" in pt:
+            return "linux_armv7"
+        if "aarch64" in pt:
+            return "linux_arm64"
+        if "x86_64" in pt:
+            return "linux_x86_64"
     return None
 
 
@@ -529,8 +660,7 @@ def should_exclude_wheel_s3(
     if not parsed:
         return False, ""
 
-    pkg_name, wheel_version = parsed
-    canonical_name = canonicalize_name(pkg_name)
+    canonical_name, wheel_version = parsed
     wheel_python = get_wheel_python_version(wheel_name)
     wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
 

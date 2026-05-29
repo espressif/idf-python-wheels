@@ -26,10 +26,14 @@ from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
 from _helper_functions import filter_requirements_by_pypi_requires_python
+from _helper_functions import find_links_wheel_build_skip
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
 from _helper_functions import print_color
+from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
+from emit_sdist_requirements import compute_sdist_requirements
+from emit_sdist_requirements import write_sdist_requirements_file
 from yaml_list_adapter import YAMLListAdapter
 
 # GLOBAL VARIABLES
@@ -289,9 +293,15 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
     """
     failed_wheels = 0
     succeeded_wheels = 0
+    skipped_wheels = 0
 
     dir = f"{os.path.curdir}{(os.sep)}downloaded_wheels"
     for requirement in requirements:
+        skip, reason = find_links_wheel_build_skip(requirement, dir)
+        if skip:
+            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
+            skipped_wheels += 1
+            continue
         # non classic requirement wheel build
         if non_classic_requirement:
             pattern = re.compile(r"(--[^ ]*)(.*)")
@@ -361,7 +371,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
         else:
             succeeded_wheels += 1
 
-    return {"failed": failed_wheels, "succeeded": succeeded_wheels}
+    return {"failed": failed_wheels, "succeeded": succeeded_wheels, "skipped": skipped_wheels}
 
 
 def get_python_dependent_wheels(wheel_dir: str, requirements: set) -> set:
@@ -413,6 +423,18 @@ def main() -> int:
 
     requirements = assemble_requirements(idf_branches, idf_constraints, True)
 
+    # Sdist list is the same on every runner (union over SDIST_EVAL_PLATFORMS in
+    # emit_sdist_requirements.py).
+    # CI uploads requirements.txt + sdist_requirements.txt
+    # as idf-requirements-bundle only from Linux x86_64
+    # This skips redundant work elsewhere.
+    if get_current_platform() == "linux_x86_64":
+        sdist_reqs = compute_sdist_requirements(requirements)
+        sdist_count = write_sdist_requirements_file(SDIST_REQUIREMENTS_FILE, sdist_reqs)
+        print_color("---------- SDIST REQUIREMENTS (index fallback) ----------")
+        print_color(f"Packages needing sdist on index: {sdist_count}", Fore.CYAN)
+        print_color("---------- END SDIST REQUIREMENTS ----------")
+
     exclude_list = YAMLListAdapter(
         "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
     ).requirements
@@ -431,15 +453,19 @@ def main() -> int:
     additional_whl = build_wheels(include_list)
     failed_wheels = additional_whl["failed"]
     succeeded_wheels = additional_whl["succeeded"]
+    skipped_wheels = additional_whl.get("skipped", 0)
 
     print_color("---------- BUILD WHEELS ----------")
     standard_whl = build_wheels(after_exclude_requirements)
     failed_wheels += standard_whl["failed"]
     succeeded_wheels += standard_whl["succeeded"]
+    skipped_wheels += standard_whl.get("skipped", 0)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
+    if skipped_wheels:
+        print_color(f"Skipped {skipped_wheels} wheels (find-links)", Fore.YELLOW)
 
     if failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")

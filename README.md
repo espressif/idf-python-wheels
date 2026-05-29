@@ -118,6 +118,14 @@ If the **project** JSON cannot be fetched (network error, etc.), preflight does 
 
 This complements **`exclude_list.yaml`**: the YAML still expresses **platform**, **markers**, and **build/repair** policy where PyPI metadata is not enough. Preflight focuses on **Python version compatibility declared on PyPI** for matching releases.
 
+### Source distributions on the Espressif index (PEP 503)
+
+Wheel builds still honor **`exclude_list.yaml`** on each CI platform. [`emit_sdist_requirements.py`](./emit_sdist_requirements.py) unions over every supported platform and Python version: if a package has **no buildable wheel path for at least one** such environment (after exclude merging), it is listed in **`sdist_requirements.txt`** and published as an **sdist** (`.tar.gz`, `.zip`, and other formats pip may fetch) on [https://dl.espressif.com/pypi](https://dl.espressif.com/pypi). Pip can then fall back to the sdist when no compatible wheel exists for the current environment (for example a dependency excluded only on Windows).
+
+- [`build_wheels.py`](./build_wheels.py) assembles the full IDF dependency tree, then [`emit_sdist_requirements.py`](./emit_sdist_requirements.py) computes **`sdist_requirements.txt`** (union over all platforms).
+- [`download_sdists.py`](./download_sdists.py) fetches those sdists from PyPI during upload; [`upload_wheels.py`](./upload_wheels.py) and [`create_index_pages.py`](./create_index_pages.py) place them under `pypi/<project>/` next to wheels (PEP 503 simple repository layout).
+- [`verify_s3_sdists.py`](./verify_s3_sdists.py) checks that each listed package has at least one sdist object on S3 after upload.
+
 To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set the environment variable:
 
 | Variable | Effect when set to `1`, `true`, or `yes` (case-insensitive) |
@@ -129,6 +137,33 @@ To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set
 File for additional Python packages to the **main requirements** list. Built separately to not restrict the **main requirements** list.
 
 The syntax can be also converted into a sentence: "For assembled **main requirements** additionally include `package_name` with `version` on `platform` for `python` version".
+
+
+### native_import_guard.yaml
+File for **native ARMv7 import checks** after wheels are installed in CI ([`test_wheels_install.py`](./test_wheels_install.py)). It does not change the requirements list.
+
+For every `name` there is:
+
+* `imports` — Python statement(s) to run after install (list of strings; multiline allowed)
+
+native_import_guard template:
+
+    packages:
+      - name: '<distribution_name>'
+        imports:
+          - import _cffi_backend
+
+The syntax can be converted into a sentence: "After installing the wheel for `name` on ARMv7, run `imports` and fail CI if import crashes or errors."
+
+example:
+
+```yaml
+    - name: 'cffi'
+      imports:
+        - import _cffi_backend
+```
+
+This would mean: load the real C extension for `cffi` on ARMv7 (not `import cffi` alone). The same names are referenced in [`repair_wheels.py`](./repair_wheels.py) for ARMv7 manylinux repair policy.
 
 
 ### build_requirements.txt
@@ -155,7 +190,8 @@ This logic is done by the [repair workflow](./.github/workflows/wheels-repair.ym
 
 Mitigations in this repo:
 
-- Repair sets **`AUDITWHEEL_PLAT`** and **`AUDITWHEEL_ONLY_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) so [`repair_wheels.py`](./repair_wheels.py) runs `auditwheel repair --plat ... --only-plat` and emitted wheels get **distinct single-tag filenames** when auditwheel supports it. If **`AUDITWHEEL_PLAT` is set**, ARMv7 “libc detection failed” outcomes are **not** treated as non-fatal skips (that would leave identical filenames across lineages).
+- **ARMv7 builds** use [piwheels](https://www.piwheels.org/) as the primary index (`PIP_INDEX_URL` in CI). [`force_no_binary_linux.txt`](./force_no_binary_linux.txt) applies on **x86_64/aarch64 Linux only**, not in ARMv7 Docker, so pip can reuse upstream **`linux_armv7l`** wheels when available. [`repair_wheels.py`](./repair_wheels.py) **does not** run auditwheel manylinux repair on those wheels (avoids bad relinks and basename clashes); it still repairs **`manylinux_*_armv7l`** wheels from PyPI when no `linux_armv7l` sibling exists.
+- Repair sets **`AUDITWHEEL_PLAT`** and **`AUDITWHEEL_ONLY_PLAT`** per lineage (`manylinux_2_36_armv7l` vs `manylinux_2_31_armv7l`) for that remaining manylinux path so [`repair_wheels.py`](./repair_wheels.py) can emit **distinct single-tag filenames** when auditwheel applies. If **`AUDITWHEEL_PLAT` is set**, ARMv7 “libc detection failed” outcomes are **not** treated as non-fatal skips for wheels that must be retagged (that would leave identical filenames across lineages).
 - The repair workflow merges repaired artifacts using **per-artifact subdirectories**, then runs [`check_wheel_collisions.py`](./check_wheel_collisions.py) to **fail CI** only if the same `*.whl` basename appears with **different contents** under **both** `wheels-repaired-linux-armv7` and `wheels-repaired-linux-armv7legacy` **and** the wheel is not a pure universal (`platform` tag `any` only; those ZIPs can legitimately differ between lineages). Other duplicate basenames across macOS runners or pure-Python wheels are expected and are ignored, before flattening for tests/upload.
 
 ## Activity Diagram

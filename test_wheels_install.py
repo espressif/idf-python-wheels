@@ -20,6 +20,7 @@ ZIP (truncated, corrupted, or not a wheel), not that ".whl" was mistaken for ".z
 
 from __future__ import annotations
 
+import platform
 import re
 import subprocess
 import sys
@@ -30,9 +31,12 @@ from colorama import Fore
 
 from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import get_current_platform
+from _helper_functions import native_import_guard_by_name
+from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel
 from _helper_functions import wheel_archive_is_readable
+from native_import_probe import run_import_probes
 from yaml_list_adapter import YAMLListAdapter
 
 WHEELS_DIR = Path("./downloaded_wheels")
@@ -245,6 +249,7 @@ def main() -> int:
     discarded_corrupt = 0
     failed_wheels = []
     deleted_wheels = []
+    installed_wheels: list[Path] = []
 
     print_color("---------- INSTALL WHEELS ----------")
 
@@ -261,6 +266,7 @@ def main() -> int:
 
         if success:
             installed += 1
+            installed_wheels.append(wheel_path)
         elif is_compatibility_error(error_message):
             # Wheel is valid but has Python version or platform constraints
             # Delete it as it's incompatible with this environment
@@ -282,6 +288,29 @@ def main() -> int:
                     print(f"   {line}")
 
     print_color("---------- END INSTALL WHEELS ----------")
+
+    native_failed = 0
+    if platform.machine().lower() == "armv7l" and installed_wheels:
+        guarded = native_import_guard_by_name()
+        print_color("---------- NATIVE IMPORT PROBES (ARMv7) ----------")
+        for wheel_path in installed_wheels:
+            parsed = parse_wheel_name(wheel_path.name)
+            if not parsed or parsed[0] not in guarded:
+                continue
+            ok, msg = run_import_probes(guarded[parsed[0]].imports)
+            if ok:
+                print_color(f"-- {wheel_path.name}", Fore.GREEN)
+            else:
+                native_failed += 1
+                failed_wheels.append((wheel_path.name, msg or "native import probe failed"))
+                print_color(f"-- {wheel_path.name}", Fore.RED)
+                if msg:
+                    for line in msg.splitlines()[:5]:
+                        print(f"   {line}")
+        print_color("---------- END NATIVE IMPORT PROBES ----------")
+        if native_failed:
+            failed += native_failed
+            print_color(f"Native import failures: {native_failed}", Fore.RED)
 
     # Print statistics
     print_color("---------- STATISTICS ----------")

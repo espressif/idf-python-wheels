@@ -227,6 +227,16 @@ jobs:
           path: ./dependent_requirements.txt
           retention-days: 1
 
+      - name: Upload IDF requirements bundle for sdist index
+        if: matrix.os == 'Linux x86_64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: idf-requirements-bundle
+          path: |
+            requirements.txt
+            sdist_requirements.txt
+          retention-days: 1
+
 
   build-python-version-dependent-wheels:
     needs: [get-supported-versions, build-wheels]
@@ -252,7 +262,7 @@ jobs:
     secrets: inherit
 
   verify-s3-wheels:
-    needs: [get-supported-versions, upload-python-wheels]
+    needs: [get-supported-versions, upload-python-wheels, build-wheels]
     name: Verify S3 wheels against exclude list
     runs-on: ubuntu-latest
     env:
@@ -282,3 +292,12 @@ jobs:
 
       - name: Verify S3 wheels
         run: python verify_s3_wheels.py ${{ secrets.DL_BUCKET }} ${{ needs.get-supported-versions.outputs.oldest_supported_python }} '${{ needs.get-supported-versions.outputs.supported_python }}'
+
+      - name: Download IDF requirements bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: idf-requirements-bundle
+          path: .
+
+      - name: Verify S3 sdists (PEP 503 fallback)
+        run: python verify_s3_sdists.py ${{ secrets.DL_BUCKET }} sdist_requirements.txt

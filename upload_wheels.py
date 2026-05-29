@@ -33,34 +33,49 @@ def normalize(name):
 
 
 def get_existing_wheels():
-    """Get set of S3 keys for wheels currently on server."""
+    """Get set of S3 keys for wheels and sdists already on the server."""
     existing = set()
     for obj in BUCKET.objects.filter(Prefix="pypi/"):
-        if obj.key.endswith(".whl"):
+        if obj.key.endswith((".whl", ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip")):
             existing.add(obj.key)
     return existing
 
 
-print_color("---------- UPLOAD WHEELS TO S3 ----------")
+print_color("---------- UPLOAD WHEELS AND SDISTS TO S3 ----------")
 
 existing_wheels = get_existing_wheels()
-print(f"Found {len(existing_wheels)} existing wheels on S3\n")
+print(f"Found {len(existing_wheels)} existing wheels and sdists on S3\n")
 
 print_color("---------- UPLOADING WHEELS ----------")
 
 
 def collect_wheel_paths():
-    """Collect (full_path, wheel_filename) for all .whl files in WHEELS_DIR.
-    Handles both flat layout (wheels directly in dir) and nested (wheels in subdirs).
+    """Collect (full_path, filename) for wheels and sdists in WHEELS_DIR.
+
+    Handles flat layout (artifacts directly in dir) and nested (artifacts in subdirs).
     """
     collected = []
     for item in os.listdir(WHEELS_DIR):
         path = os.path.join(WHEELS_DIR, item)
-        if os.path.isfile(path) and item.endswith(".whl"):
+        if os.path.isfile(path) and (
+            item.endswith(".whl")
+            or item.endswith(".tar.gz")
+            or item.endswith(".tar.bz2")
+            or item.endswith(".tar.xz")
+            or item.endswith(".tar.zst")
+            or item.endswith(".zip")
+        ):
             collected.append((path, item))
         elif os.path.isdir(path):
             for wheel in os.listdir(path):
-                if wheel.endswith(".whl"):
+                if (
+                    wheel.endswith(".whl")
+                    or wheel.endswith(".tar.gz")
+                    or wheel.endswith(".tar.bz2")
+                    or wheel.endswith(".tar.xz")
+                    or wheel.endswith(".tar.zst")
+                    or wheel.endswith(".zip")
+                ):
                     collected.append((os.path.join(path, wheel), wheel))
     return collected
 
@@ -91,7 +106,7 @@ for full_path, wheel in wheel_paths:
 print_color("---------- END UPLOADING ----------")
 
 print_color("---------- STATISTICS ----------")
-print_color(f"New wheels: {new_wheels}", Fore.GREEN)
-print(f"Existing wheels (re-uploaded): {existing_count}")
+print_color(f"New wheels and sdists: {new_wheels}", Fore.GREEN)
+print(f"Existing wheels and sdists (re-uploaded): {existing_count}")
 print(f"Total uploaded: {new_wheels + existing_count}")
 print_color("---------- END STATISTICS ----------")

@@ -7,6 +7,7 @@
 #
 import os
 import sys
+import tempfile
 import unittest
 
 from pathlib import Path
@@ -17,9 +18,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from _helper_functions import current_interpreter_satisfies_requires_python
 from _helper_functions import filter_requirements_by_pypi_requires_python
+from _helper_functions import find_links_wheel_build_skip
+from _helper_functions import force_interpreter_skip_package
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
 from _helper_functions import pypi_requires_python_preflight_skip
@@ -505,6 +509,56 @@ class TestGetNoBinaryArgs(unittest.TestCase):
         """Test that empty list is returned for packages not in source build list."""
         result = get_no_binary_args("requests")
         self.assertEqual(result, [])
+
+    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    @patch("_helper_functions.platform.system", return_value="Linux")
+    def test_returns_empty_on_linux_armv7_for_piwheels_policy(self, mock_system, mock_armv7):
+        """ARMv7 uses piwheels; force_no_binary_linux.txt does not apply there."""
+        result = get_no_binary_args("cffi")
+        self.assertEqual(result, [])
+
+
+class TestForceInterpreterBinarySkip(unittest.TestCase):
+    """--force-interpreter-binary skip policy for dependent wheel builds."""
+
+    def test_skip_armv7_cffi_backed_packages(self):
+        for name in (
+            "argon2-cffi-bindings",
+            "pynacl",
+            "tibs",
+            "rpds-py",
+            "cryptography",
+        ):
+            self.assertTrue(force_interpreter_skip_package(canonicalize_name(name)))
+
+    def test_requests_not_in_skip_set(self):
+        self.assertFalse(force_interpreter_skip_package(canonicalize_name("requests")))
+
+    def test_find_links_superseded_obsolete_cryptography_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-48.0.0-cp313-abi3-linux_armv7l.whl").write_bytes(b"")
+            req = Requirement("cryptography<43,>=2.1.4")
+            skip, reason = find_links_wheel_build_skip(req, links)
+            self.assertTrue(skip)
+            self.assertIn("48.0.0", reason)
+
+    def test_find_links_skip_when_matching_wheel_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-42.0.8-cp37-abi3-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            req = Requirement("cryptography<45,>=2.1.4")
+            skip, reason = find_links_wheel_build_skip(req, links)
+            self.assertTrue(skip)
+            self.assertIn("already has", reason)
+            self.assertIn("42.0.8", reason)
+
+    def test_find_links_no_skip_without_wheels_in_find_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            req = Requirement("cryptography<49,>=2.1.4")
+            skip, _ = find_links_wheel_build_skip(req, links)
+            self.assertFalse(skip)
 
 
 class TestPypiRequiresPythonPreflight(unittest.TestCase):

@@ -41,6 +41,20 @@ jobs:
           path: ./downloaded_wheels
           merge-multiple: true
 
+      - name: Download IDF requirements bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: idf-requirements-bundle
+          path: .
+
+      - name: Download sdists for index fallback packages
+        run: |
+          if [ -f sdist_requirements.txt ] && [ -s sdist_requirements.txt ]; then
+            python download_sdists.py sdist_requirements.txt
+          else
+            echo "No sdist_requirements.txt in bundle; skipping sdist download."
+          fi
+
       - name: Upload release asset to S3 bucket
         run: |
           python upload_wheels.py $AWS_BUCKET

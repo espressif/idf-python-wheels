@@ -88,7 +88,7 @@ s3.upload_fileobj(
 for name, filenames in packages_new.items():
     index_wheel = []
     index_wheel.append(HTML_HEADER)
-    for fn in filenames:
+    for fn in sorted(filenames):
         # Skip HTML source file of the wheel page
         if fn == "index.html":
             continue

@@ -21,6 +21,8 @@ from _helper_functions import print_color
 
 # Map runner platforms to sys.platform (pip markers only know win32/linux/darwin)
 SYS_PLATFORM_MAP = {
+    "windows": "win32",
+    "macos": "darwin",
     "linux_armv7": "linux",
     "linux_arm64": "linux",
     "linux_x86_64": "linux",

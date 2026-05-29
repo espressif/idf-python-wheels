@@ -9,8 +9,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Explicit libffi runtime matches the dev headers (bullseye: libffi7, bookworm: libffi8).
 # Piwheels manylinux cffi wheels can link against a newer libffi than the image ships;
-# pairing dev + runtime keeps installs predictable; PIP_NO_BINARY (force_no_binary_linux.txt)
-# forces source builds for those packages before build_requirements / wheels.
+# pairing dev + runtime keeps installs predictable. Wheel builds use piwheels (see workflow
+# PIP_INDEX_URL); force_no_binary_linux.txt applies on x86_64/aarch64 Linux only.
 . /etc/os-release
 case "${VERSION_CODENAME:-}" in
   bullseye) LIBFFI_RUNTIME=libffi7 ;;
@@ -26,10 +26,6 @@ apt-get install -y --no-install-recommends \
 if [ -n "$LIBFFI_RUNTIME" ]; then
   apt-get install -y --no-install-recommends "$LIBFFI_RUNTIME"
 fi
-
-export PIP_NO_BINARY="$(
-  grep -vE '^[[:space:]]*#|^[[:space:]]*$' force_no_binary_linux.txt | tr '\n' ',' | sed 's/,$//'
-)"
 
 # Manylinux/piwheels cffi wheels on armhf still reference libffi.so.7. Debian Bookworm only
 # ships libffi.so.8, so "import _cffi_backend" fails inside pip's isolated build env
