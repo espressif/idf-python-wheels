@@ -47,6 +47,9 @@ jobs:
           name: idf-requirements-bundle
           path: .
 
+      - name: Install OS dependencies for sdist download
+        run: os_dependencies/ubuntu.sh
+
       - name: Download sdists for index fallback packages
         run: |
           if [ -f sdist_requirements.txt ] && [ -s sdist_requirements.txt ]; then

@@ -16,8 +16,9 @@ class TestNativeImportGuard(unittest.TestCase):
         guarded = native_import_guard_by_name()
         entry = guarded["cryptography"]
         code = "\n".join(entry.imports)
-        self.assertIn("_openssl", code)
         self.assertIn("_rust", code)
+        self.assertIn("_openssl", code)
+        self.assertLess(code.index("_rust"), code.index("_openssl"))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,8 @@ It also checks wheels against exclude_list.yaml and removes incompatible ones.
 
 After a successful run, wheels that do not match this job's Python version and host
 platform are deleted from ``downloaded_wheels`` so CI ``wheels-tested-*`` artifacts
-do not carry the full multi-Python merge (only ``wheels-repaired-all`` is merged).
+do not carry wheels for other Python versions. CI downloads ``wheels-repaired-<arch>``
+per matrix row (not the full merge) so ARMv7 vs ARMv7 Legacy binaries are not mixed.
 
 Wheels are ZIP archives (PEP 427). pip opens them with the zipfile module; a
 BadZipFile / "Bad magic number" error means the bytes on disk are not a valid
@@ -20,6 +21,7 @@ ZIP (truncated, corrupted, or not a wheel), not that ".whl" was mistaken for ".z
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import subprocess
@@ -28,8 +30,10 @@ import sys
 from pathlib import Path
 
 from colorama import Fore
+from packaging.utils import canonicalize_name
 
 from _helper_functions import EXCLUDE_LIST_PATH
+from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import get_current_platform
 from _helper_functions import native_import_guard_by_name
 from _helper_functions import parse_wheel_name
@@ -61,6 +65,56 @@ def get_platform_patterns() -> list[str]:
         return [r"-any\.whl$"]
 
 
+def _armv7_test_plat() -> tuple[str, bool] | None:
+    """Return ``(AUDITWHEEL_PLAT, only_plat)`` on Linux ARMv7 test runners."""
+    if platform.system() != "Linux":
+        return None
+    if platform.machine().lower() not in ("armv7l", "armv7", "armhf"):
+        return None
+    plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    only_plat = os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
+    if plat:
+        return plat, only_plat
+    try:
+        codename = ""
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VERSION_CODENAME="):
+                codename = line.split("=", 1)[1].strip().strip('"')
+                break
+    except OSError:
+        return None
+    if codename == "bullseye":
+        return "manylinux_2_31_armv7l", True
+    if codename == "bookworm":
+        return "manylinux_2_36_armv7l", True
+    return None
+
+
+def _armv7_skip_cryptography_native_probe(dist_name: str) -> bool:
+    """Skip cryptography import probe on Bookworm ARMv7 test images.
+
+    Piwheels cryptography 49+ is often linked against OpenSSL 3.2+ while the bookworm
+    ``python:*-bookworm`` test container ships OpenSSL 3.0.x. The wheel is still published
+    for newer Raspberry Pi OS; cffi/argon2 in-lineage rebuilds are probed separately.
+    """
+    if canonicalize_name(dist_name) != canonicalize_name("cryptography"):
+        return False
+    armv7_plat = _armv7_test_plat()
+    return armv7_plat is not None and armv7_plat[0] == "manylinux_2_36_armv7l"
+
+
+def _platform_compatible(wheel_name: str) -> bool:
+    platform_patterns = get_platform_patterns()
+    if not any(re.search(pattern, wheel_name) for pattern in platform_patterns):
+        return False
+    armv7_plat = _armv7_test_plat()
+    if armv7_plat is not None:
+        plat, only_plat = armv7_plat
+        if not armv7_wheel_matches_forced_plat(wheel_name, plat, only_plat=only_plat):
+            return False
+    return True
+
+
 def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
     """
     Check if a wheel is compatible with the given Python version AND current platform.
@@ -84,9 +138,7 @@ def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
         base_version = int(abi3_match.group(1))  # e.g., 38 or 311 (not 3.8 or 3.11)
         # abi3 wheels work on Python >= base_version (using these integer tags)
         if current_version >= base_version:
-            # Check platform compatibility
-            platform_patterns = get_platform_patterns()
-            return any(re.search(pattern, wheel_name) for pattern in platform_patterns)
+            return _platform_compatible(wheel_name)
         return False
 
     # Check Python version compatibility for non-abi3 wheels
@@ -99,9 +151,7 @@ def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
     if not any(re.search(pattern, wheel_name) for pattern in python_patterns):
         return False
 
-    # Check platform compatibility
-    platform_patterns = get_platform_patterns()
-    return any(re.search(pattern, wheel_name) for pattern in platform_patterns)
+    return _platform_compatible(wheel_name)
 
 
 def find_compatible_wheels(python_version: str) -> list[Path]:
@@ -123,11 +173,11 @@ def prune_wheels_not_for_current_python(
 ) -> int:
     """Remove ``*.whl`` files that are not compatible with this Python + platform.
 
-    CI downloads the full merged ``wheels-repaired-all`` tree into ``downloaded_wheels``,
+    CI downloads ``wheels-repaired-<arch>`` per matrix row into ``downloaded_wheels``,
     then tests only compatible wheels. Without pruning, the subsequent
     ``wheels-tested-<arch>-<py>`` artifact would still contain every cp/py tag from the
-    merge, which is misleading and huge. ``wheels_dir`` defaults to ``WHEELS_DIR`` for
-    production; tests may pass a temporary directory.
+    repair tree for that arch. ``wheels_dir`` defaults to ``WHEELS_DIR`` for production;
+    tests may pass a temporary directory.
     """
     base = wheels_dir if wheels_dir is not None else WHEELS_DIR
     if not base.exists():
@@ -297,6 +347,12 @@ def main() -> int:
             parsed = parse_wheel_name(wheel_path.name)
             if not parsed or parsed[0] not in guarded:
                 continue
+            if _armv7_skip_cryptography_native_probe(parsed[0]):
+                print_color(
+                    f"-- skip {wheel_path.name} (cryptography OpenSSL probe; bookworm piwheels)",
+                    Fore.YELLOW,
+                )
+                continue
             ok, msg = run_import_probes(guarded[parsed[0]].imports)
             if ok:
                 print_color(f"-- {wheel_path.name}", Fore.GREEN)
@@ -307,6 +363,7 @@ def main() -> int:
                 if msg:
                     for line in msg.splitlines()[:5]:
                         print(f"   {line}")
+                wheel_path.unlink(missing_ok=True)
         print_color("---------- END NATIVE IMPORT PROBES ----------")
         if native_failed:
             failed += native_failed

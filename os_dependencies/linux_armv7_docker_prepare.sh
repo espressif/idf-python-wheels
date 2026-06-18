@@ -10,7 +10,10 @@ export DEBIAN_FRONTEND=noninteractive
 # Explicit libffi runtime matches the dev headers (bullseye: libffi7, bookworm: libffi8).
 # Piwheels manylinux cffi wheels can link against a newer libffi than the image ships;
 # pairing dev + runtime keeps installs predictable. Wheel builds use piwheels (see workflow
-# PIP_INDEX_URL); force_no_binary_linux.txt applies on x86_64/aarch64 Linux only.
+# PIP_INDEX_URL); cffi/argon2 forced to sdists globally. Cryptography is only forced on
+# explicit ARMv7 wheel rebuilds (see ``armv7_pip_wheel_subprocess_env``) — globally
+# blocking it breaks Python 3.8 transitive deps (maturin sdist for esptool, etc.).
+export PIP_NO_BINARY=cffi,argon2-cffi-bindings
 . /etc/os-release
 case "${VERSION_CODENAME:-}" in
   bullseye) LIBFFI_RUNTIME=libffi7 ;;

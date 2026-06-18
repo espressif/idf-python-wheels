@@ -65,10 +65,10 @@ jobs:
         with:
           platforms: linux/arm/v7
 
-      - name: Download all repaired wheels
+      - name: Download repaired wheels for this platform
         uses: actions/download-artifact@v8
         with:
-          name: wheels-repaired-all
+          name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
 
       - name: Setup Python
@@ -91,6 +91,8 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
+            -e AUDITWHEEL_PLAT=manylinux_2_36_armv7l \
+            -e AUDITWHEEL_ONLY_PLAT=1 \
             python:${{ matrix.python-version }}-bookworm \
             bash -c "
               set -e
@@ -107,6 +109,8 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
+            -e AUDITWHEEL_PLAT=manylinux_2_31_armv7l \
+            -e AUDITWHEEL_ONLY_PLAT=1 \
             python:${{ matrix.python-version }}-bullseye \
             bash -c "
               set -e

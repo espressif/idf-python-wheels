@@ -86,6 +86,65 @@ def is_linux_armv7_runner() -> bool:
     return platform.system() == "Linux" and platform.machine().lower() in ("armv7l", "armv7", "armhf")
 
 
+# Piwheels ``linux_armv7l`` / manylinux wheels for ``cffi`` and ``argon2-cffi-bindings`` may link
+# against libffi/glibc newer than the lineage image. Rebuild those from sdists in-container.
+# ``cryptography`` stays on piwheels (Rust/maturin sdist rebuild is impractical under ARMv7 QEMU).
+# Bookworm native-import probes skip cryptography (piwheels 49+ vs image OpenSSL); see test_wheels_install.
+ARMV7_FORCE_NO_BINARY_PACKAGES = frozenset(
+    {
+        canonicalize_name("cffi"),
+        canonicalize_name("argon2-cffi-bindings"),
+    }
+)
+
+# Applied in ``linux_armv7_docker_prepare.sh`` for all pip invocations (build_requirements, etc.).
+# Excludes cryptography: forcing it globally breaks transitive deps on Python 3.8 (maturin sdist).
+ARMV7_PIP_NO_BINARY_GLOBAL_CSV = "cffi,argon2-cffi-bindings"
+# Same set for explicit ``pip wheel`` rebuilds of cffi / argon2 on ARMv7.
+ARMV7_PIP_NO_BINARY_CSV = ARMV7_PIP_NO_BINARY_GLOBAL_CSV
+
+
+def armv7_force_no_binary_package(name: str) -> bool:
+    """True if ARMv7 Docker builds must compile this package from sdist (not piwheels)."""
+    return canonicalize_name(name) in ARMV7_FORCE_NO_BINARY_PACKAGES
+
+
+def armv7_rebuild_instead_of_find_links_skip(name: str, find_links_reason: str) -> bool:
+    """True when find-links has a matching piwheels wheel that must be rebuilt in-lineage."""
+    if not is_linux_armv7_runner() or not armv7_force_no_binary_package(name):
+        return False
+    return "already has" in find_links_reason and "matching" in find_links_reason
+
+
+def armv7_pip_wheel_subprocess_env(requirement_name: str) -> dict[str, str]:
+    """Return env for ``pip wheel`` on ARMv7 (extends global ``PIP_NO_BINARY`` when rebuilding natives)."""
+    env = os.environ.copy()
+    if not is_linux_armv7_runner():
+        return env
+    match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
+    if match and armv7_force_no_binary_package(match.group(1)):
+        env["PIP_NO_BINARY"] = ARMV7_PIP_NO_BINARY_CSV
+    return env
+
+
+def remove_find_links_wheels_for_package(
+    name: str,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> int:
+    """Remove existing wheels for ``name`` under find-links (before ARMv7 sdist rebuild)."""
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return 0
+    canonical = canonicalize_name(name)
+    removed = 0
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if parsed and parsed[0] == canonical:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def wheel_archive_is_readable(path: Path) -> bool:
     """True if the file is a zip with a readable central directory (valid wheel container).
 
@@ -314,6 +373,54 @@ def native_import_guard_by_name(
     return by_name
 
 
+_MANYLINUX_GLIBC_TAG = re.compile(r"manylinux_(\d+)_(\d+)", re.IGNORECASE)
+
+
+def manylinux_glibc_tags_in_name(name: str) -> list[tuple[int, int]]:
+    """Parse ``manylinux_M_N`` glibc levels from a wheel filename or plat string."""
+    return [(int(major), int(minor)) for major, minor in _MANYLINUX_GLIBC_TAG.findall(name)]
+
+
+def _is_linux_tag_armv7_wheel_name(wheel_name: str) -> bool:
+    wn = wheel_name.lower()
+    return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
+
+
+def armv7_wheel_matches_forced_plat(
+    wheel_name: str,
+    plat: str,
+    *,
+    only_plat: bool,
+    repair: bool = False,
+) -> bool:
+    """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits."""
+    wn = wheel_name.lower()
+    if _is_linux_tag_armv7_wheel_name(wn):
+        return "armv7l" in wn
+    plat_tags = manylinux_glibc_tags_in_name(plat)
+    wheel_tags = manylinux_glibc_tags_in_name(wn)
+    if not plat_tags:
+        return True
+    required = plat_tags[0]
+    if required not in wheel_tags:
+        return False
+    if not only_plat:
+        return True
+    has_31 = (2, 31) in wheel_tags
+    has_36 = (2, 36) in wheel_tags
+    if repair:
+        # ``repair_wheels.py``: auditwheel may emit compat 2_31 tags alongside 2_36.
+        if required == (2, 31) and has_36:
+            return False
+        return True
+    # ``test_wheels_install.py``: reject dual 2_31 + 2_36 lineage tags in one filename.
+    if has_31 and has_36:
+        return False
+    if required == (2, 31) and has_36:
+        return False
+    return True
+
+
 def _force_no_binary_linux_normalized(repo_root: Path | None = None) -> frozenset[str]:
     """
     Normalized package names from ``force_no_binary_linux.txt``
@@ -343,14 +450,18 @@ def get_no_binary_args(requirement_name: str) -> list:
     if platform.system() != "Linux":
         return []
 
-    # ARMv7 CI uses piwheels (``linux_armv7l``); do not override with ``force_no_binary_linux.txt``.
-    if is_linux_armv7_runner():
-        return []
-
     # Extract package name from requirement string (e.g., "cffi>=1.0" -> "cffi")
     match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
     if not match:
         return []
+
+    # ARMv7 CI uses piwheels for most packages; force sdists for native stacks piwheels
+    # mis-builds for Bullseye / Bookworm lineages (see ``armv7_force_no_binary_package``).
+    if is_linux_armv7_runner():
+        if armv7_force_no_binary_package(match.group(1)):
+            return ["--no-binary", match.group(1)]
+        return []
+
     pkg_name = match.group(1).lower().replace("-", "_")
 
     if pkg_name in _force_no_binary_linux_normalized(_REPO_ROOT):
@@ -379,6 +490,65 @@ def force_interpreter_skip_package(canonical_dist_name: str) -> bool:
     if canonical_dist_name in FORCE_INTERPRETER_BINARY_SKIP_EXACT:
         return True
     return canonical_dist_name == "pyobjc" or canonical_dist_name.startswith("pyobjc-")
+
+
+def get_cryptography_macos_intel_pip_wheel_args(requirement_name: str) -> list[str]:
+    """``--no-binary cryptography`` on macOS Intel (OpenSSL 4 sdist build in CI)."""
+    if get_current_platform() != "macos_x86_64":
+        return []
+    match = re.match(r"^([a-zA-Z0-9_.-]+)", str(requirement_name).strip())
+    if not match:
+        return []
+    if canonicalize_name(match.group(1)) != canonicalize_name("cryptography"):
+        return []
+    return ["--no-binary", "cryptography"]
+
+
+def bounded_pin_without_find_links_skip(
+    req: Requirement,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> Tuple[bool, str]:
+    """Defer bounded pins on Linux for packages that must not be built from sdists.
+
+    Merged IDF requirements list ``cryptography<46.1`` before an unconstrained
+    ``cryptography`` line. Until find-links has any wheel for the package, ``pip wheel``
+    with ``--no-binary`` (see ``force_no_binary_linux.txt``) downloads an old maturin sdist
+    and fails with ``BackendUnavailable`` on Python 3.8+.
+    """
+    if platform.system() != "Linux":
+        return False, ""
+    if not force_interpreter_skip_package(canonicalize_name(req.name)):
+        return False, ""
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return False, ""
+    canonical = canonicalize_name(req.name)
+    has_pkg_wheel = False
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if parsed and parsed[0] == canonical:
+            has_pkg_wheel = True
+            break
+    if has_pkg_wheel:
+        return False, ""
+    if not req.specifier:
+        return False, ""
+    has_upper = any(s.operator in ("<", "<=") for s in req.specifier)
+    has_exact = any(s.operator == "==" for s in req.specifier)
+    if has_upper and not has_exact:
+        return (
+            True,
+            f"bounded pin for {req.name} without find-links wheel (avoid maturin sdist build)",
+        )
+    return False, ""
+
+
+def armv7_bounded_pin_without_find_links_skip(
+    req: Requirement,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> Tuple[bool, str]:
+    """Alias for :func:`bounded_pin_without_find_links_skip` (ARMv7 + std Linux)."""
+    return bounded_pin_without_find_links_skip(req, find_links_dir)
 
 
 def find_links_wheel_build_skip(
@@ -426,14 +596,13 @@ def get_pip_wheel_extra_args(requirement_name: str) -> list[str]:
     probe when building from the sdist under PEP 517 isolation. Use the host env
     (after ``setup-msvc-dev`` on ``windows-2022`` with VS 17.x) and ``--no-build-isolation``.
     """
-    if platform.system() != "Windows":
-        return []
     match = re.match(r"^([a-zA-Z0-9_.-]+)", str(requirement_name).strip())
     if not match:
         return []
-    if canonicalize_name(match.group(1)) != canonicalize_name("bleak-winrt"):
-        return []
-    return ["--no-build-isolation"]
+    canonical = canonicalize_name(match.group(1))
+    if platform.system() == "Windows" and canonical == canonicalize_name("bleak-winrt"):
+        return ["--no-build-isolation"]
+    return []
 
 
 def _safe_text_for_stdout(text: str) -> str:

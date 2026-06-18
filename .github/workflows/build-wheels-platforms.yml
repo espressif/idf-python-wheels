@@ -205,6 +205,10 @@ jobs:
 
           python build_wheels.py
 
+      - name: Validate cryptography OpenSSL 4 wheels (macOS Intel)
+        if: matrix.os == 'macOS Intel'
+        run: bash scripts/validate_cryptography_macos_intel_wheel.sh ./downloaded_wheels
+
       - name: Build wheels for IDF - Windows
         if: matrix.os == 'Windows'
         run: python build_wheels.py

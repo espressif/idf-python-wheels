@@ -19,9 +19,9 @@ packages:
     imports:
       - |
         try:
-            from cryptography.hazmat.bindings._openssl import ffi
+            from cryptography.hazmat.bindings._rust import openssl as _openssl
         except ImportError:
-            from cryptography.hazmat.bindings._rust import openssl
+            from cryptography.hazmat.bindings._openssl import ffi
   - name: bcrypt
     imports:
       - import bcrypt

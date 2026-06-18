@@ -31,14 +31,20 @@ def _normalize_pkg_dir(name: str) -> str:
 
 def _load_requirement_names(path: Path) -> list[str]:
     names: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    invalid: list[str] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         try:
             names.append(canonicalize_name(Requirement(line).name))
         except InvalidRequirement:
-            continue
+            invalid.append(f"line {line_no}: {line}")
+    if invalid:
+        print_color("Invalid requirement line(s) in sdist requirements file:", Fore.RED)
+        for entry in invalid:
+            print_color(f"  {entry}", Fore.RED)
+        raise SystemExit(1)
     return names
 
 

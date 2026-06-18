@@ -11,17 +11,26 @@ import platform
 import subprocess
 import sys
 
+from pathlib import Path
+
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from _helper_functions import armv7_bounded_pin_without_find_links_skip
+from _helper_functions import armv7_force_no_binary_package
+from _helper_functions import armv7_pip_wheel_subprocess_env
+from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import find_links_wheel_build_skip
 from _helper_functions import force_interpreter_skip_package
+from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
+from _helper_functions import is_linux_armv7_runner
 from _helper_functions import print_color
 from _helper_functions import pypi_requires_python_preflight_skip
+from _helper_functions import remove_find_links_wheels_for_package
 
 
 def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:
@@ -63,7 +72,16 @@ def _dependent_requirement_skip_line(requirement_line: str, *, force_interpreter
         req = Requirement(requirement_line)
     except InvalidRequirement:
         return False
-    skip, reason = find_links_wheel_build_skip(req)
+    # --force-interpreter-binary bypasses find-links skip so pip rebuilds for the current
+    # interpreter, except for packages where forced sdists are unreliable (cryptography, etc.).
+    # On ARMv7, piwheels wheels for native stacks are rebuilt in-lineage when find-links already
+    # has a matching wheel (obsolete pins like ``cryptography<43`` still skip).
+    if not force_interpreter or force_interpreter_skip_package(canonicalize_name(req.name)):
+        skip, reason = find_links_wheel_build_skip(req)
+        if skip and not armv7_rebuild_instead_of_find_links_skip(req.name, reason):
+            print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+            return True
+    skip, reason = armv7_bounded_pin_without_find_links_skip(req)
     if skip:
         print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
         return True
@@ -106,6 +124,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+Path("downloaded_wheels").mkdir(exist_ok=True)
 
 requirements_dir = args.requirements_path
 in_requirements = args.requirements
@@ -130,8 +149,20 @@ if requirements_dir:
         if _dependent_requirement_skip_line(requirement, force_interpreter=force_interpreter):
             skipped_wheels += 1
             continue
+        try:
+            req_name = Requirement(requirement).name
+        except InvalidRequirement:
+            req_name = requirement
+        if is_linux_armv7_runner() and armv7_force_no_binary_package(req_name):
+            removed = remove_find_links_wheels_for_package(req_name)
+            if removed:
+                print_color(
+                    f"-- removed {removed} find-links wheel(s) for {req_name} (ARMv7 sdist rebuild)",
+                    Fore.YELLOW,
+                )
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
+        crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(requirement)
         extra_pip_args = get_pip_wheel_extra_args(requirement)
         force_interpreter_args = _force_interpreter_no_binary_args(requirement) if force_interpreter else []
 
@@ -148,10 +179,12 @@ if requirements_dir:
                 "downloaded_wheels",
             ]
             + no_binary_args
+            + crypto_intel_args
             + extra_pip_args
             + force_interpreter_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=armv7_pip_wheel_subprocess_env(requirement),
         )
 
         print(out.stdout.decode("utf-8", errors="replace"))
@@ -182,8 +215,20 @@ else:
         if _dependent_requirement_skip_line(requirement, force_interpreter=force_interpreter):
             skipped_wheels += 1
             continue
+        try:
+            req_name = Requirement(requirement).name
+        except InvalidRequirement:
+            req_name = requirement
+        if is_linux_armv7_runner() and armv7_force_no_binary_package(req_name):
+            removed = remove_find_links_wheels_for_package(req_name)
+            if removed:
+                print_color(
+                    f"-- removed {removed} find-links wheel(s) for {req_name} (ARMv7 sdist rebuild)",
+                    Fore.YELLOW,
+                )
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement)
+        crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(requirement)
         extra_pip_args = get_pip_wheel_extra_args(requirement)
         force_interpreter_args = _force_interpreter_no_binary_args(requirement) if force_interpreter else []
 
@@ -200,10 +245,12 @@ else:
                 "downloaded_wheels",
             ]
             + no_binary_args
+            + crypto_intel_args
             + extra_pip_args
             + force_interpreter_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=armv7_pip_wheel_subprocess_env(requirement),
         )
 
         print(out.stdout.decode("utf-8", errors="replace"))

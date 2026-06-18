@@ -25,12 +25,19 @@ from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import armv7_force_no_binary_package
+from _helper_functions import armv7_pip_wheel_subprocess_env
+from _helper_functions import armv7_rebuild_instead_of_find_links_skip
+from _helper_functions import bounded_pin_without_find_links_skip
 from _helper_functions import filter_requirements_by_pypi_requires_python
 from _helper_functions import find_links_wheel_build_skip
+from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
+from _helper_functions import is_linux_armv7_runner
 from _helper_functions import merge_requirements
 from _helper_functions import print_color
+from _helper_functions import remove_find_links_wheels_for_package
 from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
@@ -298,10 +305,22 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
     dir = f"{os.path.curdir}{(os.sep)}downloaded_wheels"
     for requirement in requirements:
         skip, reason = find_links_wheel_build_skip(requirement, dir)
+        if skip and not armv7_rebuild_instead_of_find_links_skip(requirement.name, reason):
+            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
+            skipped_wheels += 1
+            continue
+        skip, reason = bounded_pin_without_find_links_skip(requirement, dir)
         if skip:
             print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
             skipped_wheels += 1
             continue
+        if is_linux_armv7_runner() and armv7_force_no_binary_package(requirement.name):
+            removed = remove_find_links_wheels_for_package(requirement.name, dir)
+            if removed:
+                print_color(
+                    f"-- removed {removed} find-links wheel(s) for {requirement.name} (ARMv7 sdist rebuild)",
+                    Fore.YELLOW,
+                )
         # non classic requirement wheel build
         if non_classic_requirement:
             pattern = re.compile(r"(--[^ ]*)(.*)")
@@ -330,6 +349,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env=armv7_pip_wheel_subprocess_env(str(requirement)),
                 )
                 print(out.stdout.decode("utf-8", errors="replace"))
                 if out.stderr:
@@ -340,6 +360,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
         # requirement wheel build
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement.name)
+        crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(str(requirement))
 
         out = subprocess.run(
             [
@@ -357,9 +378,11 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                 "--no-cache-dir",
                 "--no-build-isolation",
             ]
-            + no_binary_args,
+            + no_binary_args
+            + crypto_intel_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=armv7_pip_wheel_subprocess_env(str(requirement)),
         )
 
         print(out.stdout.decode("utf-8", errors="replace"))

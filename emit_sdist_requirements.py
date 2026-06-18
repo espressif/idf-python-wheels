@@ -21,6 +21,7 @@ from typing import Iterable
 
 from colorama import Fore
 from packaging.requirements import Requirement
+from packaging.specifiers import Specifier
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -45,25 +46,83 @@ SDIST_EVAL_PLATFORMS = (
 SDIST_REQUIREMENTS_FILE = "sdist_requirements.txt"
 _SUPPORTED_VERSIONS_JSON = Path(__file__).resolve().parent / "supported_versions.json"
 
-# Versions used to test whether assembled pins remain buildable after exclude merging.
-_SPECIFIER_PROBE_VERSIONS = (
-    "0.1.0",
-    "1.0.0",
-    "1.2.0",
-    "1.2.18",
-    "0.13.2.0",
-    "2.0.0",
-    "3.8.0",
-    "3.9.0",
-    "3.10.0",
-    "3.11.0",
-    "3.12.0",
-    "3.13.0",
-    "3.14.0",
-    "3.42.0",
-    "9.5.0",
-    "25.1.0",
-)
+
+def _safe_version(version_str: str) -> Version | None:
+    try:
+        return Version(version_str)
+    except Exception:
+        return None
+
+
+def _bump_release(version: Version) -> Version | None:
+    release = version.release
+    if len(release) >= 3:
+        return _safe_version(f"{release[0]}.{release[1]}.{release[2] + 1}")
+    if len(release) == 2:
+        return _safe_version(f"{release[0]}.{release[1] + 1}.0")
+    if len(release) == 1:
+        return _safe_version(f"{release[0] + 1}.0.0")
+    return None
+
+
+def _drop_release(version: Version) -> Version | None:
+    release = version.release
+    if len(release) >= 3 and release[2] > 0:
+        return _safe_version(f"{release[0]}.{release[1]}.{release[2] - 1}")
+    if len(release) >= 2 and release[1] > 0:
+        return _safe_version(f"{release[0]}.{release[1] - 1}.0")
+    if len(release) >= 1 and release[0] > 0:
+        return _safe_version(f"{release[0] - 1}.0.0")
+    return None
+
+
+def _probes_from_specifier(spec: Specifier) -> list[Version]:
+    """Candidate versions derived from one PEP 440 specifier bound."""
+    base = _safe_version(spec.version)
+    if base is None:
+        return []
+
+    probes = [base]
+    if spec.operator == ">":
+        bumped = _bump_release(base)
+        if bumped is not None:
+            probes.append(bumped)
+    elif spec.operator == "<":
+        dropped = _drop_release(base)
+        if dropped is not None:
+            probes.append(dropped)
+    return probes
+
+
+def _overlap_probe_versions(*spec_sets: SpecifierSet) -> list[Version]:
+    """Build version candidates to test whether specifier sets share any allowed version."""
+    seen: set[Version] = set()
+    ordered: list[Version] = []
+    for spec_set in spec_sets:
+        for spec in spec_set:
+            for version in _probes_from_specifier(spec):
+                if version not in seen:
+                    seen.add(version)
+                    ordered.append(version)
+    for sentinel in (_safe_version("0"), _safe_version("9999")):
+        if sentinel is not None and sentinel not in seen:
+            seen.add(sentinel)
+            ordered.append(sentinel)
+    return ordered
+
+
+def _version_buildable(assembled_req: Requirement, after_req: Requirement) -> bool:
+    """True if some version allowed by assembled_req is still built per after_req specifier."""
+    if not assembled_req.specifier:
+        return True
+    if not after_req.specifier:
+        return True
+    a_set = SpecifierSet(str(assembled_req.specifier))
+    b_set = SpecifierSet(str(after_req.specifier))
+    for version in _overlap_probe_versions(a_set, b_set):
+        if version in a_set and version in b_set:
+            return True
+    return False
 
 
 def _load_supported_python_versions() -> list[str]:
@@ -99,33 +158,6 @@ def _marker_env(platform: str, python_version: str) -> dict[str, str]:
     }
 
 
-def _version_buildable(assembled_req: Requirement, after_req: Requirement) -> bool:
-    """True if some version allowed by assembled_req is still built per after_req specifier."""
-    if not assembled_req.specifier:
-        return True
-    if not after_req.specifier:
-        return True
-    a_set = SpecifierSet(str(assembled_req.specifier))
-    b_set = SpecifierSet(str(after_req.specifier))
-    test_versions: list[str] = list(_SPECIFIER_PROBE_VERSIONS)
-    for spec in a_set:
-        if spec.operator in ("==", "==="):
-            test_versions.append(spec.version)
-    test_versions.extend(("2023.0.0", "2024.2.2", "9999.0.0"))
-    seen: set[str] = set()
-    for version_str in test_versions:
-        if version_str in seen:
-            continue
-        seen.add(version_str)
-        try:
-            ver = Version(version_str)
-        except Exception:
-            continue
-        if ver in a_set and ver in b_set:
-            return True
-    return False
-
-
 def _requirement_applies_to_env(req: Requirement, platform: str, python_version: str) -> bool:
     """True if ``req`` (including its marker) applies to the evaluated environment."""
     if req.marker is None:
@@ -139,9 +171,11 @@ def _can_build_wheel_on_platform(
     platform: str,
     python_version: str,
 ) -> bool:
-    """True if exclude merge still allows building the assembled pin on this platform/Python."""
-    if not _requirement_applies_to_env(assembled_req, platform, python_version):
-        return True
+    """True if exclude merge still allows building the assembled pin on this platform/Python.
+
+    Caller must only invoke this for assembled requirements that apply to the environment
+    (see ``_requirement_applies_to_env``).
+    """
     name = canonicalize_name(assembled_req.name)
     matching = [r for r in after_set if canonicalize_name(r.name) == name]
     if not matching:
@@ -177,10 +211,12 @@ def compute_sdist_requirements(assembled: Iterable[Requirement]) -> set[Requirem
             if name in needing_names:
                 continue
             for py_ver in python_versions:
-                if any(_can_build_wheel_on_platform(ar, after, platform, py_ver) for ar in assembled_reqs):
+                applicable = [ar for ar in assembled_reqs if _requirement_applies_to_env(ar, platform, py_ver)]
+                if not applicable:
+                    continue
+                if not any(_can_build_wheel_on_platform(ar, after, platform, py_ver) for ar in applicable):
+                    needing_names.add(name)
                     break
-            else:
-                needing_names.add(name)
 
     return {req for name in needing_names for req in by_name[name]}
 

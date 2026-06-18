@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 
 from pathlib import Path
 
@@ -21,6 +22,14 @@ DEFAULT_OUT = Path("downloaded_wheels")
 DEFAULT_INDEX = "https://pypi.org/simple"
 
 
+def _read_requirement_lines(requirements_file: Path) -> list[str]:
+    return [
+        ln.strip()
+        for ln in requirements_file.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+
+
 def download_sdists(
     requirements_file: Path,
     dest_dir: Path = DEFAULT_OUT,
@@ -28,39 +37,63 @@ def download_sdists(
 ) -> int:
     if not requirements_file.is_file():
         raise SystemExit(f"requirements file not found: {requirements_file}")
-    lines = [
-        ln.strip()
-        for ln in requirements_file.read_text(encoding="utf-8").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
+    lines = _read_requirement_lines(requirements_file)
     if not lines:
         print_color("No sdist requirements to download.", Fore.YELLOW)
         return 0
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     print_color(f"---------- DOWNLOAD SDISTS ({len(lines)} requirements) ----------")
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "download",
-        "-r",
-        str(requirements_file),
-        "-d",
-        str(dest_dir),
-        "--no-deps",
-        "--no-binary",
-        ":all:",
-        "-i",
-        index_url,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.returncode != 0:
-        if result.stderr:
-            print_color(result.stderr, Fore.RED)
-        return result.returncode
+
+    # Each line is an assembled IDF pin; merged branches can list conflicting pins for
+    # the same project (e.g. esptool~=4.12.dev2 vs esptool>=5.3.0.dev0). Resolve and
+    # download them one at a time so pip does not try to satisfy all pins together.
+    failures: list[str] = []
+    for index, line in enumerate(lines, start=1):
+        print_color(f"[{index}/{len(lines)}] {line}", Fore.CYAN)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            encoding="utf-8",
+            delete=False,
+        ) as req_file:
+            req_file.write(line + "\n")
+            one_line_req = Path(req_file.name)
+        try:
+            cmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "download",
+                "-r",
+                str(one_line_req),
+                "-d",
+                str(dest_dir),
+                "--no-deps",
+                "--no-binary",
+                ":all:",
+                "-i",
+                index_url,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        finally:
+            one_line_req.unlink(missing_ok=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            if result.stderr:
+                print_color(result.stderr, Fore.RED)
+            failures.append(line)
+
+    if failures:
+        print_color(
+            f"Failed to download {len(failures)} sdist requirement(s):",
+            Fore.RED,
+        )
+        for line in failures:
+            print_color(f"  - {line}", Fore.RED)
+        return 1
+
     print_color("---------- END DOWNLOAD SDISTS ----------", Fore.GREEN)
     return 0
 
