@@ -28,6 +28,8 @@ from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
+from _helper_functions import pip_wheel_invocation_args
+from _helper_functions import pip_wheel_or_mirror_success
 from _helper_functions import print_color
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
@@ -173,11 +175,8 @@ if requirements_dir:
                 "pip",
                 "wheel",
                 requirement,
-                "--find-links",
-                "downloaded_wheels",
-                "--wheel-dir",
-                "downloaded_wheels",
             ]
+            + pip_wheel_invocation_args(requirement)
             + no_binary_args
             + crypto_intel_args
             + extra_pip_args
@@ -191,10 +190,10 @@ if requirements_dir:
         if out.stderr:
             print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
-        if out.returncode != 0:
-            failed_wheels += 1
-        else:
+        if pip_wheel_or_mirror_success(requirement, out.returncode):
             succeeded_wheels += 1
+        else:
+            failed_wheels += 1
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
@@ -239,11 +238,8 @@ else:
                 "pip",
                 "wheel",
                 f"{requirement}",
-                "--find-links",
-                "downloaded_wheels",
-                "--wheel-dir",
-                "downloaded_wheels",
             ]
+            + pip_wheel_invocation_args(requirement)
             + no_binary_args
             + crypto_intel_args
             + extra_pip_args
@@ -257,10 +253,10 @@ else:
         if out.stderr:
             print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
-        if out.returncode != 0:
-            failed_wheels += 1
-        else:
+        if pip_wheel_or_mirror_success(requirement, out.returncode):
             succeeded_wheels += 1
+        else:
+            failed_wheels += 1
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)

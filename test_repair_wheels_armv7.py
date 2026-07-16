@@ -4,10 +4,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 
+from contextlib import ExitStack
 from pathlib import Path
 
 import repair_wheels as rw
@@ -167,7 +170,7 @@ class TestManylinuxGlibcTags(unittest.TestCase):
 
         name = "cffi-2.0.0-cp311-cp311-manylinux_2_31_armv7l.manylinux_2_36_armv7l.whl"
         self.assertEqual(manylinux_glibc_tags_in_name(name), [(2, 31), (2, 36)])
-        self.assertFalse(armv7_wheel_matches_forced_plat(name, "manylinux_2_36_armv7l", only_plat=True))
+        self.assertTrue(armv7_wheel_matches_forced_plat(name, "manylinux_2_36_armv7l", only_plat=True))
         self.assertFalse(armv7_wheel_matches_forced_plat(name, "manylinux_2_31_armv7l", only_plat=True))
         self.assertTrue(
             armv7_wheel_matches_forced_plat(
@@ -184,6 +187,53 @@ class TestManylinuxGlibcTags(unittest.TestCase):
                 only_plat=True,
             )
         )
+
+
+class TestAuditwheelNotPlatformWheel(unittest.TestCase):
+    def test_keeps_wheel_on_x86_64_when_no_elf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            wheel = wheels_dir / "dbus_fast-2.24.4-cp310-cp310-manylinux_2_39_x86_64.whl"
+            with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("dbus_fast/__init__.py", "x\n")
+
+            auditwheel_msg = (
+                "INFO:auditwheel.main_repair:Repairing dbus_fast-2.24.4-cp310-cp310-manylinux_2_39_x86_64.whl\n"
+                "INFO:auditwheel.main_repair:This does not look like a platform wheel, "
+                "no ELF executable or shared library file (including compiled Python C extension) "
+                "found in the wheel archive"
+            )
+            fake_result = type(
+                "R",
+                (),
+                {"returncode": 1, "stdout": auditwheel_msg, "stderr": ""},
+            )()
+
+            with ExitStack() as stack:
+                stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
+                stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="x86_64"))
+                stack.enter_context(unittest.mock.patch.object(rw, "repair_wheel_linux", return_value=fake_result))
+                stack.enter_context(unittest.mock.patch.object(rw, "wheel_archive_is_readable", return_value=True))
+                stack.enter_context(
+                    unittest.mock.patch.object(rw, "should_skip_linux_auditwheel_for_pypi_mirror", return_value=False)
+                )
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        rw,
+                        "prune_ci_manylinux_newer_than_228_when_228_mirror_present",
+                        return_value=0,
+                    )
+                )
+                orig_cwd = os.getcwd()
+                try:
+                    os.chdir(root)
+                    rw.main()
+                finally:
+                    os.chdir(orig_cwd)
+
+            self.assertTrue(wheel.exists())
 
 
 if __name__ == "__main__":

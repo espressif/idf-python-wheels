@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from _helper_functions import _mirrored_manylinux228_version
 from _helper_functions import armv7_bounded_pin_without_find_links_skip
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
@@ -32,8 +33,13 @@ from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import merge_requirements
+from _helper_functions import mirror_pypi_manylinux228_wheel
+from _helper_functions import pip_wheel_or_mirror_success
+from _helper_functions import prune_ci_manylinux_newer_than_228
+from _helper_functions import prune_ci_manylinux_newer_than_228_when_228_mirror_present
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
+from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from build_wheels import _add_into_requirements
 from build_wheels import get_used_idf_branches
 from yaml_list_adapter import YAMLListAdapter
@@ -262,7 +268,7 @@ class TestWheelCompatibility(unittest.TestCase):
     def test_armv7_bookworm_requires_manylinux_236(self, _sys, _machine):
         self.assertTrue(self.is_wheel_compatible("cffi-2.0.0-cp311-cp311-manylinux_2_36_armv7l.whl", "311"))
         self.assertFalse(self.is_wheel_compatible("cffi-2.0.0-cp311-cp311-manylinux_2_31_armv7l.whl", "311"))
-        self.assertFalse(
+        self.assertTrue(
             self.is_wheel_compatible(
                 "cryptography-49.0.0-cp311-abi3-manylinux_2_31_armv7l.manylinux_2_36_armv7l.whl",
                 "311",
@@ -295,6 +301,38 @@ class TestWheelCompatibility(unittest.TestCase):
         from test_wheels_install import _armv7_skip_cryptography_native_probe
 
         self.assertFalse(_armv7_skip_cryptography_native_probe("cryptography"))
+
+    @patch("test_wheels_install.platform.machine", return_value="x86_64")
+    @patch("test_wheels_install.platform.system", return_value="Linux")
+    def test_linux_x86_64_does_not_skip_cryptography_native_probe(self, _sys, _machine):
+        from test_wheels_install import _should_skip_native_import_probe
+
+        self.assertFalse(_should_skip_native_import_probe("cryptography"))
+
+    @patch("test_wheels_install.run_import_probes", return_value=(True, "cryptography import OK x509"))
+    def test_run_native_import_probes_on_linux_x86_64(self, mock_probe):
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.whl"
+            wheel.write_bytes(b"")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 0)
+            self.assertEqual(failures, [])
+            mock_probe.assert_called_once()
+
+    @patch("test_wheels_install.run_import_probes", return_value=(False, "undefined symbol: EVP_sm4_cfb128"))
+    def test_run_native_import_probes_fails_on_openssl_mismatch(self, mock_probe):
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
+            wheel.write_bytes(b"x")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 1)
+            self.assertIn("EVP_sm4", failures[0][1])
+            self.assertFalse(wheel.exists())
+            mock_probe.assert_called_once()
 
 
 class TestPruneWheelsForArtifact(unittest.TestCase):
@@ -341,6 +379,35 @@ class TestGetPipWheelExtraArgs(unittest.TestCase):
         from _helper_functions import get_pip_wheel_extra_args
 
         self.assertEqual(get_pip_wheel_extra_args("cryptography"), [])
+
+    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    def test_armv7_cryptography_no_deps(self, _armv7: object) -> None:
+        from _helper_functions import get_pip_wheel_extra_args
+
+        self.assertEqual(get_pip_wheel_extra_args("cryptography==49.0.0"), ["--no-deps"])
+
+
+class TestPipWheelInvocationArgs(unittest.TestCase):
+    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    def test_armv7_cffi_uses_build_isolation(self, _armv7: object) -> None:
+        from _helper_functions import pip_wheel_invocation_args
+
+        args = pip_wheel_invocation_args("cffi>=1.15.0")
+        self.assertNotIn("--no-build-isolation", args)
+
+    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    def test_armv7_any_package_uses_build_isolation(self, _armv7: object) -> None:
+        from _helper_functions import pip_wheel_invocation_args
+
+        args = pip_wheel_invocation_args("esptool~=4.9")
+        self.assertNotIn("--no-build-isolation", args)
+
+    @patch("_helper_functions.is_linux_armv7_runner", return_value=False)
+    def test_non_armv7_keeps_no_build_isolation(self, _armv7: object) -> None:
+        from _helper_functions import pip_wheel_invocation_args
+
+        args = pip_wheel_invocation_args("cffi>=1.15.0")
+        self.assertIn("--no-build-isolation", args)
 
 
 class TestParseWheelName(unittest.TestCase):
@@ -633,6 +700,25 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             skip, _ = find_links_wheel_build_skip(req, links)
             self.assertFalse(skip)
 
+    def test_find_links_no_skip_when_newer_wheel_needed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-47.0.0-cp311-abi3-win_amd64.whl").write_bytes(b"")
+            req = Requirement("cryptography>=49.0.0")
+            skip, reason = find_links_wheel_build_skip(req, links)
+            self.assertFalse(skip)
+            self.assertEqual(reason, "")
+
+    def test_find_links_skip_superseded_exact_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cffi-2.1.0-cp314-cp314-manylinux2014_x86_64.whl").write_bytes(b"")
+            req = Requirement("cffi==1.17.1")
+            skip, reason = find_links_wheel_build_skip(req, links)
+            self.assertTrue(skip)
+            self.assertIn("newer than obsolete pin", reason)
+            self.assertIn("1.17.1", reason)
+
     @patch("_helper_functions.platform.system", return_value="Linux")
     def test_skip_bounded_pin_without_find_links_wheel(self, _mock_system):
         with tempfile.TemporaryDirectory() as tmp:
@@ -708,6 +794,112 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
         with patch.dict(os.environ, {"PIP_NO_BINARY": "cffi,argon2-cffi-bindings"}, clear=False):
             env = armv7_pip_wheel_subprocess_env("requests>=2.28")
             self.assertEqual(env["PIP_NO_BINARY"], "cffi,argon2-cffi-bindings")
+
+
+class TestPipWheelOrMirrorSuccess(unittest.TestCase):
+    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=True)
+    def test_pip_success_still_mirrors_and_returns_true(self, mock_mirror):
+        self.assertTrue(pip_wheel_or_mirror_success("greenlet>3.0.0", 0))
+        mock_mirror.assert_called_once()
+
+    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=True)
+    def test_pip_failure_succeeds_when_mirror_works(self, mock_mirror):
+        self.assertTrue(pip_wheel_or_mirror_success("pillow!=9.5.0", 1))
+        mock_mirror.assert_called_once()
+
+    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=False)
+    def test_pip_failure_fails_when_mirror_fails(self, mock_mirror):
+        self.assertFalse(pip_wheel_or_mirror_success("cffi==1.17.1", 1))
+        mock_mirror.assert_called_once()
+
+
+class TestMirrorPypiManylinux228(unittest.TestCase):
+    @patch("subprocess.run")
+    @patch("platform.machine", return_value="x86_64")
+    @patch("platform.system", return_value="Linux")
+    def test_runs_pip_download_for_force_no_binary_package(self, _sys, _machine, mock_run):
+        mock_run.return_value = type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+        self.assertTrue(mirror_pypi_manylinux228_wheel("cryptography==49.0.0"))
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("download", cmd)
+        self.assertIn("manylinux_2_28_x86_64", cmd)
+
+    @patch("subprocess.run")
+    @patch("platform.machine", return_value="aarch64")
+    @patch("platform.system", return_value="Linux")
+    def test_uses_aarch64_platform(self, _sys, _machine, mock_run):
+        mock_run.return_value = type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+        self.assertTrue(mirror_pypi_manylinux228_wheel("cffi>=1.15.0"))
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("manylinux_2_28_aarch64", cmd)
+
+    @patch("subprocess.run")
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    def test_skips_packages_outside_force_no_binary_list(self, _machine, _sys, mock_run):
+        self.assertFalse(mirror_pypi_manylinux228_wheel("requests==2.31.0"))
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch("platform.machine", return_value="x86_64")
+    @patch("platform.system", return_value="Linux")
+    def test_prunes_ci_manylinux_234_after_successful_mirror(self, _sys, _machine, mock_run):
+        mock_run.return_value = type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl").write_bytes(b"")
+            (links / "cryptography-49.0.0-cp312-abi3-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            self.assertTrue(mirror_pypi_manylinux228_wheel("cryptography==49.0.0", wheel_dir=links))
+            self.assertFalse((links / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl").exists())
+            self.assertTrue((links / "cryptography-49.0.0-cp312-abi3-manylinux_2_28_x86_64.whl").exists())
+
+
+class TestPruneCiManylinux228(unittest.TestCase):
+    def test_removes_only_newer_manylinux_for_same_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "cryptography-49.0.0-cp312-abi3-manylinux_2_28_x86_64.whl"
+            drop = links / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
+            other = links / "cryptography-48.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
+            keep.write_bytes(b"")
+            drop.write_bytes(b"")
+            other.write_bytes(b"")
+            removed = prune_ci_manylinux_newer_than_228("cryptography", "49.0.0", wheel_dir=links)
+            self.assertEqual(removed, 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
+            self.assertTrue(other.exists())
+
+    def test_detects_compound_pypi_mirror_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            compound = links / "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.manylinux_2_34_x86_64.whl"
+            compound.write_bytes(b"")
+            self.assertEqual(_mirrored_manylinux228_version("cryptography", links), "49.0.0")
+
+    def test_prune_when_228_mirror_present_drops_newer_sibling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            compound = links / "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.manylinux_2_34_x86_64.whl"
+            ci_only = links / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
+            compound.write_bytes(b"")
+            ci_only.write_bytes(b"")
+            removed = prune_ci_manylinux_newer_than_228_when_228_mirror_present(wheel_dir=links)
+            self.assertEqual(removed, 1)
+            self.assertTrue(compound.exists())
+            self.assertFalse(ci_only.exists())
+
+
+class TestSkipAuditwheelForPypiMirror(unittest.TestCase):
+    @patch("platform.machine", return_value="x86_64")
+    def test_skips_cryptography_manylinux_228_mirror(self, _machine):
+        name = "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.whl"
+        self.assertTrue(should_skip_linux_auditwheel_for_pypi_mirror(name))
+
+    @patch("platform.machine", return_value="x86_64")
+    def test_does_not_skip_ci_manylinux_234_only(self, _machine):
+        name = "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
+        self.assertFalse(should_skip_linux_auditwheel_for_pypi_mirror(name))
 
 
 class TestCryptographyMacosIntelBuild(unittest.TestCase):

@@ -25,7 +25,8 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
   ca-certificates \
   libffi-dev \
-  libssl-dev
+  libssl-dev \
+  patchelf
 if [ -n "$LIBFFI_RUNTIME" ]; then
   apt-get install -y --no-install-recommends "$LIBFFI_RUNTIME"
 fi

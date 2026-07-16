@@ -19,6 +19,8 @@ class TestNativeImportGuard(unittest.TestCase):
         self.assertIn("_rust", code)
         self.assertIn("_openssl", code)
         self.assertLess(code.index("_rust"), code.index("_openssl"))
+        self.assertIn("from cryptography import x509", code)
+        self.assertIn("cryptography import OK", code)
 
 
 if __name__ == "__main__":

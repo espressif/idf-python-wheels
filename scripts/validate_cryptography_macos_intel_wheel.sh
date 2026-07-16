@@ -95,10 +95,12 @@ missing: list[tuple[Path, tuple[int, int]]] = []
 
 for path in sorted(wheels_dir.glob("cryptography-*.whl")):
     try:
-        _name, ver, _build, _tags = parse_wheel_filename(path.name)
+        _name, ver, _build, tags = parse_wheel_filename(path.name)
     except InvalidWheelFilename:
         continue
     if Version(str(ver)) < Version("49"):
+        continue
+    if not any("x86_64" in tag.platform for tag in tags):
         continue
     min_version = _min_python_for_wheel(path)
     wheel_python = _pick_python(min_version, available_pythons)

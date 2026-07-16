@@ -1,7 +1,7 @@
 # This is a list of Python packages needed for build process and script. This file is used with pip.
 # ----- build script -----
 requests~=2.31.0
-packaging~=23.2
+packaging>=24.2,<26
 PyYAML~=6.0.1
 colorama~=0.4.6
 tomli; python_version < "3.11"
@@ -17,8 +17,13 @@ wheel<0.45.0; python_version < "3.10"
 cffi>=1.15.0                # Required by packages with C extensions (e.g., xcffib, cryptography)
 setuptools-scm>=6.2,<9      # Required by packages using git-based versioning
 setuptools-rust>=1.5.0,<2   # Required by packages with Rust extensions (e.g., cryptography, bleak, rpds-py)
+maturin>=1.4,<2             # cryptography 49+ PEP 517 backend; used with --no-build-isolation on Linux
 cython>=0.29.0              # Required by packages using Cython (e.g., coverage, pyyaml speedups)
 poetry-core>=1.0.0          # Required as build backend for packages using Poetry
+flit_core>=3.9,<4           # pytest-embedded-* (flit; --no-build-isolation in CI)
+meson-python>=0.16.0        # dbus-python (PEP 517 meson backend; Linux dependent wheels)
+meson>=1.2.0                # meson-python / dbus-python
+pybind11>=2.11              # Pillow 10+ sdist on Python 3.13+ (macOS/Linux CI)
 # bleak-winrt (scikit-build) on Windows: used with --no-build-isolation in CI
 scikit-build>=0.18.0
 cmake>=3.16

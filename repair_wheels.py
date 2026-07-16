@@ -33,9 +33,13 @@ from typing import Union
 
 from colorama import Fore
 
+from _helper_functions import _REPO_ROOT
+from _helper_functions import _force_no_binary_linux_normalized
 from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
+from _helper_functions import prune_ci_manylinux_newer_than_228_when_228_mirror_present
+from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from _helper_functions import wheel_archive_is_readable
 
 
@@ -385,6 +389,18 @@ def main() -> None:
     current_platform: str = get_platform()
     current_arch: str = platform.machine()
 
+    if current_platform == "Linux" and current_arch in ("x86_64", "aarch64"):
+        pruned = prune_ci_manylinux_newer_than_228_when_228_mirror_present(
+            wheel_dir=wheels_dir,
+            package_names=_force_no_binary_linux_normalized(_REPO_ROOT),
+        )
+        if pruned:
+            print_color(
+                f"Pre-repair: pruned {pruned} manylinux wheel(s) newer than 2_28 (PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
+            wheels = _dedupe_wheel_paths(wheels_dir)
+
     repaired_count: int = 0
     skipped_count: int = 0
     deleted_count: int = 0
@@ -461,6 +477,14 @@ def main() -> None:
             skipped_count += 1
             continue
 
+        if current_platform == "Linux" and should_skip_linux_auditwheel_for_pypi_mirror(wheel.name):
+            print_color(
+                "  -> Skipping auditwheel (PyPI manylinux_2_28 mirror; repair would retag to host 2_34)",
+                Fore.YELLOW,
+            )
+            skipped_count += 1
+            continue
+
         # Clean temp directory
         for old_wheel in temp_dir.glob("*.whl"):
             old_wheel.unlink()
@@ -525,15 +549,20 @@ def main() -> None:
                 wheel = Path(renamed_wheel)
                 error_msg = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
 
-        # Special handling for Linux ARMv7 broken wheels
-        if (
-            current_platform == "Linux"
-            and current_arch == "armv7l"
-            and "This does not look like a platform wheel, no ELF executable" in error_msg
-        ):
-            print_color("  -> Deleting corrupted wheel", Fore.RED)
-            wheel.unlink(missing_ok=True)
-            deleted_count += 1
+        # Special handling for auditwheel "not a platform wheel" (no ELF in archive).
+        # PyPI may ship manylinux-tagged pure wheels (e.g. dbus-fast 2.39+ on x86_64/aarch64);
+        # keep them on standard Linux repair hosts. ARMv7 still deletes (corrupt piwheels case).
+        if current_platform == "Linux" and "This does not look like a platform wheel, no ELF executable" in error_msg:
+            if current_arch == "armv7l":
+                print_color("  -> Deleting corrupted wheel", Fore.RED)
+                wheel.unlink(missing_ok=True)
+                deleted_count += 1
+            else:
+                print_color(
+                    "  -> Keeping original wheel (manylinux tag but no native extensions; auditwheel N/A)",
+                    Fore.YELLOW,
+                )
+                skipped_count += 1
             continue
 
         plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
@@ -699,6 +728,17 @@ def main() -> None:
                 print_color(f"  -> ERROR: {error_msg}", Fore.RED)
                 errors.append(f"{wheel.name}: {error_msg}")
                 error_count += 1
+
+    if current_platform == "Linux" and current_arch in ("x86_64", "aarch64"):
+        pruned = prune_ci_manylinux_newer_than_228_when_228_mirror_present(
+            wheel_dir=wheels_dir,
+            package_names=_force_no_binary_linux_normalized(_REPO_ROOT),
+        )
+        if pruned:
+            print_color(
+                f"Pruned {pruned} manylinux wheel(s) newer than 2_28 (PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
 
     if current_platform == "Linux" and current_arch == "armv7l":
         pruned = _prune_manylinux_armv7_when_linux_tag_present(wheels_dir)

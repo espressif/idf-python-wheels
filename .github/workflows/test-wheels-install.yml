@@ -11,6 +11,13 @@ on:
         description: 'JSON array of supported Python versions'
         required: true
         type: string
+      enabled_arches:
+        description: >-
+          JSON array of platform arch slugs to test (e.g. ["windows-x86_64"]).
+          Omit or use the default to test all platforms.
+        required: false
+        type: string
+        default: '["windows-x86_64","linux-x86_64","macos-x86_64","macos-arm64","linux-arm64","linux-armv7","linux-armv7legacy"]'
 
 jobs:
   test-install:
@@ -57,28 +64,30 @@ jobs:
 
     steps:
       - name: Checkout repository
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch)
         uses: actions/checkout@v5
 
       - name: Set up QEMU for ARMv7
-        if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch) && (matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy')
         uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/arm/v7
 
       - name: Download repaired wheels for this platform
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch)
         uses: actions/download-artifact@v8
         with:
           name: wheels-repaired-${{ matrix.arch }}
           path: ./downloaded_wheels
 
       - name: Setup Python
-        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Test wheel installation
-        if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
         run: |
           python --version
           python -m pip install --upgrade pip
@@ -86,7 +95,7 @@ jobs:
           python test_wheels_install.py
 
       - name: Test wheel installation - ARMv7 (in Docker)
-        if: matrix.os == 'Linux ARMv7'
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7'
         run: |
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
@@ -104,7 +113,7 @@ jobs:
             "
 
       - name: Test wheel installation - ARMv7 Legacy (in Docker)
-        if: matrix.os == 'Linux ARMv7 Legacy'
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7 Legacy'
         run: |
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
@@ -124,6 +133,7 @@ jobs:
       # After test_wheels_install.py, ./downloaded_wheels contains only wheels for this
       # matrix Python + platform (see prune step in test_wheels_install.main).
       - name: Upload tested wheels
+        if: contains(fromJson(inputs.enabled_arches), matrix.arch)
         uses: actions/upload-artifact@v7
         with:
           name: wheels-tested-${{ matrix.arch }}-${{ matrix.python-version }}

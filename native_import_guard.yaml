@@ -22,6 +22,8 @@ packages:
             from cryptography.hazmat.bindings._rust import openssl as _openssl
         except ImportError:
             from cryptography.hazmat.bindings._openssl import ffi
+      - from cryptography import x509
+      - print("cryptography import OK", x509.__name__)
   - name: bcrypt
     imports:
       - import bcrypt

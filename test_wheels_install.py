@@ -14,6 +14,10 @@ platform are deleted from ``downloaded_wheels`` so CI ``wheels-tested-*`` artifa
 do not carry wheels for other Python versions. CI downloads ``wheels-repaired-<arch>``
 per matrix row (not the full merge) so ARMv7 vs ARMv7 Legacy binaries are not mixed.
 
+After ``pip install``, :func:`_run_native_import_probes` imports native extensions listed
+in ``native_import_guard.yaml`` (e.g. ``from cryptography import x509``) so wheels that
+install cleanly but fail at load time (OpenSSL symbol mismatches) fail CI before upload.
+
 Wheels are ZIP archives (PEP 427). pip opens them with the zipfile module; a
 BadZipFile / "Bad magic number" error means the bytes on disk are not a valid
 ZIP (truncated, corrupted, or not a wheel), not that ".whl" was mistaken for ".zip".
@@ -88,6 +92,51 @@ def _armv7_test_plat() -> tuple[str, bool] | None:
     if codename == "bookworm":
         return "manylinux_2_36_armv7l", True
     return None
+
+
+def _should_skip_native_import_probe(dist_name: str) -> bool:
+    """Platform-specific skips for native import probes after ``pip install``."""
+    return _armv7_skip_cryptography_native_probe(dist_name)
+
+
+def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[tuple[str, str]]]:
+    """Import native extensions after install; catch load-time ABI/OpenSSL mismatches."""
+    guarded = native_import_guard_by_name()
+    native_failed = 0
+    failed_wheels: list[tuple[str, str]] = []
+    if not installed_wheels:
+        return native_failed, failed_wheels
+
+    print_color("---------- NATIVE IMPORT PROBES ----------")
+    for wheel_path in installed_wheels:
+        parsed = parse_wheel_name(wheel_path.name)
+        if not parsed or parsed[0] not in guarded:
+            continue
+        if _should_skip_native_import_probe(parsed[0]):
+            print_color(
+                f"-- skip {wheel_path.name} (native import probe skipped on this platform)",
+                Fore.YELLOW,
+            )
+            continue
+        ok, msg = run_import_probes(guarded[parsed[0]].imports)
+        if ok:
+            print_color(f"-- {wheel_path.name}", Fore.GREEN)
+            if msg:
+                for line in msg.splitlines():
+                    print(f"   {line}")
+        else:
+            native_failed += 1
+            err = msg or "native import probe failed"
+            failed_wheels.append((wheel_path.name, err))
+            print_color(f"-- {wheel_path.name}", Fore.RED)
+            if msg:
+                for line in msg.splitlines()[:8]:
+                    print(f"   {line}")
+            wheel_path.unlink(missing_ok=True)
+    print_color("---------- END NATIVE IMPORT PROBES ----------")
+    if native_failed:
+        print_color(f"Native import failures: {native_failed}", Fore.RED)
+    return native_failed, failed_wheels
 
 
 def _armv7_skip_cryptography_native_probe(dist_name: str) -> bool:
@@ -250,6 +299,16 @@ def discard_corrupt_wheel(wheel_path: Path, note: str) -> None:
     print_color(f"-- {wheel_path.name} ({note})", Fore.YELLOW)
 
 
+def _platform_wheels_all_excluded(exclude_requirements: set) -> bool:
+    """True when every platform-matching wheel in ``WHEELS_DIR`` is excluded by policy."""
+    if not WHEELS_DIR.exists():
+        return False
+    platform_wheels = [p for p in WHEELS_DIR.glob("*.whl") if _platform_compatible(p.name)]
+    if not platform_wheels:
+        return False
+    return all(should_exclude_wheel(p.name, exclude_requirements)[0] for p in platform_wheels)
+
+
 def main() -> int:
     python_version_tag = get_python_version_tag()
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -268,6 +327,12 @@ def main() -> int:
     print(f"Found {len(wheels)} compatible wheels to test\n")
 
     if not wheels:
+        if _platform_wheels_all_excluded(exclude_requirements):
+            print_color(
+                "No installable wheels for this Python version; platform wheels are excluded by policy.",
+                Fore.YELLOW,
+            )
+            return 0
         print_color("No compatible wheels found!", Fore.RED)
         return 1
 
@@ -339,35 +404,10 @@ def main() -> int:
 
     print_color("---------- END INSTALL WHEELS ----------")
 
-    native_failed = 0
-    if platform.machine().lower() == "armv7l" and installed_wheels:
-        guarded = native_import_guard_by_name()
-        print_color("---------- NATIVE IMPORT PROBES (ARMv7) ----------")
-        for wheel_path in installed_wheels:
-            parsed = parse_wheel_name(wheel_path.name)
-            if not parsed or parsed[0] not in guarded:
-                continue
-            if _armv7_skip_cryptography_native_probe(parsed[0]):
-                print_color(
-                    f"-- skip {wheel_path.name} (cryptography OpenSSL probe; bookworm piwheels)",
-                    Fore.YELLOW,
-                )
-                continue
-            ok, msg = run_import_probes(guarded[parsed[0]].imports)
-            if ok:
-                print_color(f"-- {wheel_path.name}", Fore.GREEN)
-            else:
-                native_failed += 1
-                failed_wheels.append((wheel_path.name, msg or "native import probe failed"))
-                print_color(f"-- {wheel_path.name}", Fore.RED)
-                if msg:
-                    for line in msg.splitlines()[:5]:
-                        print(f"   {line}")
-                wheel_path.unlink(missing_ok=True)
-        print_color("---------- END NATIVE IMPORT PROBES ----------")
-        if native_failed:
-            failed += native_failed
-            print_color(f"Native import failures: {native_failed}", Fore.RED)
+    native_failed, probe_failures = _run_native_import_probes(installed_wheels)
+    if native_failed:
+        failed += native_failed
+        failed_wheels.extend(probe_failures)
 
     # Print statistics
     print_color("---------- STATISTICS ----------")
