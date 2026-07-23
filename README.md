@@ -124,7 +124,10 @@ Wheel builds still honor **`exclude_list.yaml`** on each CI platform. [`emit_sdi
 
 - [`build_wheels.py`](./build_wheels.py) assembles the full IDF dependency tree, then [`emit_sdist_requirements.py`](./emit_sdist_requirements.py) computes **`sdist_requirements.txt`** (union over all platforms).
 - [`download_sdists.py`](./download_sdists.py) fetches those sdists from PyPI during upload; [`upload_wheels.py`](./upload_wheels.py) and [`create_index_pages.py`](./create_index_pages.py) place them under `pypi/<project>/` next to wheels (PEP 503 simple repository layout).
-- [`verify_s3_sdists.py`](./verify_s3_sdists.py) checks that each listed package has at least one sdist object on S3 after upload.
+- Per-project **`index.html`** pages include **`data-requires-python`** on every wheel and sdist link ([Simple Repository API](https://packaging.python.org/en/latest/specifications/simple-repository-api/#html-form), PEP 503 HTML metadata). Values come from PyPI’s **`Requires-Python`** field. Pip 8.2+ reads this attribute and ignores incompatible artifacts before download.
+- **Sdist upload guard:** [`upload_wheels.py`](./upload_wheels.py) uploads sdists only when they appear in **`sdist_requirements.txt`** (present in full **platforms-dispatch** bundle uploads). Ad-hoc **defined-wheels** uploads without that file skip sdists so accidental `pip wheel` tarballs do not reach S3.
+- After merging index-metadata changes, regenerate all index pages without re-uploading artifacts by running the **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)** workflow against the production bucket.
+- [`verify_s3_sdists.py`](./verify_s3_sdists.py) checks that each line in **`sdist_requirements.txt`** has a matching sdist on S3 (`--strict` in CI fails when the bundle file is missing).
 
 To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set the environment variable:
 

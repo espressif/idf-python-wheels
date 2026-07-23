@@ -136,26 +136,44 @@ def _load_supported_python_versions() -> list[str]:
 
 def _marker_env(platform: str, python_version: str) -> dict[str, str]:
     sys_plat = _platform_for_marker(platform)
-    if sys_plat == "win32":
-        return {
-            "sys_platform": "win32",
-            "platform_system": "Windows",
-            "os_name": "nt",
-            "python_version": python_version,
-        }
-    if sys_plat == "darwin":
-        return {
-            "sys_platform": "darwin",
-            "platform_system": "Darwin",
-            "os_name": "posix",
-            "python_version": python_version,
-        }
-    return {
-        "sys_platform": "linux",
-        "platform_system": "Linux",
-        "os_name": "posix",
-        "python_version": python_version,
+    env: dict[str, str] = {"python_version": python_version}
+
+    machine_by_platform = {
+        "linux_x86_64": "x86_64",
+        "linux_arm64": "aarch64",
+        "linux_armv7": "armv7l",
+        "macos_x86_64": "x86_64",
+        "macos_arm64": "arm64",
+        "windows": "AMD64",
     }
+    if platform in machine_by_platform:
+        env["platform_machine"] = machine_by_platform[platform]
+
+    if sys_plat == "win32":
+        env.update(
+            {
+                "sys_platform": "win32",
+                "platform_system": "Windows",
+                "os_name": "nt",
+            }
+        )
+    elif sys_plat == "darwin":
+        env.update(
+            {
+                "sys_platform": "darwin",
+                "platform_system": "Darwin",
+                "os_name": "posix",
+            }
+        )
+    else:
+        env.update(
+            {
+                "sys_platform": "linux",
+                "platform_system": "Linux",
+                "os_name": "posix",
+            }
+        )
+    return env
 
 
 def _requirement_applies_to_env(req: Requirement, platform: str, python_version: str) -> bool:
@@ -214,7 +232,7 @@ def compute_sdist_requirements(assembled: Iterable[Requirement]) -> set[Requirem
                 applicable = [ar for ar in assembled_reqs if _requirement_applies_to_env(ar, platform, py_ver)]
                 if not applicable:
                     continue
-                if not any(_can_build_wheel_on_platform(ar, after, platform, py_ver) for ar in applicable):
+                if not all(_can_build_wheel_on_platform(ar, after, platform, py_ver) for ar in applicable):
                     needing_names.add(name)
                     break
 

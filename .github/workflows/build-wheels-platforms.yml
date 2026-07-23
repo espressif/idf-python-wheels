@@ -304,4 +304,4 @@ jobs:
           path: .
 
       - name: Verify S3 sdists (PEP 503 fallback)
-        run: python verify_s3_sdists.py ${{ secrets.DL_BUCKET }} sdist_requirements.txt
+        run: python verify_s3_sdists.py ${{ secrets.DL_BUCKET }} sdist_requirements.txt --strict

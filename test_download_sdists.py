@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from download_sdists import _sdist_download_line
 from download_sdists import download_sdists
 
 
@@ -72,6 +73,32 @@ class TestDownloadSdists(unittest.TestCase):
                 rc = download_sdists(req_path, dest_dir=Path(tmp) / "out")
             self.assertEqual(rc, 0)
             mock_run.assert_not_called()
+
+    def test_strips_markers_for_pip_download(self) -> None:
+        line = 'gdbgui==0.13.2.0; python_version < "3.11" and sys_platform == "win32"'
+        self.assertEqual(_sdist_download_line(line), "gdbgui==0.13.2.0")
+
+    def test_marker_only_line_downloads_by_name(self) -> None:
+        line = 'gdbgui; sys_platform == "win32" and python_version < "3.11"'
+        self.assertEqual(_sdist_download_line(line), "gdbgui")
+
+    def test_writes_marker_stripped_line_to_pip_requirements_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            req_path = Path(tmp) / "sdist_requirements.txt"
+            dest = Path(tmp) / "out"
+            line = 'gdbgui==0.13.2.0; python_version < "3.11" and sys_platform == "win32"'
+            req_path.write_text(line + "\n", encoding="utf-8")
+            written: list[str] = []
+
+            def fake_run(cmd, **kwargs):
+                written.append(Path(cmd[5]).read_text(encoding="utf-8").strip())
+                return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+            with patch("download_sdists.subprocess.run", side_effect=fake_run):
+                rc = download_sdists(req_path, dest_dir=dest)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(written, ["gdbgui==0.13.2.0"])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,12 @@ from typing import Dict
 
 import boto3
 
+from _helper_functions import build_requires_python_map
+from _helper_functions import parse_distribution_filename
+from _helper_functions import pep503_file_link
+
+DL_BUCKET = sys.argv[1]
+
 
 def _html_loader(path: str) -> str:
     """Loads the HTML file"""
@@ -22,8 +28,6 @@ def _html_loader(path: str) -> str:
 HTML_HEADER = _html_loader("resources/html/header.html")
 HTML_PRETTY_HEADER = _html_loader("resources/html/pretty_header.html")
 HTML_FOOTER = _html_loader("resources/html/footer.html")
-
-DL_BUCKET = sys.argv[1]
 
 s3 = boto3.client("s3")
 
@@ -88,11 +92,13 @@ s3.upload_fileobj(
 for name, filenames in packages_new.items():
     index_wheel = []
     index_wheel.append(HTML_HEADER)
+    requires_python_map = build_requires_python_map(filenames)
     for fn in sorted(filenames):
-        # Skip HTML source file of the wheel page
         if fn == "index.html":
             continue
-        index_wheel.append(f'<a href="/pypi/{name}/{fn}">{fn}</a><br/>')
+        parsed = parse_distribution_filename(fn)
+        rp = requires_python_map.get(parsed) if parsed is not None else None
+        index_wheel.append(pep503_file_link(name, fn, requires_python=rp))
     index_wheel.append(HTML_FOOTER)
 
     s3.upload_fileobj(

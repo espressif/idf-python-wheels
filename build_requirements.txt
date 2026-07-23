@@ -21,6 +21,7 @@ maturin>=1.4,<2             # cryptography 49+ PEP 517 backend; used with --no-b
 cython>=0.29.0              # Required by packages using Cython (e.g., coverage, pyyaml speedups)
 poetry-core>=1.0.0          # Required as build backend for packages using Poetry
 flit_core>=3.9,<4           # pytest-embedded-* (flit; --no-build-isolation in CI)
+hatchling>=1.18.0           # argcomplete and other hatchling-backed sdists (--no-build-isolation in CI)
 meson-python>=0.16.0        # dbus-python (PEP 517 meson backend; Linux dependent wheels)
 meson>=1.2.0                # meson-python / dbus-python
 pybind11>=2.11              # Pillow 10+ sdist on Python 3.13+ (macOS/Linux CI)

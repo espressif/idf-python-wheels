@@ -15,7 +15,10 @@ import tempfile
 from pathlib import Path
 
 from colorama import Fore
+from packaging.requirements import InvalidRequirement
+from packaging.requirements import Requirement
 
+from _helper_functions import _requirement_for_pip_download
 from _helper_functions import print_color
 
 DEFAULT_OUT = Path("downloaded_wheels")
@@ -28,6 +31,17 @@ def _read_requirement_lines(requirements_file: Path) -> list[str]:
         for ln in requirements_file.read_text(encoding="utf-8").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
+
+
+def _sdist_download_line(requirement_line: str) -> str:
+    """PEP 508 name+specifier for ``pip download``; sdists are platform-independent."""
+    line = requirement_line.strip()
+    if not line:
+        return line
+    try:
+        return _requirement_for_pip_download(Requirement(line))
+    except InvalidRequirement:
+        return line
 
 
 def download_sdists(
@@ -50,14 +64,17 @@ def download_sdists(
     # download them one at a time so pip does not try to satisfy all pins together.
     failures: list[str] = []
     for index, line in enumerate(lines, start=1):
+        download_line = _sdist_download_line(line)
         print_color(f"[{index}/{len(lines)}] {line}", Fore.CYAN)
+        if download_line != line.strip():
+            print_color(f"  -> pip download as {download_line} (markers ignored for sdist)", Fore.YELLOW)
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".txt",
             encoding="utf-8",
             delete=False,
         ) as req_file:
-            req_file.write(line + "\n")
+            req_file.write(download_line + "\n")
             one_line_req = Path(req_file.name)
         try:
             cmd = [

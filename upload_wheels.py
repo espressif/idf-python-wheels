@@ -15,7 +15,12 @@ import boto3
 
 from colorama import Fore
 
+from _helper_functions import SDIST_REQUIREMENTS_FILE
+from _helper_functions import is_sdist_filename
+from _helper_functions import load_sdist_requirement_lines
+from _helper_functions import parse_distribution_filename
 from _helper_functions import print_color
+from _helper_functions import sdist_allowed_for_upload
 
 s3 = boto3.resource("s3")
 try:
@@ -47,6 +52,8 @@ existing_wheels = get_existing_wheels()
 print(f"Found {len(existing_wheels)} existing wheels and sdists on S3\n")
 
 print_color("---------- UPLOADING WHEELS ----------")
+
+sdist_allowlist = load_sdist_requirement_lines()
 
 
 def collect_wheel_paths():
@@ -83,30 +90,56 @@ def collect_wheel_paths():
 wheel_paths = collect_wheel_paths()
 new_wheels = 0
 existing_count = 0
+skipped_sdists = 0
 
 for full_path, wheel in wheel_paths:
     pattern = re.compile(r"^(.+?)-(\d+)")
     match = pattern.search(wheel)
-    if match:
-        wheel_name = match.group(1)
-        wheel_name = normalize(wheel_name)
+    if not match:
+        continue
 
-        s3_key = f"pypi/{wheel_name}/{wheel}"
-        is_new = s3_key not in existing_wheels
+    if is_sdist_filename(wheel):
+        parsed = parse_distribution_filename(wheel)
+        if parsed is None:
+            print_color(f"-- skip sdist (unparseable name): {wheel}", Fore.YELLOW)
+            skipped_sdists += 1
+            continue
+        dist_name, version = parsed
+        if not sdist_allowlist:
+            print_color(
+                f"-- skip sdist (no {SDIST_REQUIREMENTS_FILE} allowlist): {wheel}",
+                Fore.YELLOW,
+            )
+            skipped_sdists += 1
+            continue
+        if not sdist_allowed_for_upload(dist_name, version, sdist_allowlist):
+            print_color(
+                f"-- skip sdist (not in {SDIST_REQUIREMENTS_FILE}): {wheel}",
+                Fore.YELLOW,
+            )
+            skipped_sdists += 1
+            continue
 
-        BUCKET.upload_file(full_path, s3_key, ExtraArgs={"ACL": "public-read"})
+    wheel_name = match.group(1)
+    wheel_name = normalize(wheel_name)
 
-        if is_new:
-            new_wheels += 1
-            print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
-        else:
-            existing_count += 1
-            print(f"  <- {wheel_name}/{wheel}")
+    s3_key = f"pypi/{wheel_name}/{wheel}"
+    is_new = s3_key not in existing_wheels
+
+    BUCKET.upload_file(full_path, s3_key, ExtraArgs={"ACL": "public-read"})
+
+    if is_new:
+        new_wheels += 1
+        print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
+    else:
+        existing_count += 1
+        print(f"  <- {wheel_name}/{wheel}")
 
 print_color("---------- END UPLOADING ----------")
 
 print_color("---------- STATISTICS ----------")
 print_color(f"New wheels and sdists: {new_wheels}", Fore.GREEN)
 print(f"Existing wheels and sdists (re-uploaded): {existing_count}")
+print(f"Skipped sdists (allowlist / policy): {skipped_sdists}")
 print(f"Total uploaded: {new_wheels + existing_count}")
 print_color("---------- END STATISTICS ----------")

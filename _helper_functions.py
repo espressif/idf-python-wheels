@@ -5,6 +5,7 @@
 #
 from __future__ import annotations
 
+import html
 import json
 import os
 import platform
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Dict
+from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Set
@@ -35,8 +37,10 @@ from colorama import Style
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
+from packaging.utils import InvalidSdistFilename
 from packaging.utils import InvalidWheelFilename
 from packaging.utils import canonicalize_name
+from packaging.utils import parse_sdist_filename as _packaging_parse_sdist_filename
 from packaging.utils import parse_wheel_filename
 from packaging.version import InvalidVersion
 from packaging.version import Version
@@ -744,6 +748,11 @@ def _prune_mirrored_manylinux228_ci_builds(
     return pruned
 
 
+def _requirement_for_pip_download(req: Requirement) -> str:
+    """Return ``name`` + ``specifier`` only; ``pip download`` rejects PEP 508 markers."""
+    return f"{req.name}{req.specifier}"
+
+
 def mirror_pypi_manylinux228_wheel(
     requirement_line: str,
     *,
@@ -779,6 +788,8 @@ def mirror_pypi_manylinux228_wheel(
     except InvalidRequirement:
         return False
 
+    download_line = _requirement_for_pip_download(req)
+
     pkg_key = canonicalize_name(req.name).replace("-", "_")
     if pkg_key not in _force_no_binary_linux_normalized(_REPO_ROOT):
         return False
@@ -796,7 +807,7 @@ def mirror_pypi_manylinux228_wheel(
                 "-m",
                 "pip",
                 "download",
-                line,
+                download_line,
                 "--only-binary",
                 ":all:",
                 "--dest",
@@ -818,7 +829,7 @@ def mirror_pypi_manylinux228_wheel(
             print(out.stdout.decode("utf-8", errors="replace"))
         if out.returncode == 0:
             print_color(
-                f"-- mirrored {pip_platform} wheel for {line} from PyPI (abi={abi}; older glibc consumers)",
+                f"-- mirrored {pip_platform} wheel for {download_line} from PyPI (abi={abi}; older glibc consumers)",
                 Fore.YELLOW,
             )
             _prune_mirrored_manylinux228_ci_builds(req, wheel_dir=dest)
@@ -827,7 +838,7 @@ def mirror_pypi_manylinux228_wheel(
     if out.stderr:
         print_color(out.stderr.decode("utf-8", errors="replace"), Fore.YELLOW)
     print_color(
-        f"-- could not mirror {pip_platform} wheel for {line} from PyPI",
+        f"-- could not mirror {pip_platform} wheel for {download_line} from PyPI",
         Fore.YELLOW,
     )
     return False
@@ -1008,6 +1019,161 @@ def parse_wheel_name(wheel_name: str) -> tuple[str, str] | None:
         return canonicalize_name(str(name)), str(version)
     except InvalidWheelFilename:
         return None
+
+
+SDIST_ARCHIVE_SUFFIXES: tuple[str, ...] = (
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
+    ".tar.zst",
+    ".zip",
+)
+
+SDIST_REQUIREMENTS_FILE = "sdist_requirements.txt"
+
+# ``packaging`` only parses ``.tar.gz`` / ``.zip``; other archive suffixes use this fallback.
+_SDIST_FALLBACK_RE = re.compile(
+    r"^(.+?)-(.+)\.(?:tar\.(?:gz|bz2|xz|zst)|zip)$",
+    re.IGNORECASE,
+)
+
+
+def is_sdist_filename(filename: str) -> bool:
+    lower = filename.lower()
+    return any(lower.endswith(suffix) for suffix in SDIST_ARCHIVE_SUFFIXES)
+
+
+def parse_sdist_filename(filename: str) -> tuple[str, str] | None:
+    """Parse sdist archive name to ``(canonical_name, version_str)``."""
+    try:
+        name, version = _packaging_parse_sdist_filename(filename)
+        return canonicalize_name(str(name)), str(version)
+    except InvalidSdistFilename:
+        pass
+    match = _SDIST_FALLBACK_RE.match(filename)
+    if not match:
+        return None
+    name_raw, version_raw = match.group(1), match.group(2)
+    try:
+        version = str(parse_version(version_raw))
+    except InvalidVersion:
+        return None
+    return canonicalize_name(name_raw.replace("_", "-")), version
+
+
+def parse_distribution_filename(filename: str) -> tuple[str, str] | None:
+    """Parse a wheel or sdist filename to ``(canonical_name, version_str)``."""
+    if filename.lower().endswith(".whl"):
+        return parse_wheel_name(filename)
+    if is_sdist_filename(filename):
+        return parse_sdist_filename(filename)
+    return None
+
+
+def pep503_project_link(package_dir_name: str) -> str:
+    """PEP 503 root link to a project page (matches ``create_index_pages.py`` layout)."""
+    return f'        <a href="/pypi/{package_dir_name}/">{package_dir_name}/</a>'
+
+
+def pep503_file_link(
+    package_dir_name: str,
+    filename: str,
+    requires_python: Optional[str] = None,
+) -> str:
+    """Artifact link for per-project ``index.html`` pages (matches ``create_index_pages.py`` layout)."""
+    href = f"/pypi/{package_dir_name}/{filename}"
+    rp = (requires_python or "").strip()
+    if rp:
+        rp_attr = html.escape(rp, quote=True)
+        return f'<a href="{href}" data-requires-python="{rp_attr}">{filename}</a><br/>'
+    return f'<a href="{href}">{filename}</a><br/>'
+
+
+def build_requires_python_map(
+    filenames: list[str],
+    fetcher: Any | None = None,
+) -> dict[tuple[str, str], Optional[str]]:
+    """Map ``(canonical_name, version)`` → PyPI ``Requires-Python`` for index page generation."""
+    lookup = fetcher if fetcher is not None else fetch_pypi_release_requires_python
+    unique: dict[tuple[str, str], None] = {}
+    for fn in filenames:
+        if fn == "index.html":
+            continue
+        parsed = parse_distribution_filename(fn)
+        if parsed is not None:
+            unique[parsed] = None
+    return {key: lookup(key[0], key[1]) for key in unique}
+
+
+def load_sdist_requirement_lines(path: Path | str = SDIST_REQUIREMENTS_FILE) -> list[Requirement]:
+    """Load PEP 508 requirements from ``sdist_requirements.txt`` (empty if missing)."""
+    req_path = Path(path)
+    if not req_path.is_file():
+        return []
+    requirements: list[Requirement] = []
+    for line in req_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            requirements.append(Requirement(line))
+        except InvalidRequirement:
+            continue
+    return requirements
+
+
+def sdist_allowed_for_upload(
+    dist_name: str,
+    version_str: str,
+    allowlist: list[Requirement],
+) -> bool:
+    """True when ``(dist_name, version_str)`` matches an allowlisted sdist requirement line."""
+    if not allowlist:
+        return False
+    canonical = canonicalize_name(dist_name)
+    try:
+        version = parse_version(version_str)
+    except InvalidVersion:
+        return False
+    for req in allowlist:
+        if canonicalize_name(req.name) != canonical:
+            continue
+        if not req.specifier:
+            return True
+        if req.specifier.contains(version, prereleases=True):
+            return True
+    return False
+
+
+def requirement_satisfied_by_filenames(
+    filenames: Iterable[str],
+    req: Requirement,
+    *,
+    wheels_only: bool = False,
+    sdists_only: bool = False,
+) -> bool:
+    """True when any wheel/sdist filename satisfies ``req``."""
+    for filename in filenames:
+        lower = filename.lower()
+        if wheels_only and not lower.endswith(".whl"):
+            continue
+        if sdists_only and not is_sdist_filename(filename):
+            continue
+        parsed = parse_distribution_filename(filename)
+        if parsed is None:
+            continue
+        dist_name, version_str = parsed
+        if canonicalize_name(dist_name) != canonicalize_name(req.name):
+            continue
+        try:
+            version = parse_version(version_str)
+        except InvalidVersion:
+            continue
+        if not req.specifier:
+            return True
+        if req.specifier.contains(version, prereleases=True):
+            return True
+    return False
 
 
 def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:

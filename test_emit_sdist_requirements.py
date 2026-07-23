@@ -15,6 +15,8 @@ from unittest.mock import patch
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from emit_sdist_requirements import _marker_env
+from emit_sdist_requirements import _requirement_applies_to_env
 from emit_sdist_requirements import _version_buildable
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
@@ -124,6 +126,45 @@ class TestComputeSdistRequirements(unittest.TestCase):
 
         names = {r.name for r in result}
         self.assertIn("special-lib", names)
+
+    def test_needs_sdist_when_one_applicable_pin_is_unbuildable(self) -> None:
+        """If any co-applicable assembled pin lacks a wheel path, the package needs an sdist."""
+        assembled = {
+            _req("esptool~=4.12.dev2"),
+            _req("esptool>=5.3.0.dev0"),
+        }
+
+        def fake_exclude(assembled_set, exclude_reqs, print_requirements=True):
+            return set(assembled_set)
+
+        def fake_can_build(assembled_req, after_set, platform, python_version):
+            if "4.12.dev2" in str(assembled_req.specifier):
+                return False
+            return True
+
+        with patch("emit_sdist_requirements.YAMLListAdapter") as mock_adapter:
+            mock_adapter.return_value.requirements = set()
+            with patch("build_wheels.exclude_from_requirements", side_effect=fake_exclude):
+                with patch(
+                    "emit_sdist_requirements._can_build_wheel_on_platform",
+                    side_effect=fake_can_build,
+                ):
+                    with patch("emit_sdist_requirements.SDIST_EVAL_PLATFORMS", ("linux",)):
+                        with patch(
+                            "emit_sdist_requirements._load_supported_python_versions",
+                            return_value=["3.11"],
+                        ):
+                            result = compute_sdist_requirements(assembled)
+
+        names = {r.name for r in result}
+        self.assertIn("esptool", names)
+
+    def test_platform_machine_marker_applies_on_arm64_eval(self) -> None:
+        req = _req('pkg-a>=1.0; platform_machine == "aarch64"')
+        env = _marker_env("linux_arm64", "3.11")
+        self.assertEqual(env["platform_machine"], "aarch64")
+        self.assertTrue(_requirement_applies_to_env(req, "linux_arm64", "3.11"))
+        self.assertFalse(_requirement_applies_to_env(req, "linux_x86_64", "3.11"))
 
 
 class TestWriteSdistRequirementsFile(unittest.TestCase):

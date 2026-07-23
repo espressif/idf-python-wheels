@@ -853,6 +853,19 @@ class TestMirrorPypiManylinux228(unittest.TestCase):
             self.assertFalse((links / "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl").exists())
             self.assertTrue((links / "cryptography-49.0.0-cp312-abi3-manylinux_2_28_x86_64.whl").exists())
 
+    @patch("subprocess.run")
+    @patch("platform.machine", return_value="aarch64")
+    @patch("platform.system", return_value="Linux")
+    def test_strips_pep508_markers_for_pip_download(self, _sys, _machine, mock_run):
+        mock_run.return_value = type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+        line = 'greenlet==3.0.0; python_version < "3.13"'
+        self.assertTrue(mirror_pypi_manylinux228_wheel(line))
+        cmd = mock_run.call_args[0][0]
+        marker_idx = cmd.index(line) if line in cmd else -1
+        self.assertEqual(marker_idx, -1)
+        self.assertIn("greenlet==3.0.0", cmd)
+        self.assertNotIn("python_version", cmd)
+
 
 class TestPruneCiManylinux228(unittest.TestCase):
     def test_removes_only_newer_manylinux_for_same_version(self):
