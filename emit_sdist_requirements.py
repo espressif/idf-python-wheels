@@ -27,6 +27,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from _helper_functions import EXCLUDE_LIST_PATH
+from _helper_functions import SDIST_REQUIREMENTS_FILE
 from _helper_functions import print_color
 from yaml_list_adapter import YAMLListAdapter
 from yaml_list_adapter import _platform_for_marker
@@ -43,7 +44,6 @@ SDIST_EVAL_PLATFORMS = (
     "macos_arm64",
 )
 
-SDIST_REQUIREMENTS_FILE = "sdist_requirements.txt"
 _SUPPORTED_VERSIONS_JSON = Path(__file__).resolve().parent / "supported_versions.json"
 
 
@@ -247,13 +247,6 @@ def write_sdist_requirements_file(
     lines = sorted((str(r) for r in requirements), key=str.lower)
     Path(path).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     return len(lines)
-
-
-def emit_sdist_requirements_to_stdout(assembled: Iterable[Requirement]) -> int:
-    reqs = compute_sdist_requirements(assembled)
-    for line in sorted((str(r) for r in reqs), key=str.lower):
-        print(line)
-    return 0
 
 
 def main() -> int:

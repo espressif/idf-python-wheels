@@ -18,10 +18,10 @@ from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from _helper_functions import armv7_bounded_pin_without_find_links_skip
 from _helper_functions import armv7_force_no_binary_package
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
+from _helper_functions import bounded_pin_without_find_links_skip
 from _helper_functions import find_links_wheel_build_skip
 from _helper_functions import force_interpreter_skip_package
 from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
@@ -83,7 +83,7 @@ def _dependent_requirement_skip_line(requirement_line: str, *, force_interpreter
         if skip and not armv7_rebuild_instead_of_find_links_skip(req.name, reason):
             print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
             return True
-    skip, reason = armv7_bounded_pin_without_find_links_skip(req)
+    skip, reason = bounded_pin_without_find_links_skip(req)
     if skip:
         print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
         return True

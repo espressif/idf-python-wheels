@@ -17,7 +17,7 @@ with patch.object(sys, "argv", ["build_wheels_from_file.py", "-r"]):
 
 
 class TestDependentRequirementSkipLine(unittest.TestCase):
-    @patch.object(bwf, "armv7_bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
         bwf,
@@ -34,7 +34,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
             bwf._dependent_requirement_skip_line("requests>=2.28.0", force_interpreter=True),
         )
 
-    @patch.object(bwf, "armv7_bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
         bwf,
@@ -54,7 +54,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         )
 
     @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
-    @patch.object(bwf, "armv7_bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
         bwf,
@@ -76,7 +76,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         )
 
     @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
-    @patch.object(bwf, "armv7_bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
         bwf,
@@ -97,7 +97,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
             bwf._dependent_requirement_skip_line("cryptography<43", force_interpreter=True),
         )
 
-    @patch.object(bwf, "armv7_bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
         bwf,

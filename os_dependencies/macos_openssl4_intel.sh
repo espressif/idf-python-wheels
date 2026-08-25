@@ -5,10 +5,22 @@
 # cryptography 49+ vendors OpenSSL 4.0.1 in upstream wheels; Intel Mac has no PyPI
 # wheel. Building from sdist against Homebrew openssl@3 breaks PyInstaller/runtime.
 # See README.md "macOS Intel (x86_64) and cryptography".
+#
+# Sourced from macos.sh / spike CI: restore caller ``set`` options so ``-u``/``pipefail``
+# do not leak into the rest of that shell.
+
+_openssl4_saved_opts="$(set +o)"
+_openssl4_restore_shell() {
+  eval "${_openssl4_saved_opts}"
+  unset _openssl4_saved_opts prefix
+  unset -f _append_github_env _brew_openssl4_prefix _install_openssl4_from_source \
+    _configure_openssl4_env _openssl4_restore_shell 2>/dev/null || true
+}
 
 set -euo pipefail
 
 if [ "$(uname -m)" != "x86_64" ]; then
+  _openssl4_restore_shell
   return 0 2>/dev/null || exit 0
 fi
 
@@ -62,11 +74,12 @@ _install_openssl4_from_source() {
 
   curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL4_VERSION}.tar.gz" -o "${build_dir}/openssl.tar.gz"
   tar -xzf "${build_dir}/openssl.tar.gz" -C "${build_dir}"
-  cd "${build_dir}/openssl-${OPENSSL4_VERSION}"
-
-  ./Configure darwin64-x86_64-cc --prefix="${OPENSSL4_PREFIX}" --openssldir="${OPENSSL4_PREFIX}"
-  make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-  sudo make install_sw
+  (
+    cd "${build_dir}/openssl-${OPENSSL4_VERSION}"
+    ./Configure darwin64-x86_64-cc --prefix="${OPENSSL4_PREFIX}" --openssldir="${OPENSSL4_PREFIX}"
+    make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+    sudo make install_sw
+  )
 }
 
 _configure_openssl4_env() {
@@ -100,3 +113,4 @@ if [ -z "${prefix:-}" ]; then
 fi
 
 _configure_openssl4_env "${prefix}"
+_openssl4_restore_shell

@@ -2,7 +2,9 @@
 # Minimal OS setup for ARMv7 Docker builds *before* pip installs (build_requirements / wheels).
 # Expects to run as root (official python:*-bookworm / *-bullseye images).
 # Must be sourced (not subprocess bash) so PIP_NO_BINARY persists for later pip / PEP 517 builds.
+# Restore caller ``set`` options afterwards so ``errexit`` does not leak into that shell.
 
+_armv7_prepare_saved_opts="$(set +o)"
 set -e
 
 export DEBIAN_FRONTEND=noninteractive
@@ -44,3 +46,6 @@ if [ "$arch" = "armv7l" ]; then
     fi
   done
 fi
+
+eval "${_armv7_prepare_saved_opts}"
+unset _armv7_prepare_saved_opts

@@ -11,7 +11,6 @@ import tempfile
 import unittest
 
 from pathlib import Path
-from typing import Optional
 from unittest.mock import patch
 
 # Add parent directory to path for imports
@@ -21,7 +20,6 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from _helper_functions import _mirrored_manylinux228_version
-from _helper_functions import armv7_bounded_pin_without_find_links_skip
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
@@ -43,20 +41,6 @@ from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from build_wheels import _add_into_requirements
 from build_wheels import get_used_idf_branches
 from yaml_list_adapter import YAMLListAdapter
-
-
-def requirement_exact_pin_version(req: Requirement) -> Optional[str]:
-    """Mirror of former production helper: single non-wildcard ``==`` pin only (used by tests)."""
-    specs = list(req.specifier)
-    if len(specs) != 1:
-        return None
-    spec = specs[0]
-    if spec.operator != "==":
-        return None
-    ver = str(spec.version)
-    if ver.endswith(".*"):
-        return None
-    return ver
 
 
 class TestChangeSpecifierLogic(unittest.TestCase):
@@ -734,7 +718,7 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             links = Path(tmp)
             req = Requirement("cryptography<43,>=2.1.4")
-            skip, reason = armv7_bounded_pin_without_find_links_skip(req, links)
+            skip, reason = bounded_pin_without_find_links_skip(req, links)
             self.assertTrue(skip)
             self.assertIn("bounded pin", reason)
 
@@ -744,7 +728,7 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             links = Path(tmp)
             req = Requirement("cryptography==47.0.0")
-            skip, _ = armv7_bounded_pin_without_find_links_skip(req, links)
+            skip, _ = bounded_pin_without_find_links_skip(req, links)
             self.assertFalse(skip)
 
     @patch("_helper_functions.platform.system", return_value="Linux")
@@ -754,7 +738,7 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             links = Path(tmp)
             (links / "cryptography-49.0.0-cp313-abi3-linux_armv7l.whl").write_bytes(b"")
             req = Requirement("cryptography<43,>=2.1.4")
-            skip, _ = armv7_bounded_pin_without_find_links_skip(req, links)
+            skip, _ = bounded_pin_without_find_links_skip(req, links)
             self.assertFalse(skip)
 
     @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
@@ -954,12 +938,6 @@ class TestPypiRequiresPythonPreflight(unittest.TestCase):
     def tearDown(self):
         if self._saved_skip_check is not None:
             os.environ["SKIP_PYPI_REQUIRES_PYTHON_CHECK"] = self._saved_skip_check
-
-    def test_requirement_exact_pin_version(self):
-        self.assertEqual(requirement_exact_pin_version(Requirement("foo==1.0")), "1.0")
-        self.assertIsNone(requirement_exact_pin_version(Requirement("foo>=1.0")))
-        self.assertIsNone(requirement_exact_pin_version(Requirement("foo==1.*")))
-        self.assertIsNone(requirement_exact_pin_version(Requirement("foo>1,<2")))
 
     def test_current_interpreter_satisfies_requires_python(self):
         self.assertTrue(current_interpreter_satisfies_requires_python(None))

@@ -107,9 +107,8 @@ ARMV7_FORCE_NO_BINARY_PACKAGES = frozenset(
 
 # Applied in ``linux_armv7_docker_prepare.sh`` for all pip invocations (build_requirements, etc.).
 # Excludes cryptography: forcing it globally breaks transitive deps on Python 3.8 (maturin sdist).
-ARMV7_PIP_NO_BINARY_GLOBAL_CSV = "cffi,argon2-cffi-bindings"
 # Same set for explicit ``pip wheel`` rebuilds of cffi / argon2 on ARMv7.
-ARMV7_PIP_NO_BINARY_CSV = ARMV7_PIP_NO_BINARY_GLOBAL_CSV
+ARMV7_PIP_NO_BINARY_CSV = "cffi,argon2-cffi-bindings"
 
 
 def armv7_force_no_binary_package(name: str) -> bool:
@@ -552,14 +551,6 @@ def bounded_pin_without_find_links_skip(
     return False, ""
 
 
-def armv7_bounded_pin_without_find_links_skip(
-    req: Requirement,
-    find_links_dir: Path | str = "downloaded_wheels",
-) -> Tuple[bool, str]:
-    """Alias for :func:`bounded_pin_without_find_links_skip` (ARMv7 + std Linux)."""
-    return bounded_pin_without_find_links_skip(req, find_links_dir)
-
-
 def pip_wheel_standard_args(find_links_dir: Path | str = DEFAULT_WHEEL_DIR) -> list[str]:
     """Shared ``pip wheel`` flags used by ``build_wheels.py`` and ``build_wheels_from_file.py``."""
     wheel_dir = str(find_links_dir)
@@ -590,21 +581,9 @@ def pip_wheel_invocation_args(
     return args
 
 
-_MANYLINUX_GLIBC_TAG_RE = re.compile(r"manylinux_(\d+)_(\d+)_")
-
-
 def _wheel_has_manylinux_228_tag(wheel_name: str) -> bool:
     """True when the wheel filename includes a ``manylinux_2_28`` platform tag."""
-    try:
-        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
-    except InvalidWheelFilename:
-        return False
-    for tag in tags:
-        plat = str(getattr(tag, "platform", tag))
-        for match in _MANYLINUX_GLIBC_TAG_RE.finditer(plat):
-            if (int(match.group(1)), int(match.group(2))) == (2, 28):
-                return True
-    return False
+    return (2, 28) in manylinux_glibc_tags_in_name(wheel_name)
 
 
 def _requirement_exact_version(req: Requirement) -> str | None:
@@ -617,18 +596,8 @@ def _requirement_exact_version(req: Requirement) -> str | None:
 
 def _wheel_highest_manylinux_glibc(wheel_name: str) -> tuple[int, int] | None:
     """Return the highest ``manylinux_M_N`` glibc tag embedded in a wheel filename."""
-    try:
-        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
-    except InvalidWheelFilename:
-        return None
-    highest: tuple[int, int] | None = None
-    for tag in tags:
-        plat = str(getattr(tag, "platform", tag))
-        for match in _MANYLINUX_GLIBC_TAG_RE.finditer(plat):
-            candidate = (int(match.group(1)), int(match.group(2)))
-            if highest is None or candidate > highest:
-                highest = candidate
-    return highest
+    tags = manylinux_glibc_tags_in_name(wheel_name)
+    return max(tags) if tags else None
 
 
 def prune_ci_manylinux_newer_than_228(
@@ -1070,11 +1039,6 @@ def parse_distribution_filename(filename: str) -> tuple[str, str] | None:
     return None
 
 
-def pep503_project_link(package_dir_name: str) -> str:
-    """PEP 503 root link to a project page (matches ``create_index_pages.py`` layout)."""
-    return f'        <a href="/pypi/{package_dir_name}/">{package_dir_name}/</a>'
-
-
 def pep503_file_link(
     package_dir_name: str,
     filename: str,
@@ -1236,27 +1200,6 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
     match = re.search(r"-cp(\d)(\d+)-", wheel_name)
     if match:
         return f"{match.group(1)}.{match.group(2)}"
-    match = re.search(r"-cp(\d{2})-abi3-", wheel_name)
-    if match:
-        tag = match.group(1)
-        return f"{int(tag[0])}.{tag[1:]}"
-    return None
-
-
-def get_wheel_linux_arch(wheel_name: str) -> str | None:
-    """Return ``linux_armv7`` / ``linux_arm64`` / ``linux_x86_64`` from platform tags, or None."""
-    try:
-        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
-    except InvalidWheelFilename:
-        return None
-    for tag in tags:
-        pt = tag.platform.lower()
-        if "armv7l" in pt:
-            return "linux_armv7"
-        if "aarch64" in pt:
-            return "linux_arm64"
-        if "x86_64" in pt:
-            return "linux_x86_64"
     return None
 
 

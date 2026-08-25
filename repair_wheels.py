@@ -35,6 +35,7 @@ from colorama import Fore
 
 from _helper_functions import _REPO_ROOT
 from _helper_functions import _force_no_binary_linux_normalized
+from _helper_functions import _is_linux_tag_armv7_wheel_name as _is_linux_tag_wheel
 from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
@@ -129,11 +130,6 @@ def _allow_linux_tag_env_enabled() -> bool:
     tag in our repair containers.
     """
     return os.environ.get("AUDITWHEEL_ALLOW_LINUX_TAG", "").strip().lower() in ("1", "true", "yes")
-
-
-def _is_linux_tag_wheel(wheel_name: str) -> bool:
-    wn = wheel_name.lower()
-    return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
 
 
 def _should_skip_armv7_auditwheel(wheel_name: str, current_arch: str) -> bool:
