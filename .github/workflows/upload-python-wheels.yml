@@ -7,6 +7,20 @@ on:
         description: 'JSON array of supported Python versions'
         required: true
         type: string
+      enabled_arches:
+        description: >-
+          JSON array of platform arch slugs to test before upload.
+          Omit or use the default to test all platforms.
+        required: false
+        type: string
+        default: '["windows-x86_64","linux-x86_64","macos-x86_64","macos-arm64","linux-arm64","linux-armv7","linux-armv7legacy"]'
+      idf_requirements_bundle:
+        description: >-
+          When true, download the idf-requirements-bundle artifact and publish
+          sdists for index fallback packages. Set false for defined-wheels ad-hoc builds.
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   test-wheels:
@@ -14,6 +28,7 @@ jobs:
     uses: ./.github/workflows/test-wheels-install.yml
     with:
       supported_python_versions: ${{ inputs.supported_python_versions }}
+      enabled_arches: ${{ inputs.enabled_arches }}
 
   triage:
     name: Upload Python wheels
@@ -40,6 +55,26 @@ jobs:
           pattern: wheels-tested-*
           path: ./downloaded_wheels
           merge-multiple: true
+
+      - name: Download IDF requirements bundle
+        if: inputs.idf_requirements_bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: idf-requirements-bundle
+          path: .
+
+      - name: Install OS dependencies for sdist download
+        if: inputs.idf_requirements_bundle
+        run: os_dependencies/ubuntu.sh
+
+      - name: Download sdists for index fallback packages
+        if: inputs.idf_requirements_bundle
+        run: |
+          if [ -f sdist_requirements.txt ] && [ -s sdist_requirements.txt ]; then
+            python download_sdists.py sdist_requirements.txt
+          else
+            echo "No sdist_requirements.txt in bundle; skipping sdist download."
+          fi
 
       - name: Upload release asset to S3 bucket
         run: |

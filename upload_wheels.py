@@ -15,7 +15,12 @@ import boto3
 
 from colorama import Fore
 
+from _helper_functions import SDIST_REQUIREMENTS_FILE
+from _helper_functions import is_sdist_filename
+from _helper_functions import load_sdist_requirement_lines
+from _helper_functions import parse_distribution_filename
 from _helper_functions import print_color
+from _helper_functions import sdist_allowed_for_upload
 
 s3 = boto3.resource("s3")
 try:
@@ -33,34 +38,51 @@ def normalize(name):
 
 
 def get_existing_wheels():
-    """Get set of S3 keys for wheels currently on server."""
+    """Get set of S3 keys for wheels and sdists already on the server."""
     existing = set()
     for obj in BUCKET.objects.filter(Prefix="pypi/"):
-        if obj.key.endswith(".whl"):
+        if obj.key.endswith((".whl", ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip")):
             existing.add(obj.key)
     return existing
 
 
-print_color("---------- UPLOAD WHEELS TO S3 ----------")
+print_color("---------- UPLOAD WHEELS AND SDISTS TO S3 ----------")
 
 existing_wheels = get_existing_wheels()
-print(f"Found {len(existing_wheels)} existing wheels on S3\n")
+print(f"Found {len(existing_wheels)} existing wheels and sdists on S3\n")
 
 print_color("---------- UPLOADING WHEELS ----------")
 
+sdist_allowlist = load_sdist_requirement_lines()
+
 
 def collect_wheel_paths():
-    """Collect (full_path, wheel_filename) for all .whl files in WHEELS_DIR.
-    Handles both flat layout (wheels directly in dir) and nested (wheels in subdirs).
+    """Collect (full_path, filename) for wheels and sdists in WHEELS_DIR.
+
+    Handles flat layout (artifacts directly in dir) and nested (artifacts in subdirs).
     """
     collected = []
     for item in os.listdir(WHEELS_DIR):
         path = os.path.join(WHEELS_DIR, item)
-        if os.path.isfile(path) and item.endswith(".whl"):
+        if os.path.isfile(path) and (
+            item.endswith(".whl")
+            or item.endswith(".tar.gz")
+            or item.endswith(".tar.bz2")
+            or item.endswith(".tar.xz")
+            or item.endswith(".tar.zst")
+            or item.endswith(".zip")
+        ):
             collected.append((path, item))
         elif os.path.isdir(path):
             for wheel in os.listdir(path):
-                if wheel.endswith(".whl"):
+                if (
+                    wheel.endswith(".whl")
+                    or wheel.endswith(".tar.gz")
+                    or wheel.endswith(".tar.bz2")
+                    or wheel.endswith(".tar.xz")
+                    or wheel.endswith(".tar.zst")
+                    or wheel.endswith(".zip")
+                ):
                     collected.append((os.path.join(path, wheel), wheel))
     return collected
 
@@ -68,30 +90,56 @@ def collect_wheel_paths():
 wheel_paths = collect_wheel_paths()
 new_wheels = 0
 existing_count = 0
+skipped_sdists = 0
 
 for full_path, wheel in wheel_paths:
     pattern = re.compile(r"^(.+?)-(\d+)")
     match = pattern.search(wheel)
-    if match:
-        wheel_name = match.group(1)
-        wheel_name = normalize(wheel_name)
+    if not match:
+        continue
 
-        s3_key = f"pypi/{wheel_name}/{wheel}"
-        is_new = s3_key not in existing_wheels
+    if is_sdist_filename(wheel):
+        parsed = parse_distribution_filename(wheel)
+        if parsed is None:
+            print_color(f"-- skip sdist (unparseable name): {wheel}", Fore.YELLOW)
+            skipped_sdists += 1
+            continue
+        dist_name, version = parsed
+        if not sdist_allowlist:
+            print_color(
+                f"-- skip sdist (no {SDIST_REQUIREMENTS_FILE} allowlist): {wheel}",
+                Fore.YELLOW,
+            )
+            skipped_sdists += 1
+            continue
+        if not sdist_allowed_for_upload(dist_name, version, sdist_allowlist):
+            print_color(
+                f"-- skip sdist (not in {SDIST_REQUIREMENTS_FILE}): {wheel}",
+                Fore.YELLOW,
+            )
+            skipped_sdists += 1
+            continue
 
-        BUCKET.upload_file(full_path, s3_key, ExtraArgs={"ACL": "public-read"})
+    wheel_name = match.group(1)
+    wheel_name = normalize(wheel_name)
 
-        if is_new:
-            new_wheels += 1
-            print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
-        else:
-            existing_count += 1
-            print(f"  <- {wheel_name}/{wheel}")
+    s3_key = f"pypi/{wheel_name}/{wheel}"
+    is_new = s3_key not in existing_wheels
+
+    BUCKET.upload_file(full_path, s3_key, ExtraArgs={"ACL": "public-read"})
+
+    if is_new:
+        new_wheels += 1
+        print_color(f"++ {wheel_name}/{wheel}", Fore.GREEN)
+    else:
+        existing_count += 1
+        print(f"  <- {wheel_name}/{wheel}")
 
 print_color("---------- END UPLOADING ----------")
 
 print_color("---------- STATISTICS ----------")
-print_color(f"New wheels: {new_wheels}", Fore.GREEN)
-print(f"Existing wheels (re-uploaded): {existing_count}")
+print_color(f"New wheels and sdists: {new_wheels}", Fore.GREEN)
+print(f"Existing wheels and sdists (re-uploaded): {existing_count}")
+print(f"Skipped sdists (allowlist / policy): {skipped_sdists}")
 print(f"Total uploaded: {new_wheels + existing_count}")
 print_color("---------- END STATISTICS ----------")

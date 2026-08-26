@@ -12,19 +12,35 @@ See: https://github.com/espressif/idf-python-wheels/blob/main/README.md#universa
 - Linux: auditwheel (bundles SOs)
 """
 
+from __future__ import annotations
+
+import base64
+import hashlib
 import os
 import platform
+import re
+import shutil
 import subprocess
+import tempfile
+import zipfile
 
 from pathlib import Path
 from typing import List
+from typing import Optional
 from typing import Set
 from typing import Tuple
 from typing import Union
 
 from colorama import Fore
 
+from _helper_functions import _REPO_ROOT
+from _helper_functions import _force_no_binary_linux_normalized
+from _helper_functions import _is_linux_tag_armv7_wheel_name as _is_linux_tag_wheel
+from _helper_functions import armv7_wheel_matches_forced_plat
+from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
+from _helper_functions import prune_ci_manylinux_newer_than_228_when_228_mirror_present
+from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from _helper_functions import wheel_archive_is_readable
 
 
@@ -36,7 +52,14 @@ def _stderr_indicates_bad_zip(error_msg: str) -> bool:
         "BadZipFile" in error_msg
         or "Bad magic number for central directory" in error_msg
         or "File is not a zip file" in error_msg
+        or "zlib.error" in error_msg
+        or "invalid literal/length/distance code" in error_msg
     )
+
+
+def _wheel_record_sha256(payload: bytes) -> str:
+    """PEP 427 RECORD hash: url-safe base64 of SHA-256, no padding."""
+    return base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).decode("ascii").rstrip("=")
 
 
 def _dedupe_wheel_paths(wheels_dir: Path) -> List[Path]:
@@ -109,30 +132,151 @@ def _allow_linux_tag_env_enabled() -> bool:
     return os.environ.get("AUDITWHEEL_ALLOW_LINUX_TAG", "").strip().lower() in ("1", "true", "yes")
 
 
-def _is_linux_tag_wheel(wheel_name: str) -> bool:
-    wn = wheel_name.lower()
-    return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
+def _should_skip_armv7_auditwheel(wheel_name: str, current_arch: str) -> bool:
+    """Keep ``linux_armv7l`` wheels (piwheels / local) — do not retag with auditwheel manylinux on ARMv7.
+
+    When ``AUDITWHEEL_PLAT`` is set, ``linux_armv7l`` wheels are retagged via
+    ``_retag_linux_armv7_wheel_to_plat`` instead (see main loop).
+    """
+    return current_arch == "armv7l" and _is_linux_tag_wheel(wheel_name)
+
+
+_LINUX_ARMV7L_WHL_SUFFIX = "-linux_armv7l.whl"
+_LINUX_ARMV7L_TAG_RE = re.compile(r"-linux_armv7l$", re.IGNORECASE)
+
+
+def _armv7_retag_stage_path() -> Path:
+    """Stage retagged wheels on local FS, not the bind-mounted wheels dir (QEMU ARMv7 Docker)."""
+    fd, staged = tempfile.mkstemp(prefix="retag-", suffix=".whl", dir=tempfile.gettempdir())
+    os.close(fd)
+    return Path(staged)
+
+
+def _retag_linux_armv7_wheel_to_plat(wheel_path: Path, plat: str) -> Optional[Path]:
+    """Retag a piwheels ``linux_armv7l`` wheel to ``AUDITWHEEL_PLAT`` without auditwheel relink.
+
+    ARMv7 (Bookworm) and ARMv7 Legacy (Bullseye) both produce ``*-linux_armv7l.whl`` names
+    with different ELF bytes. Retagging to ``manylinux_2_36_armv7l`` vs ``manylinux_2_31_armv7l``
+    gives distinct index keys while keeping piwheels-built binaries intact.
+
+    Writes to a container-local staging file first (many-entry wheels such as pycryptodome
+    can fail when rebuilt directly on the QEMU bind-mounted ``downloaded_wheels`` tree).
+    """
+    if not _is_linux_tag_wheel(wheel_path.name):
+        return None
+    if not wheel_path.name.lower().endswith(_LINUX_ARMV7L_WHL_SUFFIX):
+        return None
+    new_name = wheel_path.name[: -len(_LINUX_ARMV7L_WHL_SUFFIX)] + f"-{plat}.whl"
+    if new_name == wheel_path.name:
+        return None
+    new_path = wheel_path.parent / new_name
+    staged = _armv7_retag_stage_path()
+
+    try:
+        with zipfile.ZipFile(wheel_path, "r") as zin:
+            wheel_info_path = next(
+                (info.filename for info in zin.infolist() if info.filename.lower().endswith(".dist-info/wheel")),
+                None,
+            )
+            record_path = next(
+                (info.filename for info in zin.infolist() if info.filename.lower().endswith(".dist-info/record")),
+                None,
+            )
+            if not wheel_info_path:
+                return None
+
+            wheel_text = zin.read(wheel_info_path).decode("utf-8")
+            new_lines: list[str] = []
+            for line in wheel_text.splitlines():
+                stripped = line.rstrip()
+                if stripped.startswith("Tag:") and _LINUX_ARMV7L_TAG_RE.search(stripped):
+                    line = _LINUX_ARMV7L_TAG_RE.sub(f"-{plat}", stripped)
+                new_lines.append(line)
+            updated_wheel = ("\n".join(new_lines) + "\n").encode("utf-8")
+
+            updated_record: bytes | None = None
+            if record_path:
+                record_lines: list[str] = []
+                for line in zin.read(record_path).decode("utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    rec_name = line.split(",", 1)[0]
+                    if rec_name.lower() == wheel_info_path.lower():
+                        digest = _wheel_record_sha256(updated_wheel)
+                        line = f"{rec_name},sha256={digest},{len(updated_wheel)}"
+                    record_lines.append(line)
+                updated_record = ("\n".join(record_lines) + "\n").encode("utf-8")
+
+            with zipfile.ZipFile(staged, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for info in zin.infolist():
+                    if info.is_dir():
+                        continue
+                    name = info.filename
+                    if name == wheel_info_path:
+                        zout.writestr(info, updated_wheel)
+                    elif record_path and name == record_path and updated_record is not None:
+                        zout.writestr(info, updated_record)
+                    else:
+                        zout.writestr(info, zin.read(name))
+
+        if not wheel_archive_is_readable(staged):
+            return None
+
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        # ``/tmp`` and the bind-mounted ``/work/downloaded_wheels`` are different filesystems in
+        # ARMv7 Docker; ``os.replace`` raises EXDEV there. Copy instead of rename.
+        shutil.copy2(staged, new_path)
+        if not wheel_archive_is_readable(new_path):
+            new_path.unlink(missing_ok=True)
+            return None
+        wheel_path.unlink(missing_ok=True)
+        return new_path
+    except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
+        return None
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _prune_manylinux_armv7_when_linux_tag_present(wheels_dir: Path) -> int:
+    """Remove manylinux armv7l wheels when a linux_armv7l sibling exists (pip prefers manylinux)."""
+    removed = 0
+    by_dist_version: dict[tuple[str, str], list[Path]] = {}
+    for path in wheels_dir.rglob("*.whl"):
+        if "armv7l" not in path.name.lower():
+            continue
+        parsed = parse_wheel_name(path.name)
+        if not parsed:
+            continue
+        by_dist_version.setdefault((parsed[0], parsed[1]), []).append(path)
+
+    for paths in by_dist_version.values():
+        linux_paths = [p for p in paths if _is_linux_tag_wheel(p.name)]
+        manylinux_paths = [p for p in paths if "manylinux" in p.name.lower() and "armv7l" in p.name.lower()]
+        if not linux_paths or not manylinux_paths:
+            continue
+        for path in manylinux_paths:
+            print_color(
+                f"Removing manylinux armv7l wheel (linux_armv7l kept; pip would prefer manylinux): {path.name}",
+                Fore.YELLOW,
+            )
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def _armv7_forced_plat_filename_ok(wheel_name: str, plat: str) -> bool:
-    """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits.
-
-    When ``AUDITWHEEL_ONLY_PLAT`` is set, legacy wheels must not carry a ``manylinux_2_36``
-    tag (auditwheel dual-tag would collide with the standard lineage again).
-    """
-    plat_l = plat.lower()
+    """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits."""
     wn = wheel_name.lower()
-    if _allow_linux_tag_env_enabled() and _is_linux_tag_wheel(wn):
-        return True
-    if "manylinux_2_36" in plat_l:
-        return "manylinux_2_36" in wn
-    if "manylinux_2_31" in plat_l and "manylinux_2_36" not in plat_l:
-        if "manylinux_2_31" not in wn:
-            return False
-        if _only_plat_env_enabled() and "manylinux_2_36" in wn:
-            return False
-        return True
-    return True
+    if _is_linux_tag_wheel(wn):
+        if not plat:
+            return _allow_linux_tag_env_enabled()
+        return False
+    return armv7_wheel_matches_forced_plat(
+        wheel_name,
+        plat,
+        only_plat=_only_plat_env_enabled(),
+        repair=True,
+    )
 
 
 def repair_wheel_windows(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
@@ -241,6 +385,18 @@ def main() -> None:
     current_platform: str = get_platform()
     current_arch: str = platform.machine()
 
+    if current_platform == "Linux" and current_arch in ("x86_64", "aarch64"):
+        pruned = prune_ci_manylinux_newer_than_228_when_228_mirror_present(
+            wheel_dir=wheels_dir,
+            package_names=_force_no_binary_linux_normalized(_REPO_ROOT),
+        )
+        if pruned:
+            print_color(
+                f"Pre-repair: pruned {pruned} manylinux wheel(s) newer than 2_28 (PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
+            wheels = _dedupe_wheel_paths(wheels_dir)
+
     repaired_count: int = 0
     skipped_count: int = 0
     deleted_count: int = 0
@@ -283,6 +439,46 @@ def main() -> None:
             print_color("  -> Deleting file (not a valid / readable zip wheel archive)", Fore.RED)
             wheel.unlink(missing_ok=True)
             deleted_count += 1
+            continue
+
+        plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+        if current_platform == "Linux" and current_arch == "armv7l" and plat_env and _is_linux_tag_wheel(wheel.name):
+            retagged = _retag_linux_armv7_wheel_to_plat(wheel, plat_env)
+            if not retagged:
+                retagged = _retag_linux_armv7_wheel_to_plat(wheel, plat_env)
+            if retagged and _armv7_forced_plat_filename_ok(retagged.name, plat_env):
+                print_color(
+                    f"  -> Retagged linux_armv7l to {plat_env} (ARMv7 lineage split): {retagged.name}",
+                    Fore.GREEN,
+                )
+                repaired_count += 1
+            else:
+                if retagged and not _armv7_forced_plat_filename_ok(retagged.name, plat_env):
+                    msg = f"Retagged wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r}: {retagged.name}"
+                else:
+                    msg = f"Failed to retag linux_armv7l wheel to {plat_env!r}: {wheel.name}"
+                print_color(f"  -> ERROR: {msg}", Fore.RED)
+                errors.append(msg)
+                if retagged:
+                    retagged.unlink(missing_ok=True)
+                wheel.unlink(missing_ok=True)
+                error_count += 1
+            continue
+
+        if _should_skip_armv7_auditwheel(wheel.name, current_arch):
+            print_color(
+                "  -> Skipping auditwheel (linux_armv7l; keep piwheels/local wheel on ARMv7)",
+                Fore.YELLOW,
+            )
+            skipped_count += 1
+            continue
+
+        if current_platform == "Linux" and should_skip_linux_auditwheel_for_pypi_mirror(wheel.name):
+            print_color(
+                "  -> Skipping auditwheel (PyPI manylinux_2_28 mirror; repair would retag to host 2_34)",
+                Fore.YELLOW,
+            )
+            skipped_count += 1
             continue
 
         # Clean temp directory
@@ -349,15 +545,20 @@ def main() -> None:
                 wheel = Path(renamed_wheel)
                 error_msg = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
 
-        # Special handling for Linux ARMv7 broken wheels
-        if (
-            current_platform == "Linux"
-            and current_arch == "armv7l"
-            and "This does not look like a platform wheel, no ELF executable" in error_msg
-        ):
-            print_color("  -> Deleting corrupted wheel", Fore.RED)
-            wheel.unlink(missing_ok=True)
-            deleted_count += 1
+        # Special handling for auditwheel "not a platform wheel" (no ELF in archive).
+        # PyPI may ship manylinux-tagged pure wheels (e.g. dbus-fast 2.39+ on x86_64/aarch64);
+        # keep them on standard Linux repair hosts. ARMv7 still deletes (corrupt piwheels case).
+        if current_platform == "Linux" and "This does not look like a platform wheel, no ELF executable" in error_msg:
+            if current_arch == "armv7l":
+                print_color("  -> Deleting corrupted wheel", Fore.RED)
+                wheel.unlink(missing_ok=True)
+                deleted_count += 1
+            else:
+                print_color(
+                    "  -> Keeping original wheel (manylinux tag but no native extensions; auditwheel N/A)",
+                    Fore.YELLOW,
+                )
+                skipped_count += 1
             continue
 
         plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
@@ -384,7 +585,7 @@ def main() -> None:
             # When allowing linux-tag wheels (piwheels), treat missing graft libs as non-fatal
             # and keep the original linux-tag wheel rather than failing the whole repair job.
             or (
-                plat_env
+                not plat_env
                 and allow_linux_tag
                 and is_linux_tag
                 and (
@@ -523,6 +724,22 @@ def main() -> None:
                 print_color(f"  -> ERROR: {error_msg}", Fore.RED)
                 errors.append(f"{wheel.name}: {error_msg}")
                 error_count += 1
+
+    if current_platform == "Linux" and current_arch in ("x86_64", "aarch64"):
+        pruned = prune_ci_manylinux_newer_than_228_when_228_mirror_present(
+            wheel_dir=wheels_dir,
+            package_names=_force_no_binary_linux_normalized(_REPO_ROOT),
+        )
+        if pruned:
+            print_color(
+                f"Pruned {pruned} manylinux wheel(s) newer than 2_28 (PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
+
+    if current_platform == "Linux" and current_arch == "armv7l":
+        pruned = _prune_manylinux_armv7_when_linux_tag_present(wheels_dir)
+        if pruned:
+            print_color(f"Pruned {pruned} manylinux armv7l wheel(s) superseded by linux_armv7l", Fore.YELLOW)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Total wheels: {len(wheels)}")

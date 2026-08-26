@@ -1,5 +1,6 @@
-# Linux: pip PIP_NO_BINARY / per-wheel --no-binary (ARMv7 Docker + build_wheels on Linux)
+# Linux x86_64/aarch64: pip --no-binary (ARMv7 Docker uses piwheels instead; see linux_armv7_docker_prepare.sh)
 cffi
+cryptography
 # PyPI maturin manylinux wheels need newer glibc than Debian bookworm/bullseye armhf; sdist uses setuptools-rust.
 maturin
 pillow

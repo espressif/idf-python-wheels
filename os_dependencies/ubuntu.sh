@@ -30,3 +30,6 @@ sudo apt-get install -y \
     libfribidi-dev \
     libharfbuzz-dev \
     libxcb1-dev
+
+# cryptography (Rust/maturin) sdist builds with --no-build-isolation on Linux x86_64
+sudo apt-get install -y libssl-dev libffi-dev rustc cargo

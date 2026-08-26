@@ -145,6 +145,14 @@ jobs:
           name: dependent_requirements_${{ matrix.arch }}
           path: dependent_requirements_${{ matrix.arch }}
 
+      # Stage-1 wheels seed find-links so obsolete merged pins (e.g. cryptography<43) are
+      # skipped before pip falls back to sdists (ARMv7 has no manylinux wheels for old pins).
+      - name: Download stage-1 wheel seed
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-download-directory-${{ matrix.arch }}-${{ inputs.oldest_supported_python }}
+          path: ./downloaded_wheels
+
       - name: Print requirements
         if: matrix.os != 'Windows'
         run: cat dependent_requirements_${{ matrix.arch }}/dependent_requirements.txt
@@ -215,6 +223,10 @@ jobs:
             fi
 
             python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
+
+      - name: Validate cryptography OpenSSL 4 wheels (macOS Intel)
+        if: matrix.os == 'macOS Intel'
+        run: bash scripts/validate_cryptography_macos_intel_wheel.sh ./downloaded_wheels
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
         if: matrix.os == 'Windows'

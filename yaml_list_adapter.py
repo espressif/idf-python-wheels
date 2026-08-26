@@ -21,6 +21,8 @@ from _helper_functions import print_color
 
 # Map runner platforms to sys.platform (pip markers only know win32/linux/darwin)
 SYS_PLATFORM_MAP = {
+    "windows": "win32",
+    "macos": "darwin",
     "linux_armv7": "linux",
     "linux_arm64": "linux",
     "linux_x86_64": "linux",
@@ -121,16 +123,12 @@ class YAMLListAdapter:
 
         - return (new_version_specifier, text_after(version number), original_version_specifier)
         """
-        pattern = re.compile(r"(===|==|!=|~=|<=?|>=?|===?)\s*(.*)")
-        try:
-            match = pattern.match(spec_with_text)
-            if match:
-                str_match: tuple = match.groups()
-        except AttributeError:
+        pattern = re.compile(r"(===|==|!=|~=|<=?|>=?)\s*(.*)")
+        match = pattern.match(spec_with_text)
+        if not match:
             print_color(f"Unexpected version specifier: {spec_with_text}", Fore.YELLOW)
             raise SystemExit()
-
-        ver_specifier, text = str_match  # e.g. ('<', '1.20')
+        ver_specifier, text = match.groups()  # e.g. ('<', '1.20')
 
         for old, new in (
             ("===", "==="),  # not changed specifier for arbitrary equality defined by PEP440

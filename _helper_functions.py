@@ -5,16 +5,20 @@
 #
 from __future__ import annotations
 
+import html
 import json
 import os
 import platform
 import re
+import subprocess
 import sys
 import zipfile
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Dict
+from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Set
@@ -26,23 +30,32 @@ from urllib.parse import quote
 from urllib.request import Request
 from urllib.request import urlopen
 
+import yaml
+
 from colorama import Fore
 from colorama import Style
+from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
+from packaging.utils import InvalidSdistFilename
 from packaging.utils import InvalidWheelFilename
 from packaging.utils import canonicalize_name
+from packaging.utils import parse_sdist_filename as _packaging_parse_sdist_filename
 from packaging.utils import parse_wheel_filename
 from packaging.version import InvalidVersion
 from packaging.version import Version
 from packaging.version import parse as parse_version
 
-# Linux ``--no-binary`` names: one per line in ``force_no_binary_linux.txt`` (also ``PIP_NO_BINARY`` in ARMv7 Docker).
+# Linux ``--no-binary`` names: one per line in ``force_no_binary_linux.txt``
+# (x86_64/aarch64 Linux only; ARMv7 uses piwheels).
 
 _REPO_ROOT = Path(__file__).resolve().parent
 FORCE_NO_BINARY_LINUX_FILE = "force_no_binary_linux.txt"
 
 EXCLUDE_LIST_PATH = "exclude_list.yaml"
+NATIVE_IMPORT_GUARD_PATH = "native_import_guard.yaml"
+PYPI_SIMPLE_INDEX = "https://pypi.org/simple/"
+DEFAULT_WHEEL_DIR = "downloaded_wheels"
 
 # Platform names for exclude_list.yaml (YAML -> runner name)
 PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
@@ -74,6 +87,69 @@ def get_current_platform() -> str:
     if system == "windows":
         return "windows"
     return sys.platform
+
+
+def is_linux_armv7_runner() -> bool:
+    """True on Linux ARMv7 wheel builds (Docker ``armv7l`` / ``armhf``)."""
+    return platform.system() == "Linux" and platform.machine().lower() in ("armv7l", "armv7", "armhf")
+
+
+# Piwheels ``linux_armv7l`` / manylinux wheels for ``cffi`` and ``argon2-cffi-bindings`` may link
+# against libffi/glibc newer than the lineage image. Rebuild those from sdists in-container.
+# ``cryptography`` stays on piwheels (Rust/maturin sdist rebuild is impractical under ARMv7 QEMU).
+# Bookworm native-import probes skip cryptography (piwheels 49+ vs image OpenSSL); see test_wheels_install.
+ARMV7_FORCE_NO_BINARY_PACKAGES = frozenset(
+    {
+        canonicalize_name("cffi"),
+        canonicalize_name("argon2-cffi-bindings"),
+    }
+)
+
+# Applied in ``linux_armv7_docker_prepare.sh`` for all pip invocations (build_requirements, etc.).
+# Excludes cryptography: forcing it globally breaks transitive deps on Python 3.8 (maturin sdist).
+# Same set for explicit ``pip wheel`` rebuilds of cffi / argon2 on ARMv7.
+ARMV7_PIP_NO_BINARY_CSV = "cffi,argon2-cffi-bindings"
+
+
+def armv7_force_no_binary_package(name: str) -> bool:
+    """True if ARMv7 Docker builds must compile this package from sdist (not piwheels)."""
+    return canonicalize_name(name) in ARMV7_FORCE_NO_BINARY_PACKAGES
+
+
+def armv7_rebuild_instead_of_find_links_skip(name: str, find_links_reason: str) -> bool:
+    """True when find-links has a matching piwheels wheel that must be rebuilt in-lineage."""
+    if not is_linux_armv7_runner() or not armv7_force_no_binary_package(name):
+        return False
+    return "already has" in find_links_reason and "matching" in find_links_reason
+
+
+def armv7_pip_wheel_subprocess_env(requirement_name: str) -> dict[str, str]:
+    """Return env for ``pip wheel`` on ARMv7 (extends global ``PIP_NO_BINARY`` when rebuilding natives)."""
+    env = os.environ.copy()
+    if not is_linux_armv7_runner():
+        return env
+    match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
+    if match and armv7_force_no_binary_package(match.group(1)):
+        env["PIP_NO_BINARY"] = ARMV7_PIP_NO_BINARY_CSV
+    return env
+
+
+def remove_find_links_wheels_for_package(
+    name: str,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> int:
+    """Remove existing wheels for ``name`` under find-links (before ARMv7 sdist rebuild)."""
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return 0
+    canonical = canonicalize_name(name)
+    removed = 0
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if parsed and parsed[0] == canonical:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def wheel_archive_is_readable(path: Path) -> bool:
@@ -267,6 +343,92 @@ def load_force_no_binary_linux_names(repo_root: Path | None = None) -> list[str]
     return out
 
 
+@dataclass(frozen=True)
+class NativeImportGuardEntry:
+    """Import probes for native ARMv7 wheels (``test_wheels_install.py``)."""
+
+    imports: tuple[str, ...]
+
+
+_NATIVE_IMPORT_GUARD_CACHE: dict[Path, dict[str, NativeImportGuardEntry]] = {}
+
+
+def native_import_guard_by_name(
+    repo_root: Path | None = None,
+) -> dict[str, NativeImportGuardEntry]:
+    """Map canonical distribution name → guard config (``native_import_guard.yaml``)."""
+    root = (repo_root if repo_root is not None else _REPO_ROOT).resolve()
+    cached = _NATIVE_IMPORT_GUARD_CACHE.get(root)
+    if cached is not None:
+        return cached
+    path = root / NATIVE_IMPORT_GUARD_PATH
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    by_name: dict[str, NativeImportGuardEntry] = {}
+    for entry in data.get("packages") or []:
+        if not isinstance(entry, dict):
+            continue
+        name, imports = entry.get("name"), entry.get("imports")
+        if not name or not imports:
+            continue
+        stmts = tuple(str(s).strip() for s in imports if str(s).strip())
+        if not stmts:
+            continue
+        by_name[canonicalize_name(str(name))] = NativeImportGuardEntry(imports=stmts)
+    if not by_name:
+        raise ValueError(f"{path}: no packages with imports defined")
+    _NATIVE_IMPORT_GUARD_CACHE[root] = by_name
+    return by_name
+
+
+_MANYLINUX_GLIBC_TAG = re.compile(r"manylinux_(\d+)_(\d+)", re.IGNORECASE)
+
+
+def manylinux_glibc_tags_in_name(name: str) -> list[tuple[int, int]]:
+    """Parse ``manylinux_M_N`` glibc levels from a wheel filename or plat string."""
+    return [(int(major), int(minor)) for major, minor in _MANYLINUX_GLIBC_TAG.findall(name)]
+
+
+def _is_linux_tag_armv7_wheel_name(wheel_name: str) -> bool:
+    wn = wheel_name.lower()
+    return "-linux_" in wn and "manylinux" not in wn and "musllinux" not in wn
+
+
+def armv7_wheel_matches_forced_plat(
+    wheel_name: str,
+    plat: str,
+    *,
+    only_plat: bool,
+    repair: bool = False,
+) -> bool:
+    """True if ``wheel_name`` matches ``AUDITWHEEL_PLAT`` for ARMv7 / ARMv7 Legacy splits."""
+    wn = wheel_name.lower()
+    if _is_linux_tag_armv7_wheel_name(wn):
+        return "armv7l" in wn
+    plat_tags = manylinux_glibc_tags_in_name(plat)
+    wheel_tags = manylinux_glibc_tags_in_name(wn)
+    if not plat_tags:
+        return True
+    required = plat_tags[0]
+    if required not in wheel_tags:
+        return False
+    if not only_plat:
+        return True
+    has_31 = (2, 31) in wheel_tags
+    has_36 = (2, 36) in wheel_tags
+    if repair:
+        # ``repair_wheels.py``: auditwheel may emit compat 2_31 tags alongside 2_36.
+        if required == (2, 31) and has_36:
+            return False
+        return True
+    # ``test_wheels_install.py``: reject dual 2_31 + 2_36 tags on Legacy (2_31) tests — those
+    # are Bookworm auditwheel compat filenames. Bookworm (2_36) tests accept them when 2_36 is present.
+    if has_31 and has_36:
+        return required == (2, 36)
+    if required == (2, 31) and has_36:
+        return False
+    return True
+
+
 def _force_no_binary_linux_normalized(repo_root: Path | None = None) -> frozenset[str]:
     """
     Normalized package names from ``force_no_binary_linux.txt``
@@ -300,11 +462,444 @@ def get_no_binary_args(requirement_name: str) -> list:
     match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
     if not match:
         return []
+
+    # ARMv7 CI uses piwheels for most packages; force sdists for native stacks piwheels
+    # mis-builds for Bullseye / Bookworm lineages (see ``armv7_force_no_binary_package``).
+    if is_linux_armv7_runner():
+        if armv7_force_no_binary_package(match.group(1)):
+            return ["--no-binary", match.group(1)]
+        return []
+
     pkg_name = match.group(1).lower().replace("-", "_")
 
     if pkg_name in _force_no_binary_linux_normalized(_REPO_ROOT):
         return ["--no-binary", match.group(1)]
     return []
+
+
+# Do not pass ``--no-binary`` for these in ``build_wheels_from_file --force-interpreter-binary``:
+# legacy sdists, PyObjC, heavy Rust/maturin stacks, and ARMv7 CFFI-backed wheels where
+# forced source builds fail under QEMU (libffi / glibc in pip's isolated build env).
+FORCE_INTERPRETER_BINARY_SKIP_EXACT = frozenset(
+    {
+        canonicalize_name("argon2-cffi-bindings"),
+        canonicalize_name("cryptography"),
+        canonicalize_name("protobuf"),
+        canonicalize_name("pydantic-core"),
+        canonicalize_name("pynacl"),
+        canonicalize_name("rpds-py"),
+        canonicalize_name("ruamel.yaml.clib"),
+        canonicalize_name("tibs"),
+    }
+)
+
+
+def force_interpreter_skip_package(canonical_dist_name: str) -> bool:
+    if canonical_dist_name in FORCE_INTERPRETER_BINARY_SKIP_EXACT:
+        return True
+    return canonical_dist_name == "pyobjc" or canonical_dist_name.startswith("pyobjc-")
+
+
+def get_cryptography_macos_intel_pip_wheel_args(requirement_name: str) -> list[str]:
+    """``--no-binary cryptography`` on macOS Intel (OpenSSL 4 sdist build in CI)."""
+    if get_current_platform() != "macos_x86_64":
+        return []
+    match = re.match(r"^([a-zA-Z0-9_.-]+)", str(requirement_name).strip())
+    if not match:
+        return []
+    if canonicalize_name(match.group(1)) != canonicalize_name("cryptography"):
+        return []
+    return ["--no-binary", "cryptography"]
+
+
+def bounded_pin_without_find_links_skip(
+    req: Requirement,
+    find_links_dir: Path | str = "downloaded_wheels",
+) -> Tuple[bool, str]:
+    """Defer bounded pins on Linux for packages that must not be built from sdists.
+
+    Merged IDF requirements list ``cryptography<46.1`` before an unconstrained
+    ``cryptography`` line. Until find-links has any wheel for the package, ``pip wheel``
+    with ``--no-binary`` (see ``force_no_binary_linux.txt``) downloads an old maturin sdist
+    and fails with ``BackendUnavailable`` on Python 3.8+.
+    """
+    if platform.system() != "Linux":
+        return False, ""
+    if not force_interpreter_skip_package(canonicalize_name(req.name)):
+        return False, ""
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return False, ""
+    canonical = canonicalize_name(req.name)
+    has_pkg_wheel = False
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if parsed and parsed[0] == canonical:
+            has_pkg_wheel = True
+            break
+    if has_pkg_wheel:
+        return False, ""
+    if not req.specifier:
+        return False, ""
+    has_upper = any(s.operator in ("<", "<=") for s in req.specifier)
+    has_exact = any(s.operator == "==" for s in req.specifier)
+    if has_upper and not has_exact:
+        return (
+            True,
+            f"bounded pin for {req.name} without find-links wheel (avoid maturin sdist build)",
+        )
+    return False, ""
+
+
+def pip_wheel_standard_args(find_links_dir: Path | str = DEFAULT_WHEEL_DIR) -> list[str]:
+    """Shared ``pip wheel`` flags used by ``build_wheels.py`` and ``build_wheels_from_file.py``."""
+    wheel_dir = str(find_links_dir)
+    return [
+        "--find-links",
+        wheel_dir,
+        "--find-links",
+        PYPI_SIMPLE_INDEX,
+        "--wheel-dir",
+        wheel_dir,
+        "--no-cache-dir",
+        "--no-build-isolation",
+    ]
+
+
+def pip_wheel_invocation_args(
+    requirement_name: str,
+    find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> list[str]:
+    """``pip wheel`` flags for a single requirement (may drop ``--no-build-isolation`` on ARMv7)."""
+    args = list(pip_wheel_standard_args(find_links_dir))
+    if is_linux_armv7_runner():
+        # cffi 2.x sdists fail metadata prep under host setuptools + --no-build-isolation
+        # (project.license validation), including transitive cffi pulls (e.g. esptool → cryptography).
+        # PEP 517 isolation matches build_requirements install on ARMv7 Docker.
+        del requirement_name  # per-requirement env still via armv7_pip_wheel_subprocess_env()
+        args = [arg for arg in args if arg != "--no-build-isolation"]
+    return args
+
+
+def _wheel_has_manylinux_228_tag(wheel_name: str) -> bool:
+    """True when the wheel filename includes a ``manylinux_2_28`` platform tag."""
+    return (2, 28) in manylinux_glibc_tags_in_name(wheel_name)
+
+
+def _requirement_exact_version(req: Requirement) -> str | None:
+    """Return the pinned version when the requirement uses ``==``."""
+    for spec in req.specifier:
+        if spec.operator == "==":
+            return str(spec.version)
+    return None
+
+
+def _wheel_highest_manylinux_glibc(wheel_name: str) -> tuple[int, int] | None:
+    """Return the highest ``manylinux_M_N`` glibc tag embedded in a wheel filename."""
+    tags = manylinux_glibc_tags_in_name(wheel_name)
+    return max(tags) if tags else None
+
+
+def prune_ci_manylinux_newer_than_228(
+    package_name: str,
+    package_version: str,
+    *,
+    wheel_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> int:
+    """Drop CI-built manylinux wheels newer than ``2_28`` after mirroring PyPI ``2_28``.
+
+    Ubuntu 24.04 rebuilds link against newer system OpenSSL (e.g. SM4 symbols) and
+    auditwheel tags ``manylinux_2_34_*``. Pip prefers those over mirrored ``2_28``
+    wheels when both are on the index, breaking consumers on older OpenSSL (ESP-IDF
+    Docker, esptool PyInstaller on focal, etc.).
+    """
+    dest = Path(wheel_dir)
+    canonical = canonicalize_name(package_name)
+    version = str(package_version)
+    removed = 0
+    for path in dest.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if not parsed or parsed[0] != canonical or parsed[1] != version:
+            continue
+        glibc = _wheel_highest_manylinux_glibc(path.name)
+        if glibc is not None and glibc > (2, 28) and not _wheel_has_manylinux_228_tag(path.name):
+            print_color(
+                f"-- removed {path.name} (CI manylinux_{glibc[0]}_{glibc[1]}; PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def prune_ci_manylinux_newer_than_228_when_228_mirror_present(
+    *,
+    wheel_dir: Path | str = DEFAULT_WHEEL_DIR,
+    package_names: frozenset[str] | None = None,
+) -> int:
+    """Drop manylinux > ``2_28`` when a ``2_28`` wheel exists for the same dist+version.
+
+    Used after merging matrix artifacts and after ``repair_wheels`` so CI or auditwheel
+    outputs cannot coexist with PyPI ``manylinux_2_28`` mirrors on the upload index.
+    """
+    dest = Path(wheel_dir)
+    by_dist_version: dict[tuple[str, str], list[Path]] = {}
+    for path in dest.rglob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if not parsed:
+            continue
+        if package_names is not None:
+            pkg_key = parsed[0].replace("-", "_")
+            if pkg_key not in package_names:
+                continue
+        by_dist_version.setdefault(parsed, []).append(path)
+
+    removed = 0
+    for (dist, version), paths in by_dist_version.items():
+        if not any(_wheel_has_manylinux_228_tag(p.name) for p in paths):
+            continue
+        for path in paths:
+            glibc = _wheel_highest_manylinux_glibc(path.name)
+            if glibc is not None and glibc > (2, 28) and not _wheel_has_manylinux_228_tag(path.name):
+                print_color(
+                    f"-- removed {path.name} (manylinux_{glibc[0]}_{glibc[1]}; "
+                    f"keeping manylinux_2_28 for {dist}=={version})",
+                    Fore.YELLOW,
+                )
+                path.unlink()
+                removed += 1
+    return removed
+
+
+def should_skip_linux_auditwheel_for_pypi_mirror(wheel_name: str) -> bool:
+    """Skip auditwheel on PyPI ``manylinux_2_28`` mirrors (repair retags to host ``2_34``)."""
+    machine = platform.machine().lower()
+    if machine not in ("x86_64", "amd64", "aarch64", "arm64"):
+        return False
+    parsed = parse_wheel_name(wheel_name)
+    if not parsed:
+        return False
+    pkg_key = parsed[0].replace("-", "_")
+    if pkg_key not in _force_no_binary_linux_normalized(_REPO_ROOT):
+        return False
+    return _wheel_has_manylinux_228_tag(wheel_name)
+
+
+def _mirrored_manylinux228_version(package_name: str, wheel_dir: Path) -> str | None:
+    """Return the version string of a ``manylinux_2_28`` wheel mirrored for ``package_name``."""
+    canonical = canonicalize_name(package_name)
+    for path in wheel_dir.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if not parsed or parsed[0] != canonical:
+            continue
+        if _wheel_has_manylinux_228_tag(path.name):
+            return parsed[1]
+    return None
+
+
+def _prune_mirrored_manylinux228_ci_builds(
+    req: Requirement,
+    *,
+    wheel_dir: Path,
+) -> int:
+    """Remove CI manylinux > ``2_28`` after mirroring PyPI ``2_28`` for ``req``."""
+    mirrored_version = _mirrored_manylinux228_version(req.name, wheel_dir)
+    if not mirrored_version:
+        mirrored_version = _requirement_exact_version(req)
+    if not mirrored_version:
+        return 0
+    pruned = prune_ci_manylinux_newer_than_228(req.name, mirrored_version, wheel_dir=wheel_dir)
+    if pruned:
+        print_color(
+            f"-- pruned {pruned} CI manylinux wheel(s) newer than 2_28 for {req.name}=={mirrored_version}",
+            Fore.YELLOW,
+        )
+    return pruned
+
+
+def _requirement_for_pip_download(req: Requirement) -> str:
+    """Return ``name`` + ``specifier`` only; ``pip download`` rejects PEP 508 markers."""
+    return f"{req.name}{req.specifier}"
+
+
+def mirror_pypi_manylinux228_wheel(
+    requirement_line: str,
+    *,
+    wheel_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> bool:
+    """Download a ``manylinux_2_28`` wheel from PyPI for older glibc/OpenSSL consumers.
+
+    CI rebuilds on Ubuntu 24.04 produce ``manylinux_2_34_*`` wheels (glibc >= 2.34,
+    newer system OpenSSL). Downstream tools (ESP-IDF Docker, esptool PyInstaller on
+    Ubuntu 20.04) need PyPI's ``manylinux_2_28`` wheel instead. After a successful
+    mirror, locally rebuilt ``manylinux`` wheels newer than ``2_28`` for the same
+    version are removed so pip cannot prefer the incompatible CI build.
+
+    ARMv7 builds use piwheels and different manylinux lineage tags; no mirroring here.
+    """
+    if platform.system() != "Linux" or is_linux_armv7_runner():
+        return False
+    machine = platform.machine().lower()
+    pip_platform = {
+        "x86_64": "manylinux_2_28_x86_64",
+        "amd64": "manylinux_2_28_x86_64",
+        "aarch64": "manylinux_2_28_aarch64",
+        "arm64": "manylinux_2_28_aarch64",
+    }.get(machine)
+    if not pip_platform:
+        return False
+
+    line = requirement_line.strip()
+    if not line:
+        return False
+    try:
+        req = Requirement(line)
+    except InvalidRequirement:
+        return False
+
+    download_line = _requirement_for_pip_download(req)
+
+    pkg_key = canonicalize_name(req.name).replace("-", "_")
+    if pkg_key not in _force_no_binary_linux_normalized(_REPO_ROOT):
+        return False
+
+    py_major, py_minor = sys.version_info[:2]
+    dest = Path(wheel_dir)
+    dest.mkdir(exist_ok=True)
+    cp_abi = f"cp{py_major}{py_minor}"
+    abi_candidates = [cp_abi, "abi3"] if cp_abi != "abi3" else ["abi3"]
+
+    for abi in abi_candidates:
+        out = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "download",
+                download_line,
+                "--only-binary",
+                ":all:",
+                "--dest",
+                str(dest),
+                "--no-deps",
+                "--platform",
+                pip_platform,
+                "--python-version",
+                f"{py_major}.{py_minor}",
+                "--implementation",
+                "cp",
+                "--abi",
+                abi,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if out.stdout:
+            print(out.stdout.decode("utf-8", errors="replace"))
+        if out.returncode == 0:
+            print_color(
+                f"-- mirrored {pip_platform} wheel for {download_line} from PyPI (abi={abi}; older glibc consumers)",
+                Fore.YELLOW,
+            )
+            _prune_mirrored_manylinux228_ci_builds(req, wheel_dir=dest)
+            return True
+
+    if out.stderr:
+        print_color(out.stderr.decode("utf-8", errors="replace"), Fore.YELLOW)
+    print_color(
+        f"-- could not mirror {pip_platform} wheel for {download_line} from PyPI",
+        Fore.YELLOW,
+    )
+    return False
+
+
+# Backward-compatible alias (same behavior; not cryptography-specific).
+mirror_pypi_manylinux228_x86_64_wheel = mirror_pypi_manylinux228_wheel
+
+
+def _find_links_versions_too_new_for_pin(versions: list[Version], req: Requirement) -> bool:
+    """True when every find-links wheel is excluded by an upper bound (obsolete pin; skip sdist)."""
+    if not req.specifier:
+        return False
+    oldest = min(versions)
+    for spec in req.specifier:
+        if spec.operator not in ("<", "<="):
+            continue
+        try:
+            bound = Version(spec.version)
+        except InvalidVersion:
+            continue
+        if spec.operator == "<" and oldest >= bound:
+            return True
+        if spec.operator == "<=" and oldest > bound:
+            return True
+    return False
+
+
+def pip_wheel_or_mirror_success(
+    requirement_line: str,
+    pip_returncode: int,
+    *,
+    wheel_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> bool:
+    """True when ``pip wheel`` succeeded or a PyPI ``manylinux_2_28`` mirror was fetched."""
+    if pip_returncode == 0:
+        mirror_pypi_manylinux228_wheel(requirement_line, wheel_dir=wheel_dir)
+        return True
+    return mirror_pypi_manylinux228_wheel(requirement_line, wheel_dir=wheel_dir)
+
+
+def find_links_wheel_build_skip(
+    req: Requirement,
+    find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> Tuple[bool, str]:
+    """Skip ``pip wheel`` when find-links already satisfies the pin or only an sdist would work.
+
+    Merged IDF requirements can list several cryptography pins. Stage-1 may already have
+    ``cryptography-47.0.0`` in ``downloaded_wheels`` while a later line says ``cryptography<45``.
+    Pip then resolves an older sdist (maturin) and fails with ``BackendUnavailable``.
+
+    When find-links wheels are older than a lower-bound pin (e.g. ``>=49`` with only 47 present),
+    do **not** skip so pip can fetch a newer wheel from PyPI.
+    """
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return False, ""
+    canonical = canonicalize_name(req.name)
+    versions: list[Version] = []
+    for path in links.glob("*.whl"):
+        parsed = parse_wheel_name(path.name)
+        if not parsed or parsed[0] != canonical:
+            continue
+        try:
+            versions.append(Version(parsed[1]))
+        except InvalidVersion:
+            continue
+    if not versions:
+        return False, ""
+    matching = [v for v in versions if req.specifier.contains(v, prereleases=True)]
+    if matching:
+        best = max(matching)
+        return True, f"find-links already has {req.name} {best} matching {req.specifier}"
+    newest = max(versions)
+    for spec in req.specifier:
+        if spec.operator != "==":
+            continue
+        try:
+            pinned = Version(spec.version)
+        except InvalidVersion:
+            continue
+        if newest > pinned and not any(s.operator in ("<", "<=") for s in req.specifier):
+            return (
+                True,
+                f"find-links has {req.name} {newest} newer than obsolete pin =={spec.version}",
+            )
+    if _find_links_versions_too_new_for_pin(versions, req):
+        return (
+            True,
+            f"find-links has {req.name} up to {newest} but none match {req.specifier}",
+        )
+    return False, ""
 
 
 def get_pip_wheel_extra_args(requirement_name: str) -> list[str]:
@@ -316,14 +911,16 @@ def get_pip_wheel_extra_args(requirement_name: str) -> list[str]:
     probe when building from the sdist under PEP 517 isolation. Use the host env
     (after ``setup-msvc-dev`` on ``windows-2022`` with VS 17.x) and ``--no-build-isolation``.
     """
-    if platform.system() != "Windows":
-        return []
     match = re.match(r"^([a-zA-Z0-9_.-]+)", str(requirement_name).strip())
     if not match:
         return []
-    if canonicalize_name(match.group(1)) != canonicalize_name("bleak-winrt"):
-        return []
-    return ["--no-build-isolation"]
+    canonical = canonicalize_name(match.group(1))
+    if platform.system() == "Windows" and canonical == canonicalize_name("bleak-winrt"):
+        return ["--no-build-isolation"]
+    if is_linux_armv7_runner() and canonical == canonicalize_name("cryptography"):
+        # piwheels ships cryptography wheels; avoid re-wheeling cffi sdists (license metadata failure).
+        return ["--no-deps"]
+    return []
 
 
 def _safe_text_for_stdout(text: str) -> str:
@@ -384,13 +981,163 @@ def parse_wheel_name(wheel_name: str) -> tuple[str, str] | None:
     (epochs, local versions, post/dev releases, etc.).
 
     Returns:
-        tuple: (normalized_package_name, version_str) or None if parsing fails
+        tuple: (canonical distribution name, version_str) or None if parsing fails
     """
     try:
         name, version, _build, _tags = parse_wheel_filename(wheel_name)
-        return name, str(version)
+        return canonicalize_name(str(name)), str(version)
     except InvalidWheelFilename:
         return None
+
+
+SDIST_ARCHIVE_SUFFIXES: tuple[str, ...] = (
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
+    ".tar.zst",
+    ".zip",
+)
+
+SDIST_REQUIREMENTS_FILE = "sdist_requirements.txt"
+
+# ``packaging`` only parses ``.tar.gz`` / ``.zip``; other archive suffixes use this fallback.
+_SDIST_FALLBACK_RE = re.compile(
+    r"^(.+?)-(.+)\.(?:tar\.(?:gz|bz2|xz|zst)|zip)$",
+    re.IGNORECASE,
+)
+
+
+def is_sdist_filename(filename: str) -> bool:
+    lower = filename.lower()
+    return any(lower.endswith(suffix) for suffix in SDIST_ARCHIVE_SUFFIXES)
+
+
+def parse_sdist_filename(filename: str) -> tuple[str, str] | None:
+    """Parse sdist archive name to ``(canonical_name, version_str)``."""
+    try:
+        name, version = _packaging_parse_sdist_filename(filename)
+        return canonicalize_name(str(name)), str(version)
+    except InvalidSdistFilename:
+        pass
+    match = _SDIST_FALLBACK_RE.match(filename)
+    if not match:
+        return None
+    name_raw, version_raw = match.group(1), match.group(2)
+    try:
+        version = str(parse_version(version_raw))
+    except InvalidVersion:
+        return None
+    return canonicalize_name(name_raw.replace("_", "-")), version
+
+
+def parse_distribution_filename(filename: str) -> tuple[str, str] | None:
+    """Parse a wheel or sdist filename to ``(canonical_name, version_str)``."""
+    if filename.lower().endswith(".whl"):
+        return parse_wheel_name(filename)
+    if is_sdist_filename(filename):
+        return parse_sdist_filename(filename)
+    return None
+
+
+def pep503_file_link(
+    package_dir_name: str,
+    filename: str,
+    requires_python: Optional[str] = None,
+) -> str:
+    """Artifact link for per-project ``index.html`` pages (matches ``create_index_pages.py`` layout)."""
+    href = f"/pypi/{package_dir_name}/{filename}"
+    rp = (requires_python or "").strip()
+    if rp:
+        rp_attr = html.escape(rp, quote=True)
+        return f'<a href="{href}" data-requires-python="{rp_attr}">{filename}</a><br/>'
+    return f'<a href="{href}">{filename}</a><br/>'
+
+
+def build_requires_python_map(
+    filenames: list[str],
+    fetcher: Any | None = None,
+) -> dict[tuple[str, str], Optional[str]]:
+    """Map ``(canonical_name, version)`` → PyPI ``Requires-Python`` for index page generation."""
+    lookup = fetcher if fetcher is not None else fetch_pypi_release_requires_python
+    unique: dict[tuple[str, str], None] = {}
+    for fn in filenames:
+        if fn == "index.html":
+            continue
+        parsed = parse_distribution_filename(fn)
+        if parsed is not None:
+            unique[parsed] = None
+    return {key: lookup(key[0], key[1]) for key in unique}
+
+
+def load_sdist_requirement_lines(path: Path | str = SDIST_REQUIREMENTS_FILE) -> list[Requirement]:
+    """Load PEP 508 requirements from ``sdist_requirements.txt`` (empty if missing)."""
+    req_path = Path(path)
+    if not req_path.is_file():
+        return []
+    requirements: list[Requirement] = []
+    for line in req_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            requirements.append(Requirement(line))
+        except InvalidRequirement:
+            continue
+    return requirements
+
+
+def sdist_allowed_for_upload(
+    dist_name: str,
+    version_str: str,
+    allowlist: list[Requirement],
+) -> bool:
+    """True when ``(dist_name, version_str)`` matches an allowlisted sdist requirement line."""
+    if not allowlist:
+        return False
+    canonical = canonicalize_name(dist_name)
+    try:
+        version = parse_version(version_str)
+    except InvalidVersion:
+        return False
+    for req in allowlist:
+        if canonicalize_name(req.name) != canonical:
+            continue
+        if not req.specifier:
+            return True
+        if req.specifier.contains(version, prereleases=True):
+            return True
+    return False
+
+
+def requirement_satisfied_by_filenames(
+    filenames: Iterable[str],
+    req: Requirement,
+    *,
+    wheels_only: bool = False,
+    sdists_only: bool = False,
+) -> bool:
+    """True when any wheel/sdist filename satisfies ``req``."""
+    for filename in filenames:
+        lower = filename.lower()
+        if wheels_only and not lower.endswith(".whl"):
+            continue
+        if sdists_only and not is_sdist_filename(filename):
+            continue
+        parsed = parse_distribution_filename(filename)
+        if parsed is None:
+            continue
+        dist_name, version_str = parsed
+        if canonicalize_name(dist_name) != canonicalize_name(req.name):
+            continue
+        try:
+            version = parse_version(version_str)
+        except InvalidVersion:
+            continue
+        if not req.specifier:
+            return True
+        if req.specifier.contains(version, prereleases=True):
+            return True
+    return False
 
 
 def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bool, str]:
@@ -415,8 +1162,7 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
     if not parsed:
         return False, ""
 
-    pkg_name, wheel_version = parsed
-    canonical_name = canonicalize_name(pkg_name)
+    canonical_name, wheel_version = parsed
 
     for req in exclude_requirements:
         # Check if package name matches (using canonical names)
@@ -448,6 +1194,7 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
 
     Examples:
         - "pkg-1.0-cp311-cp311-linux.whl" -> "3.11"
+        - "pkg-1.0-cp39-abi3-manylinux_2_31_armv7l.whl" -> "3.9"
         - "pkg-1.0-py3-none-any.whl" -> None (universal)
     """
     match = re.search(r"-cp(\d)(\d+)-", wheel_name)
@@ -529,8 +1276,7 @@ def should_exclude_wheel_s3(
     if not parsed:
         return False, ""
 
-    pkg_name, wheel_version = parsed
-    canonical_name = canonicalize_name(pkg_name)
+    canonical_name, wheel_version = parsed
     wheel_python = get_wheel_python_version(wheel_name)
     wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
 

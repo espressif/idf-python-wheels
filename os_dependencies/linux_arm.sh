@@ -49,6 +49,19 @@ if [ -n "$GITHUB_ENV" ]; then
     echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
 fi
 
+# ARM64 native runners (cryptography and other Rust/maturin sdists with --no-build-isolation)
+if [ "$arch" == "aarch64" ]; then
+    apt-get install -y libssl-dev libffi-dev gcc
+    if ! apt-get install -y rustc cargo; then
+        curl --proto '=https' --tlsv1.3 -sSf https://sh.rustup.rs | bash -s -- -y
+    fi
+    if [ -d "$HOME/.cargo/bin" ] && [ -n "$GITHUB_ENV" ]; then
+        echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+        echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
+        echo "PATH=$HOME/.cargo/bin:$PATH" >> "$GITHUB_ENV"
+    fi
+fi
+
 #Only ARMv7
 if [ "$arch" == "armv7l" ]; then
     # pip cache permissions to avoid warnings

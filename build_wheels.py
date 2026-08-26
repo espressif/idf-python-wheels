@@ -25,11 +25,25 @@ from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import armv7_force_no_binary_package
+from _helper_functions import armv7_pip_wheel_subprocess_env
+from _helper_functions import armv7_rebuild_instead_of_find_links_skip
+from _helper_functions import bounded_pin_without_find_links_skip
 from _helper_functions import filter_requirements_by_pypi_requires_python
+from _helper_functions import find_links_wheel_build_skip
+from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
+from _helper_functions import get_pip_wheel_extra_args
+from _helper_functions import is_linux_armv7_runner
 from _helper_functions import merge_requirements
+from _helper_functions import pip_wheel_invocation_args
+from _helper_functions import pip_wheel_or_mirror_success
 from _helper_functions import print_color
+from _helper_functions import remove_find_links_wheels_for_package
+from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
+from emit_sdist_requirements import compute_sdist_requirements
+from emit_sdist_requirements import write_sdist_requirements_file
 from yaml_list_adapter import YAMLListAdapter
 
 # GLOBAL VARIABLES
@@ -56,6 +70,26 @@ GH_TOKEN: str = os.environ.get("GH_TOKEN", "")
 # Authentication header
 AUTH_HEADER: Dict[str, str] = {"authorization": f"Bearer {GH_TOKEN}", "content-type": "application/json"}
 
+# Network timeouts for GitHub raw/API and CDN fetches (seconds); override in CI if needed
+REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "60"))
+REQUEST_RETRIES = int(os.environ.get("REQUEST_RETRIES", "3"))
+
+
+def _requests_get(url: str, *, context: str = "") -> requests.Response:
+    """GET with configurable timeout and retries for flaky remote hosts."""
+    last_exc: Optional[requests.RequestException] = None
+    for attempt in range(1, REQUEST_RETRIES + 1):
+        try:
+            return requests.get(url, headers=AUTH_HEADER, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < REQUEST_RETRIES:
+                label = context or url
+                print_color(f"{label}: {exc} — retry {attempt}/{REQUEST_RETRIES}", Fore.YELLOW)
+    assert last_exc is not None
+    raise last_exc
+
+
 print(
     f"ENV variables: IDF v{MIN_IDF_MAJOR_VERSION}.{MIN_IDF_MINOR_VERSION}"
     f" -- grater or equal release and master branches will be considered"
@@ -75,7 +109,10 @@ def check_response(response: requests.Response, warning: str, exit_on_wrong: boo
 # ESP-IDF branches list
 def fetch_idf_branches() -> List[str]:
     """Fetch IDF branches from URL specified in global variables"""
-    res = requests.get(IDF_BRANCHES_URL, headers=AUTH_HEADER, timeout=10)
+    try:
+        res = _requests_get(IDF_BRANCHES_URL, context="Failed to fetch ESP-IDF branches")
+    except requests.RequestException as exc:
+        raise SystemExit(f"Failed to fetch ESP-IDF branches.\n{exc}") from exc
     if check_response(res, "Failed to fetch ESP-IDF branches.", True):
         return [branch["name"] for branch in res.json()]
     return []
@@ -104,7 +141,7 @@ def get_used_idf_branches(idf_repo_branches: List[str]) -> List[str]:
 # Constraints files versions list
 def _idf_version_from_cmake() -> Optional[dict]:
     """Get IDF master branch version from version.cmake"""
-    res = requests.get(IDF_MASTER_VERSION_URL, headers=AUTH_HEADER, timeout=10)
+    res = _requests_get(IDF_MASTER_VERSION_URL, context="Failed to get master version of IDF from CMAKE")
     if check_response(res, "Failed to get master version of IDF from CMAKE."):
         regex = re.compile(r"^\s*set\s*\(\s*IDF_VERSION_([A-Z]{5})\s+(\d+)")
         lines = res.text.splitlines()
@@ -153,8 +190,9 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
     requirements_txt: List[str] = []
 
     for feature in idf_requirements_json["features"]:
-        res = requests.get(
-            f"{IDF_RESOURCES_URL}{branch}/{feature['requirement_path']}", headers=AUTH_HEADER, timeout=10
+        res = _requests_get(
+            f"{IDF_RESOURCES_URL}{branch}/{feature['requirement_path']}",
+            context=f"Failed to download feature (requirement group) '{feature['name']}'",
         )
         if check_response(res, f"Failed to download feature (requirement group) '{feature['name']}'"):
             requirements_txt += res.text.splitlines()
@@ -166,7 +204,7 @@ def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> L
 def _download_esptool_requirements() -> List[str]:
     """Download esptool requirements from pyproject.toml file"""
     requirements_txt: List[str] = []
-    res = requests.get(ESPTOOL_PYPROJECT_URL, headers=AUTH_HEADER, timeout=10)
+    res = _requests_get(ESPTOOL_PYPROJECT_URL, context="Failed to download esptool pyproject.toml file")
     if check_response(res, "Failed to download esptool pyproject.toml file"):
         pyproject_content = tomllib.loads(res.text)
         esptool_deps = pyproject_content.get("project", {}).get("dependencies", [])
@@ -177,7 +215,10 @@ def _download_esptool_requirements() -> List[str]:
 
 def _download_branch_constraints(constraint_file_url: str, branch, idf_constraint: str) -> List[str]:
     """Download constraints file for specific branch"""
-    res = requests.get(constraint_file_url, headers=AUTH_HEADER, timeout=10)
+    res = _requests_get(
+        constraint_file_url,
+        context=f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}",
+    )
     if check_response(res, f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}"):
         requirements_txt = res.text.splitlines()
         print(f"Added ESP-IDF constraints file {idf_constraint} for branch {branch}")
@@ -213,7 +254,10 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
         idf_requirements_json_url = f"{IDF_RESOURCES_URL}{branch}/tools/requirements.json"
         constraint_file_url = f"https://dl.espressif.com/dl/esp-idf/espidf.constraints.{idf_constraints[i]}.txt"
 
-        res = requests.get(idf_requirements_json_url, headers=AUTH_HEADER, timeout=10)
+        res = _requests_get(
+            idf_requirements_json_url,
+            context=f"Failed to download requirements JSON for branch {branch}",
+        )
         if not check_response(res, f"\nFailed to download requirements JSON for branch {branch}"):
             continue
 
@@ -289,9 +333,27 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
     """
     failed_wheels = 0
     succeeded_wheels = 0
+    skipped_wheels = 0
 
     dir = f"{os.path.curdir}{(os.sep)}downloaded_wheels"
     for requirement in requirements:
+        skip, reason = find_links_wheel_build_skip(requirement, dir)
+        if skip and not armv7_rebuild_instead_of_find_links_skip(requirement.name, reason):
+            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
+            skipped_wheels += 1
+            continue
+        skip, reason = bounded_pin_without_find_links_skip(requirement, dir)
+        if skip:
+            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
+            skipped_wheels += 1
+            continue
+        if is_linux_armv7_runner() and armv7_force_no_binary_package(requirement.name):
+            removed = remove_find_links_wheels_for_package(requirement.name, dir)
+            if removed:
+                print_color(
+                    f"-- removed {removed} find-links wheel(s) for {requirement.name} (ARMv7 sdist rebuild)",
+                    Fore.YELLOW,
+                )
         # non classic requirement wheel build
         if non_classic_requirement:
             pattern = re.compile(r"(--[^ ]*)(.*)")
@@ -320,6 +382,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env=armv7_pip_wheel_subprocess_env(str(requirement)),
                 )
                 print(out.stdout.decode("utf-8", errors="replace"))
                 if out.stderr:
@@ -330,6 +393,8 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
         # requirement wheel build
         # Get no-binary args for packages that should be built from source
         no_binary_args = get_no_binary_args(requirement.name)
+        crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(str(requirement))
+        extra_pip_args = get_pip_wheel_extra_args(str(requirement))
 
         out = subprocess.run(
             [
@@ -338,30 +403,26 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                 "pip",
                 "wheel",
                 f"{requirement}",
-                "--find-links",
-                f"{dir}",
-                "--find-links",
-                "https://pypi.org/simple/",
-                "--wheel-dir",
-                f"{dir}",
-                "--no-cache-dir",
-                "--no-build-isolation",
             ]
-            + no_binary_args,
+            + pip_wheel_invocation_args(str(requirement), dir)
+            + no_binary_args
+            + crypto_intel_args
+            + extra_pip_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=armv7_pip_wheel_subprocess_env(str(requirement)),
         )
 
         print(out.stdout.decode("utf-8", errors="replace"))
         if out.stderr:
             print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
 
-        if out.returncode != 0:
-            failed_wheels += 1
-        else:
+        if pip_wheel_or_mirror_success(str(requirement), out.returncode, wheel_dir=dir):
             succeeded_wheels += 1
+        else:
+            failed_wheels += 1
 
-    return {"failed": failed_wheels, "succeeded": succeeded_wheels}
+    return {"failed": failed_wheels, "succeeded": succeeded_wheels, "skipped": skipped_wheels}
 
 
 def get_python_dependent_wheels(wheel_dir: str, requirements: set) -> set:
@@ -413,6 +474,18 @@ def main() -> int:
 
     requirements = assemble_requirements(idf_branches, idf_constraints, True)
 
+    # Sdist list is the same on every runner (union over SDIST_EVAL_PLATFORMS in
+    # emit_sdist_requirements.py).
+    # CI uploads requirements.txt + sdist_requirements.txt
+    # as idf-requirements-bundle only from Linux x86_64
+    # This skips redundant work elsewhere.
+    if get_current_platform() == "linux_x86_64":
+        sdist_reqs = compute_sdist_requirements(requirements)
+        sdist_count = write_sdist_requirements_file(SDIST_REQUIREMENTS_FILE, sdist_reqs)
+        print_color("---------- SDIST REQUIREMENTS (index fallback) ----------")
+        print_color(f"Packages needing sdist on index: {sdist_count}", Fore.CYAN)
+        print_color("---------- END SDIST REQUIREMENTS ----------")
+
     exclude_list = YAMLListAdapter(
         "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
     ).requirements
@@ -431,15 +504,19 @@ def main() -> int:
     additional_whl = build_wheels(include_list)
     failed_wheels = additional_whl["failed"]
     succeeded_wheels = additional_whl["succeeded"]
+    skipped_wheels = additional_whl.get("skipped", 0)
 
     print_color("---------- BUILD WHEELS ----------")
     standard_whl = build_wheels(after_exclude_requirements)
     failed_wheels += standard_whl["failed"]
     succeeded_wheels += standard_whl["succeeded"]
+    skipped_wheels += standard_whl.get("skipped", 0)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
     print_color(f"Failed {failed_wheels} wheels", Fore.RED)
+    if skipped_wheels:
+        print_color(f"Skipped {skipped_wheels} wheels (find-links)", Fore.YELLOW)
 
     if failed_wheels != 0:
         raise SystemExit("One or more wheels failed to build")

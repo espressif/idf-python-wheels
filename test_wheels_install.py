@@ -11,7 +11,12 @@ It also checks wheels against exclude_list.yaml and removes incompatible ones.
 
 After a successful run, wheels that do not match this job's Python version and host
 platform are deleted from ``downloaded_wheels`` so CI ``wheels-tested-*`` artifacts
-do not carry the full multi-Python merge (only ``wheels-repaired-all`` is merged).
+do not carry wheels for other Python versions. CI downloads ``wheels-repaired-<arch>``
+per matrix row (not the full merge) so ARMv7 vs ARMv7 Legacy binaries are not mixed.
+
+After ``pip install``, :func:`_run_native_import_probes` imports native extensions listed
+in ``native_import_guard.yaml`` (e.g. ``from cryptography import x509``) so wheels that
+install cleanly but fail at load time (OpenSSL symbol mismatches) fail CI before upload.
 
 Wheels are ZIP archives (PEP 427). pip opens them with the zipfile module; a
 BadZipFile / "Bad magic number" error means the bytes on disk are not a valid
@@ -20,6 +25,8 @@ ZIP (truncated, corrupted, or not a wheel), not that ".whl" was mistaken for ".z
 
 from __future__ import annotations
 
+import os
+import platform
 import re
 import subprocess
 import sys
@@ -27,12 +34,17 @@ import sys
 from pathlib import Path
 
 from colorama import Fore
+from packaging.utils import canonicalize_name
 
 from _helper_functions import EXCLUDE_LIST_PATH
+from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import get_current_platform
+from _helper_functions import native_import_guard_by_name
+from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel
 from _helper_functions import wheel_archive_is_readable
+from native_import_probe import run_import_probes
 from yaml_list_adapter import YAMLListAdapter
 
 WHEELS_DIR = Path("./downloaded_wheels")
@@ -55,6 +67,101 @@ def get_platform_patterns() -> list[str]:
     else:
         # Unknown platform, only match universal wheels
         return [r"-any\.whl$"]
+
+
+def _armv7_test_plat() -> tuple[str, bool] | None:
+    """Return ``(AUDITWHEEL_PLAT, only_plat)`` on Linux ARMv7 test runners."""
+    if platform.system() != "Linux":
+        return None
+    if platform.machine().lower() not in ("armv7l", "armv7", "armhf"):
+        return None
+    plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    only_plat = os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
+    if plat:
+        return plat, only_plat
+    try:
+        codename = ""
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VERSION_CODENAME="):
+                codename = line.split("=", 1)[1].strip().strip('"')
+                break
+    except OSError:
+        return None
+    if codename == "bullseye":
+        return "manylinux_2_31_armv7l", True
+    if codename == "bookworm":
+        return "manylinux_2_36_armv7l", True
+    return None
+
+
+def _should_skip_native_import_probe(dist_name: str) -> bool:
+    """Platform-specific skips for native import probes after ``pip install``."""
+    return _armv7_skip_cryptography_native_probe(dist_name)
+
+
+def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[tuple[str, str]]]:
+    """Import native extensions after install; catch load-time ABI/OpenSSL mismatches."""
+    guarded = native_import_guard_by_name()
+    native_failed = 0
+    failed_wheels: list[tuple[str, str]] = []
+    if not installed_wheels:
+        return native_failed, failed_wheels
+
+    print_color("---------- NATIVE IMPORT PROBES ----------")
+    for wheel_path in installed_wheels:
+        parsed = parse_wheel_name(wheel_path.name)
+        if not parsed or parsed[0] not in guarded:
+            continue
+        if _should_skip_native_import_probe(parsed[0]):
+            print_color(
+                f"-- skip {wheel_path.name} (native import probe skipped on this platform)",
+                Fore.YELLOW,
+            )
+            continue
+        ok, msg = run_import_probes(guarded[parsed[0]].imports)
+        if ok:
+            print_color(f"-- {wheel_path.name}", Fore.GREEN)
+            if msg:
+                for line in msg.splitlines():
+                    print(f"   {line}")
+        else:
+            native_failed += 1
+            err = msg or "native import probe failed"
+            failed_wheels.append((wheel_path.name, err))
+            print_color(f"-- {wheel_path.name}", Fore.RED)
+            if msg:
+                for line in msg.splitlines()[:8]:
+                    print(f"   {line}")
+            wheel_path.unlink(missing_ok=True)
+    print_color("---------- END NATIVE IMPORT PROBES ----------")
+    if native_failed:
+        print_color(f"Native import failures: {native_failed}", Fore.RED)
+    return native_failed, failed_wheels
+
+
+def _armv7_skip_cryptography_native_probe(dist_name: str) -> bool:
+    """Skip cryptography import probe on Bookworm ARMv7 test images.
+
+    Piwheels cryptography 49+ is often linked against OpenSSL 3.2+ while the bookworm
+    ``python:*-bookworm`` test container ships OpenSSL 3.0.x. The wheel is still published
+    for newer Raspberry Pi OS; cffi/argon2 in-lineage rebuilds are probed separately.
+    """
+    if canonicalize_name(dist_name) != canonicalize_name("cryptography"):
+        return False
+    armv7_plat = _armv7_test_plat()
+    return armv7_plat is not None and armv7_plat[0] == "manylinux_2_36_armv7l"
+
+
+def _platform_compatible(wheel_name: str) -> bool:
+    platform_patterns = get_platform_patterns()
+    if not any(re.search(pattern, wheel_name) for pattern in platform_patterns):
+        return False
+    armv7_plat = _armv7_test_plat()
+    if armv7_plat is not None:
+        plat, only_plat = armv7_plat
+        if not armv7_wheel_matches_forced_plat(wheel_name, plat, only_plat=only_plat):
+            return False
+    return True
 
 
 def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
@@ -80,9 +187,7 @@ def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
         base_version = int(abi3_match.group(1))  # e.g., 38 or 311 (not 3.8 or 3.11)
         # abi3 wheels work on Python >= base_version (using these integer tags)
         if current_version >= base_version:
-            # Check platform compatibility
-            platform_patterns = get_platform_patterns()
-            return any(re.search(pattern, wheel_name) for pattern in platform_patterns)
+            return _platform_compatible(wheel_name)
         return False
 
     # Check Python version compatibility for non-abi3 wheels
@@ -95,9 +200,7 @@ def is_wheel_compatible(wheel_name: str, python_version: str) -> bool:
     if not any(re.search(pattern, wheel_name) for pattern in python_patterns):
         return False
 
-    # Check platform compatibility
-    platform_patterns = get_platform_patterns()
-    return any(re.search(pattern, wheel_name) for pattern in platform_patterns)
+    return _platform_compatible(wheel_name)
 
 
 def find_compatible_wheels(python_version: str) -> list[Path]:
@@ -119,11 +222,11 @@ def prune_wheels_not_for_current_python(
 ) -> int:
     """Remove ``*.whl`` files that are not compatible with this Python + platform.
 
-    CI downloads the full merged ``wheels-repaired-all`` tree into ``downloaded_wheels``,
+    CI downloads ``wheels-repaired-<arch>`` per matrix row into ``downloaded_wheels``,
     then tests only compatible wheels. Without pruning, the subsequent
     ``wheels-tested-<arch>-<py>`` artifact would still contain every cp/py tag from the
-    merge, which is misleading and huge. ``wheels_dir`` defaults to ``WHEELS_DIR`` for
-    production; tests may pass a temporary directory.
+    repair tree for that arch. ``wheels_dir`` defaults to ``WHEELS_DIR`` for production;
+    tests may pass a temporary directory.
     """
     base = wheels_dir if wheels_dir is not None else WHEELS_DIR
     if not base.exists():
@@ -196,6 +299,16 @@ def discard_corrupt_wheel(wheel_path: Path, note: str) -> None:
     print_color(f"-- {wheel_path.name} ({note})", Fore.YELLOW)
 
 
+def _platform_wheels_all_excluded(exclude_requirements: set) -> bool:
+    """True when every platform-matching wheel in ``WHEELS_DIR`` is excluded by policy."""
+    if not WHEELS_DIR.exists():
+        return False
+    platform_wheels = [p for p in WHEELS_DIR.glob("*.whl") if _platform_compatible(p.name)]
+    if not platform_wheels:
+        return False
+    return all(should_exclude_wheel(p.name, exclude_requirements)[0] for p in platform_wheels)
+
+
 def main() -> int:
     python_version_tag = get_python_version_tag()
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -214,6 +327,12 @@ def main() -> int:
     print(f"Found {len(wheels)} compatible wheels to test\n")
 
     if not wheels:
+        if _platform_wheels_all_excluded(exclude_requirements):
+            print_color(
+                "No installable wheels for this Python version; platform wheels are excluded by policy.",
+                Fore.YELLOW,
+            )
+            return 0
         print_color("No compatible wheels found!", Fore.RED)
         return 1
 
@@ -245,6 +364,7 @@ def main() -> int:
     discarded_corrupt = 0
     failed_wheels = []
     deleted_wheels = []
+    installed_wheels: list[Path] = []
 
     print_color("---------- INSTALL WHEELS ----------")
 
@@ -261,6 +381,7 @@ def main() -> int:
 
         if success:
             installed += 1
+            installed_wheels.append(wheel_path)
         elif is_compatibility_error(error_message):
             # Wheel is valid but has Python version or platform constraints
             # Delete it as it's incompatible with this environment
@@ -282,6 +403,11 @@ def main() -> int:
                     print(f"   {line}")
 
     print_color("---------- END INSTALL WHEELS ----------")
+
+    native_failed, probe_failures = _run_native_import_probes(installed_wheels)
+    if native_failed:
+        failed += native_failed
+        failed_wheels.extend(probe_failures)
 
     # Print statistics
     print_color("---------- STATISTICS ----------")

@@ -1,0 +1,32 @@
+# Native ARMv7 wheels: import probes run by test_wheels_install.py after pip install (ARMv7 CI only).
+# ``import cffi`` alone is not enough — a broken auditwheel manylinux tag can segfault only in _cffi_backend.
+#
+# Each entry:
+#   name     — PyPI distribution name (packaging canonical names)
+#   imports  — Python statements executed in one subprocess (multiline allowed)
+
+packages:
+  - name: cffi
+    imports:
+      - import _cffi_backend
+  - name: argon2-cffi-bindings
+    imports:
+      - from _argon2_cffi_bindings import _ffi
+  - name: argon2-cffi
+    imports:
+      - import argon2
+  - name: cryptography
+    imports:
+      - |
+        try:
+            from cryptography.hazmat.bindings._rust import openssl as _openssl
+        except ImportError:
+            from cryptography.hazmat.bindings._openssl import ffi
+      - from cryptography import x509
+      - print("cryptography import OK", x509.__name__)
+  - name: bcrypt
+    imports:
+      - import bcrypt
+  - name: pynacl
+    imports:
+      - import nacl.bindings

@@ -48,12 +48,47 @@ on:
 
 env:
   GH_TOKEN : ${{ secrets.GITHUB_TOKEN }}
+  # PyO3 (cryptography, etc.): allow installing cp311-abi3 wheels on newer CPython
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
 
 jobs:
   get-supported-versions:
     name: Get Supported Versions
     uses: ./.github/workflows/get-supported-versions.yml
     secrets: inherit
+
+  enabled-platforms:
+    name: Resolve enabled platforms
+    runs-on: ubuntu-latest
+    outputs:
+      enabled_arches: ${{ steps.arches.outputs.json }}
+    steps:
+      - name: Build enabled_arches JSON from workflow inputs
+        id: arches
+        env:
+          OS_UBUNTU: ${{ inputs.os_ubuntu_latest }}
+          OS_WINDOWS: ${{ inputs.os_windows_latest }}
+          OS_MACOS_X64: ${{ inputs.os_macos_latest }}
+          OS_MACOS_ARM64: ${{ inputs.os_macos_arm64 }}
+          OS_LINUX_ARM64: ${{ inputs.os_linux_arm64 }}
+          OS_LINUX_ARMV7: ${{ inputs.os_linux_armv7 }}
+          OS_LINUX_ARMV7_LEGACY: ${{ inputs.os_linux_armv7_legacy }}
+        run: |
+          parts=()
+          [ "$OS_UBUNTU" = "true" ] && parts+=('"linux-x86_64"')
+          [ "$OS_WINDOWS" = "true" ] && parts+=('"windows-x86_64"')
+          [ "$OS_MACOS_X64" = "true" ] && parts+=('"macos-x86_64"')
+          [ "$OS_MACOS_ARM64" = "true" ] && parts+=('"macos-arm64"')
+          [ "$OS_LINUX_ARM64" = "true" ] && parts+=('"linux-arm64"')
+          [ "$OS_LINUX_ARMV7" = "true" ] && parts+=('"linux-armv7"')
+          [ "$OS_LINUX_ARMV7_LEGACY" = "true" ] && parts+=('"linux-armv7legacy"')
+          if [ ${#parts[@]} -eq 0 ]; then
+            echo "At least one platform must be enabled for defined-wheels." >&2
+            exit 1
+          fi
+          json="[$(IFS=,; echo "${parts[*]}")]"
+          echo "Enabled platforms: $json"
+          echo "json=$json" >> "$GITHUB_OUTPUT"
 
   ubuntu-latest:
     needs: get-supported-versions
@@ -124,6 +159,24 @@ jobs:
       - name: Install additional OS dependencies - Windows
         run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows.ps1
 
+      - name: Locate Visual Studio 2022
+        id: vs2022
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $path = & $vswhere -version "[17.0,18.0)" -latest -property installationPath
+          if (-not $path) {
+            throw "Visual Studio 2022 (17.x) not found on this runner."
+          }
+          Write-Host "Using Visual Studio at: $path"
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Enable MSVC developer environment
+        uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
+          vs-path: ${{ steps.vs2022.outputs.path }}
+
       - name: Build wheels
         run: |
           python build_wheels_from_file.py --requirements ${{ inputs.packages }}
@@ -139,7 +192,7 @@ jobs:
     needs: get-supported-versions
     name: macos x86_64
     if: ${{ inputs.os_macos_latest }}
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
@@ -286,10 +339,14 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
-    container: python:${{ matrix.python-version }}-bookworm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version}}
 
       - name: Get Python version
         run: |
@@ -368,17 +425,21 @@ jobs:
   # https://github.com/espressif/idf-python-wheels/blob/main/README.md#universal-wheel-tag---linking-of-dynamic-libraries
   repair-wheels:
     if: ${{ always() }}
-    needs: [get-supported-versions, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64, linux-armv7-legacy]
+    needs: [get-supported-versions, enabled-platforms, ubuntu-latest, windows-latest, macos-latest, macos-m1, linux-armv7, linux-arm64, linux-armv7-legacy]
     name: Repair wheels
     uses: ./.github/workflows/wheels-repair.yml
+    with:
+      enabled_arches: ${{ needs.enabled-platforms.outputs.enabled_arches }}
 
   upload-python-wheels:
     if: ${{ always() }}
-    needs: [get-supported-versions, repair-wheels]
+    needs: [get-supported-versions, enabled-platforms, repair-wheels]
     name: Upload Python wheels
     uses: ./.github/workflows/upload-python-wheels.yml
     with:
       supported_python_versions: ${{ needs.get-supported-versions.outputs.supported_python }}
+      enabled_arches: ${{ needs.enabled-platforms.outputs.enabled_arches }}
+      idf_requirements_bundle: false
     secrets: inherit
 
   verify-s3-wheels:
