@@ -38,13 +38,13 @@ from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
-from _helper_functions import pip_wheel_invocation_args
-from _helper_functions import pip_wheel_or_mirror_success
 from _helper_functions import print_color
 from _helper_functions import remove_find_links_wheels_for_package
 from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
+from wheel_compat_policy import pip_wheel_invocation_args
+from wheel_compat_policy import pip_wheel_or_mirror_success
 from yaml_list_adapter import YAMLListAdapter
 
 # GLOBAL VARIABLES

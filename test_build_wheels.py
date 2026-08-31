@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from _helper_functions import _mirrored_manylinux228_version
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
@@ -32,15 +31,19 @@ from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
-from _helper_functions import mirror_pypi_manylinux228_wheel
-from _helper_functions import pip_wheel_or_mirror_success
-from _helper_functions import prune_ci_manylinux_newer_than_228
-from _helper_functions import prune_ci_manylinux_newer_than_228_when_228_mirror_present
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
-from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from build_wheels import _add_into_requirements
 from build_wheels import get_used_idf_branches
+from wheel_compat_policy import _mirrored_manylinux228_version
+from wheel_compat_policy import get_macos_only_binary_args
+from wheel_compat_policy import mirror_pypi_manylinux228_wheel
+from wheel_compat_policy import pip_wheel_or_mirror_success
+from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
+from wheel_compat_policy import prune_ci_manylinux_newer_than_228
+from wheel_compat_policy import prune_ci_manylinux_newer_than_228_when_228_mirror_present
+from wheel_compat_policy import should_skip_linux_auditwheel_for_pypi_mirror
+from wheel_compat_policy import should_skip_macos_delocate_for_pypi_mirror
 from yaml_list_adapter import YAMLListAdapter
 
 
@@ -401,26 +404,94 @@ class TestGetPipWheelExtraArgs(unittest.TestCase):
 
 
 class TestPipWheelInvocationArgs(unittest.TestCase):
-    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=True)
     def test_armv7_cffi_uses_build_isolation(self, _armv7: object) -> None:
-        from _helper_functions import pip_wheel_invocation_args
+        from wheel_compat_policy import pip_wheel_invocation_args
 
         args = pip_wheel_invocation_args("cffi>=1.15.0")
         self.assertNotIn("--no-build-isolation", args)
 
-    @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
+    @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=True)
     def test_armv7_any_package_uses_build_isolation(self, _armv7: object) -> None:
-        from _helper_functions import pip_wheel_invocation_args
+        from wheel_compat_policy import pip_wheel_invocation_args
 
         args = pip_wheel_invocation_args("esptool~=4.9")
         self.assertNotIn("--no-build-isolation", args)
 
-    @patch("_helper_functions.is_linux_armv7_runner", return_value=False)
+    @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=False)
     def test_non_armv7_keeps_no_build_isolation(self, _armv7: object) -> None:
-        from _helper_functions import pip_wheel_invocation_args
+        from wheel_compat_policy import pip_wheel_invocation_args
 
         args = pip_wheel_invocation_args("cffi>=1.15.0")
         self.assertIn("--no-build-isolation", args)
+
+    @patch("wheel_compat_policy.platform.system", return_value="Darwin")
+    @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=False)
+    def test_macos_pip_wheel_only_binary_all(self, _armv7: object, _sys: object) -> None:
+        from wheel_compat_policy import pip_wheel_invocation_args
+
+        args = pip_wheel_invocation_args("psutil")
+        only_at = args.index("--only-binary")
+        self.assertEqual(args[only_at + 1], ":all:")
+
+
+class TestMacosPypiMirrorPolicy(unittest.TestCase):
+    @patch("wheel_compat_policy.platform.system", return_value="Darwin")
+    def test_only_binary_args_on_macos(self, _sys: object) -> None:
+        self.assertEqual(get_macos_only_binary_args(), ["--only-binary", ":all:"])
+
+    @patch("wheel_compat_policy.platform.system", return_value="Linux")
+    def test_only_binary_args_off_linux(self, _sys: object) -> None:
+        self.assertEqual(get_macos_only_binary_args(), [])
+
+    @patch("_helper_functions.platform.machine", return_value="x86_64")
+    @patch("wheel_compat_policy.platform.system", return_value="Darwin")
+    def test_skip_delocate_for_pypi_macos_wheels(self, _sys: object, _mach: object) -> None:
+        self.assertTrue(should_skip_macos_delocate_for_pypi_mirror("psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl"))
+        self.assertTrue(should_skip_macos_delocate_for_pypi_mirror("cffi-1.17.1-cp311-cp311-macosx_11_0_arm64.whl"))
+
+    @patch("_helper_functions.platform.machine", return_value="x86_64")
+    @patch("_helper_functions.platform.system", return_value="Darwin")
+    @patch("wheel_compat_policy.platform.system", return_value="Darwin")
+    def test_keep_delocate_for_cryptography_intel(self, _sys: object, _hf_sys: object, _mach: object) -> None:
+        self.assertFalse(
+            should_skip_macos_delocate_for_pypi_mirror("cryptography-49.0.0-cp313-abi3-macosx_10_12_x86_64.whl")
+        )
+
+    @patch("_helper_functions.platform.machine", return_value="arm64")
+    @patch("_helper_functions.platform.system", return_value="Darwin")
+    @patch("wheel_compat_policy.platform.system", return_value="Darwin")
+    def test_skip_delocate_for_cryptography_arm(self, _sys: object, _hf_sys: object, _mach: object) -> None:
+        self.assertTrue(
+            should_skip_macos_delocate_for_pypi_mirror("cryptography-49.0.0-cp313-abi3-macosx_11_0_arm64.whl")
+        )
+
+    @patch("wheel_compat_policy.platform.system", return_value="Linux")
+    def test_skip_delocate_off_linux(self, _sys: object) -> None:
+        self.assertFalse(should_skip_macos_delocate_for_pypi_mirror("psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl"))
+
+    def test_prune_keeps_lowest_macosx_tag_any_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "cffi-1.17.1-cp311-cp311-macosx_10_9_x86_64.whl"
+            drop = links / "cffi-1.17.1-cp311-cp311-macosx_15_0_x86_64.whl"
+            other = links / "cffi-1.17.1-cp311-cp311-macosx_11_0_arm64.whl"
+            keep.write_bytes(b"pypi")
+            drop.write_bytes(b"local")
+            other.write_bytes(b"arm")
+            removed = prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links)
+            self.assertEqual(removed, 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
+            self.assertTrue(other.exists())
+
+    def test_prune_noop_when_only_one_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            only = links / "psutil-7.2.2-cp36-abi3-macosx_15_0_x86_64.whl"
+            only.write_bytes(b"local")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 0)
+            self.assertTrue(only.exists())
 
 
 class TestParseWheelName(unittest.TestCase):
@@ -681,6 +752,7 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             "tibs",
             "rpds-py",
             "cryptography",
+            "psutil",
         ):
             self.assertTrue(force_interpreter_skip_package(canonicalize_name(name)))
 
@@ -810,17 +882,17 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
 
 
 class TestPipWheelOrMirrorSuccess(unittest.TestCase):
-    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=True)
+    @patch("wheel_compat_policy.mirror_pypi_manylinux228_wheel", return_value=True)
     def test_pip_success_still_mirrors_and_returns_true(self, mock_mirror):
         self.assertTrue(pip_wheel_or_mirror_success("greenlet>3.0.0", 0))
         mock_mirror.assert_called_once()
 
-    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=True)
+    @patch("wheel_compat_policy.mirror_pypi_manylinux228_wheel", return_value=True)
     def test_pip_failure_succeeds_when_mirror_works(self, mock_mirror):
         self.assertTrue(pip_wheel_or_mirror_success("pillow!=9.5.0", 1))
         mock_mirror.assert_called_once()
 
-    @patch("_helper_functions.mirror_pypi_manylinux228_wheel", return_value=False)
+    @patch("wheel_compat_policy.mirror_pypi_manylinux228_wheel", return_value=False)
     def test_pip_failure_fails_when_mirror_fails(self, mock_mirror):
         self.assertFalse(pip_wheel_or_mirror_success("cffi==1.17.1", 1))
         mock_mirror.assert_called_once()

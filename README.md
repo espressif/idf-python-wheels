@@ -210,6 +210,12 @@ Mitigations in this repo:
 
 Upstream [dropped x86_64 macOS support](https://github.com/pyca/cryptography/compare/48.0.1...49.0.0) in 49+; this path is maintained locally until ESP-IDF drops Intel Mac. Scheduled CI runs [`validate_cryptography_macos_intel_wheel.sh`](./scripts/validate_cryptography_macos_intel_wheel.sh) after macOS Intel builds and after [`delocate`](./repair_wheels.py) repair. For a local isolated rebuild smoke test, use [`spike_cryptography_macos_intel_openssl4.sh`](./scripts/spike_cryptography_macos_intel_openssl4.sh).
 
+### macOS: prefer PyPI wheels (avoid CI ``macosx_*`` tag stealing)
+
+A local sdist build on GitHub `macos-15-*` runners often stamps a **higher** `macosx_*` tag (`macosx_15_0_x86_64`, …) than the official cibuildwheel tag (`macosx_10_9_x86_64`, `macosx_11_0_arm64`). Pip prefers the highest compatible tag, so the extra-index CI copy wins over PyPI. For **psutil 7.2.2** that locally compiled `_psutil_osx.abi3.so` SIGABRT’d ESP-IDF `export.sh` / `test_pytest_macos`.
+
+macOS `pip wheel` therefore passes **`--only-binary :all:`** (Intel **cryptography** still uses `--no-binary cryptography` for the OpenSSL 4 rebuild above). [`repair_wheels.py`](./repair_wheels.py) **skips delocate** except that Intel cryptography rebuild, and **prunes** any higher `macosx_*` sibling for the same distribution/version/arch so it cannot be uploaded. After install, every platform wheel is import-probed. Leftover higher-tag objects already on the extra-index (for example [psutil 7.2.2](https://dl.espressif.com/pypi/psutil/)) must be deleted from the bucket; a later upload only overwrites the same filename.
+
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
 

@@ -29,11 +29,11 @@ from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
-from _helper_functions import pip_wheel_invocation_args
-from _helper_functions import pip_wheel_or_mirror_success
 from _helper_functions import print_color
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
+from wheel_compat_policy import pip_wheel_invocation_args
+from wheel_compat_policy import pip_wheel_or_mirror_success
 
 
 def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:

@@ -39,9 +39,11 @@ from _helper_functions import _is_linux_tag_armv7_wheel_name as _is_linux_tag_wh
 from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
-from _helper_functions import prune_ci_manylinux_newer_than_228_when_228_mirror_present
-from _helper_functions import should_skip_linux_auditwheel_for_pypi_mirror
 from _helper_functions import wheel_archive_is_readable
+from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
+from wheel_compat_policy import prune_ci_manylinux_newer_than_228_when_228_mirror_present
+from wheel_compat_policy import should_skip_linux_auditwheel_for_pypi_mirror
+from wheel_compat_policy import should_skip_macos_delocate_for_pypi_mirror
 
 
 def _stderr_indicates_bad_zip(error_msg: str) -> bool:
@@ -397,6 +399,15 @@ def main() -> None:
             )
             wheels = _dedupe_wheel_paths(wheels_dir)
 
+    if current_platform == "Darwin":
+        pruned = prune_ci_macos_newer_than_pypi_mirror(wheel_dir=wheels_dir)
+        if pruned:
+            print_color(
+                f"Pre-repair: pruned {pruned} macOS wheel(s) newer than the PyPI macosx tag",
+                Fore.YELLOW,
+            )
+            wheels = _dedupe_wheel_paths(wheels_dir)
+
     repaired_count: int = 0
     skipped_count: int = 0
     deleted_count: int = 0
@@ -476,6 +487,14 @@ def main() -> None:
         if current_platform == "Linux" and should_skip_linux_auditwheel_for_pypi_mirror(wheel.name):
             print_color(
                 "  -> Skipping auditwheel (PyPI manylinux_2_28 mirror; repair would retag to host 2_34)",
+                Fore.YELLOW,
+            )
+            skipped_count += 1
+            continue
+
+        if current_platform == "Darwin" and should_skip_macos_delocate_for_pypi_mirror(wheel.name):
+            print_color(
+                "  -> Skipping delocate (keep PyPI macOS tag; local retag can steal pip preference)",
                 Fore.YELLOW,
             )
             skipped_count += 1
@@ -733,6 +752,14 @@ def main() -> None:
         if pruned:
             print_color(
                 f"Pruned {pruned} manylinux wheel(s) newer than 2_28 (PyPI 2_28 mirror kept)",
+                Fore.YELLOW,
+            )
+
+    if current_platform == "Darwin":
+        pruned = prune_ci_macos_newer_than_pypi_mirror(wheel_dir=wheels_dir)
+        if pruned:
+            print_color(
+                f"Pruned {pruned} macOS wheel(s) newer than the PyPI macosx tag",
                 Fore.YELLOW,
             )
 
