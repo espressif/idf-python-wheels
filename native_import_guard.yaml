@@ -1,21 +1,43 @@
-# Native ARMv7 wheels: import probes run by test_wheels_install.py after pip install (ARMv7 CI only).
-# ``import cffi`` alone is not enough — a broken auditwheel manylinux tag can segfault only in _cffi_backend.
+# Native import probes after pip install (test_wheels_install.py, every test-wheels-install runner).
+# Does not change the requirements list.
 #
-# Each entry:
-#   name     — PyPI distribution name (packaging canonical names)
-#   imports  — Python statements executed in one subprocess (multiline allowed)
+# "After installing the wheel for package_name (on platform, for python, at version),
+#  run imports — or skip — and fail CI if import crashes or errors."
+#
+# Top-level:
+#   probe_unlisted   — probe platform wheels not listed below via import <top_level> (default true)
+#   skip_pure_any    — skip *-none-any.whl (default true)
+#   skip_top_level   — top_level.txt names ignored when generating default imports
+#
+# Each packages: entry (same filter tokens as exclude_list.yaml / include_list.yaml):
+#   package_name  — PyPI distribution name (legacy key ``name`` is also accepted)
+#   imports       — Python statement(s) in one subprocess (list; multiline allowed). Optional if skip.
+#   skip          — true: do not probe when filters match (optional)
+#   platform      — win32 | darwin | linux | linux_x86_64 | linux_arm64 | linux_armv7 |
+#                   macos_x86_64 | macos_arm64 (string or list). Omitted = all platforms.
+#   python        — python_version specifier(s), e.g. '>=3.10' or ['==3.8', '==3.9']
+#   version       — package version specifier(s), e.g. '>=49' or ['>=1.0', '<2']
+#
+# ``import cffi`` alone is not enough — a broken auditwheel manylinux tag can segfault only in _cffi_backend.
+
+probe_unlisted: true
+skip_pure_any: true
+skip_top_level:
+  - test
+  - tests
+  - testing
 
 packages:
-  - name: cffi
+  - package_name: cffi
     imports:
       - import _cffi_backend
-  - name: argon2-cffi-bindings
+  - package_name: argon2-cffi-bindings
     imports:
       - from _argon2_cffi_bindings import _ffi
-  - name: argon2-cffi
+  - package_name: argon2-cffi
     imports:
       - import argon2
-  - name: cryptography
+  - package_name: cryptography
     imports:
       - |
         try:
@@ -24,9 +46,13 @@ packages:
             from cryptography.hazmat.bindings._openssl import ffi
       - from cryptography import x509
       - print("cryptography import OK", x509.__name__)
-  - name: bcrypt
+  - package_name: bcrypt
     imports:
       - import bcrypt
-  - name: pynacl
+  - package_name: pynacl
     imports:
       - import nacl.bindings
+  - package_name: psutil
+    imports:
+      - import psutil
+      - print("psutil import OK", psutil.__version__)

@@ -319,6 +319,34 @@ class TestWheelCompatibility(unittest.TestCase):
             self.assertFalse(wheel.exists())
             mock_probe.assert_called_once()
 
+    @patch("test_wheels_install.run_import_probes", return_value=(True, "ok"))
+    def test_run_native_import_probes_defaults_for_unguarded_platform_wheel(self, mock_probe):
+        import zipfile
+
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "greenlet-3.1.0-cp311-cp311-macosx_10_9_x86_64.whl"
+            with zipfile.ZipFile(wheel, "w") as zf:
+                zf.writestr("greenlet-3.1.0.dist-info/top_level.txt", "greenlet\n")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 0)
+            self.assertEqual(failures, [])
+            mock_probe.assert_called_once()
+            self.assertEqual(mock_probe.call_args[0][0], ("import greenlet",))
+
+    @patch("test_wheels_install.run_import_probes")
+    def test_run_native_import_probes_skips_pure_any_wheel(self, mock_probe):
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "six-1.16.0-py2.py3-none-any.whl"
+            wheel.write_bytes(b"")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 0)
+            self.assertEqual(failures, [])
+            mock_probe.assert_not_called()
+
 
 class TestPruneWheelsForArtifact(unittest.TestCase):
     """``prune_wheels_not_for_current_python`` keeps per-matrix wheels for CI artifacts."""

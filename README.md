@@ -143,30 +143,35 @@ The syntax can be also converted into a sentence: "For assembled **main requirem
 
 
 ### native_import_guard.yaml
-File for **native ARMv7 import checks** after wheels are installed in CI ([`test_wheels_install.py`](./test_wheels_install.py)). It does not change the requirements list.
+File for **native import checks** after wheels are installed in CI ([`test_wheels_install.py`](./test_wheels_install.py), all test-wheels-install runners). It does not change the requirements list.
 
-For every `name` there is:
+The syntax matches [`exclude_list.yaml`](./exclude_list.yaml) / [`include_list.yaml`](./include_list.yaml): “After installing the wheel for `package_name` (on `platform`, for `python`, at `version`), run `imports` — or `skip` — and fail CI if import crashes or errors.”
 
-* `imports` — Python statement(s) to run after install (list of strings; multiline allowed)
+Top-level options:
 
-native_import_guard template:
+* `probe_unlisted` — if true (default), every other **platform** wheel is probed with `import <top_level>` from the wheel’s `top_level.txt`
+* `skip_pure_any` — if true (default), skip `*-none-any.whl`
+* `skip_top_level` — names ignored when generating that default import (`test`, `tests`, `testing`)
 
-    packages:
-      - name: '<distribution_name>'
-        imports:
-          - import _cffi_backend
+Each `packages:` entry:
 
-The syntax can be converted into a sentence: "After installing the wheel for `name` on ARMv7, run `imports` and fail CI if import crashes or errors."
+* `package_name` — PyPI distribution name (legacy key `name` is accepted)
+* `imports` — Python statement(s) to run after install (list; multiline allowed)
+* `skip` — if true, do not probe when the filters match
+* `platform` / `python` / `version` — optional, same tokens as `exclude_list.yaml` (omitted = all)
 
 example:
 
 ```yaml
-    - name: 'cffi'
-      imports:
-        - import _cffi_backend
+probe_unlisted: true
+skip_pure_any: true
+packages:
+  - package_name: cffi
+    imports:
+      - import _cffi_backend
 ```
 
-This would mean: load the real C extension for `cffi` on ARMv7 (not `import cffi` alone). The same names are referenced in [`repair_wheels.py`](./repair_wheels.py) for ARMv7 manylinux repair policy.
+This would mean: load the real C extension for `cffi` (not `import cffi` alone). The same names are referenced in [`repair_wheels.py`](./repair_wheels.py) for ARMv7 manylinux repair policy.
 
 
 ### build_requirements.txt

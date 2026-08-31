@@ -14,7 +14,6 @@ import subprocess
 import sys
 import zipfile
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -29,8 +28,6 @@ from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request
 from urllib.request import urlopen
-
-import yaml
 
 from colorama import Fore
 from colorama import Style
@@ -53,7 +50,6 @@ _REPO_ROOT = Path(__file__).resolve().parent
 FORCE_NO_BINARY_LINUX_FILE = "force_no_binary_linux.txt"
 
 EXCLUDE_LIST_PATH = "exclude_list.yaml"
-NATIVE_IMPORT_GUARD_PATH = "native_import_guard.yaml"
 PYPI_SIMPLE_INDEX = "https://pypi.org/simple/"
 DEFAULT_WHEEL_DIR = "downloaded_wheels"
 
@@ -399,43 +395,6 @@ def load_force_no_binary_linux_names(repo_root: Path | None = None) -> list[str]
     normalized = frozenset(pkg.lower().replace("-", "_") for pkg in out)
     _FORCE_NO_BINARY_LINUX_CACHE[root] = (out, normalized)
     return out
-
-
-@dataclass(frozen=True)
-class NativeImportGuardEntry:
-    """Import probes for native ARMv7 wheels (``test_wheels_install.py``)."""
-
-    imports: tuple[str, ...]
-
-
-_NATIVE_IMPORT_GUARD_CACHE: dict[Path, dict[str, NativeImportGuardEntry]] = {}
-
-
-def native_import_guard_by_name(
-    repo_root: Path | None = None,
-) -> dict[str, NativeImportGuardEntry]:
-    """Map canonical distribution name → guard config (``native_import_guard.yaml``)."""
-    root = (repo_root if repo_root is not None else _REPO_ROOT).resolve()
-    cached = _NATIVE_IMPORT_GUARD_CACHE.get(root)
-    if cached is not None:
-        return cached
-    path = root / NATIVE_IMPORT_GUARD_PATH
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    by_name: dict[str, NativeImportGuardEntry] = {}
-    for entry in data.get("packages") or []:
-        if not isinstance(entry, dict):
-            continue
-        name, imports = entry.get("name"), entry.get("imports")
-        if not name or not imports:
-            continue
-        stmts = tuple(str(s).strip() for s in imports if str(s).strip())
-        if not stmts:
-            continue
-        by_name[canonicalize_name(str(name))] = NativeImportGuardEntry(imports=stmts)
-    if not by_name:
-        raise ValueError(f"{path}: no packages with imports defined")
-    _NATIVE_IMPORT_GUARD_CACHE[root] = by_name
-    return by_name
 
 
 _MANYLINUX_GLIBC_TAG = re.compile(r"manylinux_(\d+)_(\d+)", re.IGNORECASE)

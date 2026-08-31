@@ -15,31 +15,23 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_GUARD_PATH = _ROOT / "native_import_guard.yaml"
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 def _guard_import_blocks(package_names: list[str]) -> dict[str, str]:
     """Return canonical name → import probe source for requested packages."""
-    import yaml
-
     from packaging.utils import canonicalize_name
 
-    data = yaml.safe_load(_GUARD_PATH.read_text(encoding="utf-8")) or {}
+    from native_import_guard import load_native_import_guard
+
     wanted = {canonicalize_name(name) for name in package_names}
     blocks: dict[str, str] = {}
-    for entry in data.get("packages") or []:
-        if not isinstance(entry, dict):
+    for entry in load_native_import_guard(_ROOT).packages:
+        if entry.name not in wanted or not entry.imports:
             continue
-        name = entry.get("name")
-        imports = entry.get("imports")
-        if not name or not imports:
-            continue
-        canon = canonicalize_name(str(name))
-        if canon not in wanted:
-            continue
-        stmts = [str(stmt).strip() for stmt in imports if str(stmt).strip()]
-        if stmts:
-            blocks[canon] = "\n".join(stmts)
+        if entry.name not in blocks:
+            blocks[entry.name] = "\n".join(entry.imports)
     return blocks
 
 
