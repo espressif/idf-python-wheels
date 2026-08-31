@@ -30,6 +30,7 @@ from _helper_functions import force_interpreter_skip_package
 from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
+from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
 from _helper_functions import mirror_pypi_manylinux228_wheel
 from _helper_functions import pip_wheel_or_mirror_success
@@ -923,6 +924,72 @@ class TestCryptographyMacosIntelBuild(unittest.TestCase):
     @patch("_helper_functions.get_current_platform", return_value="linux_x86_64")
     def test_noop_off_macos_intel(self, _mock_plat):
         self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("cryptography"), [])
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["50.0.1"])
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_rebuild_when_find_links_intel_wheel_is_older(self, _mock_plat, _mock_pypi):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-49.0.0-cp313-abi3-macosx_10_12_x86_64.whl").write_bytes(b"")
+            req = Requirement("cryptography>=2.1.4")
+            self.assertTrue(
+                macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                    req,
+                    "find-links already has cryptography 49.0.0 matching >=2.1.4",
+                    links,
+                )
+            )
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["50.0.1"])
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_skip_when_find_links_intel_wheel_is_latest(self, _mock_plat, _mock_pypi):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-50.0.1-cp313-abi3-macosx_10_12_x86_64.whl").write_bytes(b"")
+            req = Requirement("cryptography>=2.1.4")
+            self.assertFalse(
+                macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                    req,
+                    "find-links already has cryptography 50.0.1 matching >=2.1.4",
+                    links,
+                )
+            )
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["50.0.1"])
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_rebuild_when_find_links_only_has_other_platform_wheel(self, _mock_plat, _mock_pypi):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl").write_bytes(b"")
+            req = Requirement("cryptography>=2.1.4")
+            self.assertTrue(
+                macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                    req,
+                    "find-links already has cryptography 50.0.1 matching >=2.1.4",
+                    links,
+                )
+            )
+
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_still_skip_obsolete_cryptography_pin(self, _mock_plat):
+        req = Requirement("cryptography<43,>=2.1.4")
+        self.assertFalse(
+            macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                req,
+                "find-links has cryptography up to 49.0.0 but none match <43,>=2.1.4",
+            )
+        )
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["50.0.1"])
+    @patch("_helper_functions.get_current_platform", return_value="linux_x86_64")
+    def test_linux_does_not_rebuild_for_older_find_links(self, _mock_plat, _mock_pypi):
+        req = Requirement("cryptography>=2.1.4")
+        self.assertFalse(
+            macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                req,
+                "find-links already has cryptography 49.0.0 matching >=2.1.4",
+            )
+        )
 
 
 class TestPypiRequiresPythonPreflight(unittest.TestCase):

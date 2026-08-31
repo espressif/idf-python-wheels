@@ -36,6 +36,7 @@ from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
+from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
 from _helper_functions import pip_wheel_invocation_args
 from _helper_functions import pip_wheel_or_mirror_success
@@ -339,9 +340,15 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
     for requirement in requirements:
         skip, reason = find_links_wheel_build_skip(requirement, dir)
         if skip and not armv7_rebuild_instead_of_find_links_skip(requirement.name, reason):
-            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
-            skipped_wheels += 1
-            continue
+            if macos_intel_cryptography_rebuild_instead_of_find_links_skip(requirement, reason, dir):
+                print_color(
+                    f"-- rebuild {requirement} on macOS Intel ({reason}; newer PyPI sdist needed)",
+                    Fore.CYAN,
+                )
+            else:
+                print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
+                skipped_wheels += 1
+                continue
         skip, reason = bounded_pin_without_find_links_skip(requirement, dir)
         if skip:
             print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)

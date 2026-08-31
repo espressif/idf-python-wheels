@@ -123,6 +123,64 @@ def armv7_rebuild_instead_of_find_links_skip(name: str, find_links_reason: str) 
     return "already has" in find_links_reason and "matching" in find_links_reason
 
 
+def _macos_x86_64_cryptography_versions_in_find_links(
+    find_links_dir: Path | str,
+) -> list[Version]:
+    """Versions of cryptography wheels tagged macosx_*_x86_64 in find-links."""
+    versions: list[Version] = []
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return versions
+    for path in links.glob("*.whl"):
+        try:
+            name, ver, _build, tags = parse_wheel_filename(path.name)
+        except InvalidWheelFilename:
+            continue
+        if canonicalize_name(str(name)) != canonicalize_name("cryptography"):
+            continue
+        if not any("macosx" in tag.platform and "x86_64" in tag.platform for tag in tags):
+            continue
+        try:
+            versions.append(Version(str(ver)))
+        except InvalidVersion:
+            continue
+    return versions
+
+
+def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+    req: Requirement,
+    find_links_reason: str,
+    find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> bool:
+    """Rebuild cryptography from sdist on Intel Mac when find-links is behind PyPI.
+
+    Official 49+ wheels dropped macOS x86_64. A matching older Intel wheel (or a
+    Linux/Windows wheel seeded into find-links) must not skip the OpenSSL 4 build
+    for a newer PyPI release. Obsolete upper-bound pins still skip.
+    """
+    if get_current_platform() != "macos_x86_64":
+        return False
+    if canonicalize_name(req.name) != canonicalize_name("cryptography"):
+        return False
+    if "none match" in find_links_reason or "newer than obsolete pin" in find_links_reason:
+        return False
+    if "already has" not in find_links_reason:
+        return False
+    latest = matching_release_version_strings(req)
+    if latest is None:
+        return True
+    if not latest:
+        return False
+    try:
+        latest_ver = Version(latest[0])
+    except InvalidVersion:
+        return True
+    local = _macos_x86_64_cryptography_versions_in_find_links(find_links_dir)
+    if local and max(local) >= latest_ver:
+        return False
+    return True
+
+
 def armv7_pip_wheel_subprocess_env(requirement_name: str) -> dict[str, str]:
     """Return env for ``pip wheel`` on ARMv7 (extends global ``PIP_NO_BINARY`` when rebuilding natives)."""
     env = os.environ.copy()

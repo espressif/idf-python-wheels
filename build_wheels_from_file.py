@@ -28,6 +28,7 @@ from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
+from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import pip_wheel_invocation_args
 from _helper_functions import pip_wheel_or_mirror_success
 from _helper_functions import print_color
@@ -81,8 +82,14 @@ def _dependent_requirement_skip_line(requirement_line: str, *, force_interpreter
     if not force_interpreter or force_interpreter_skip_package(canonicalize_name(req.name)):
         skip, reason = find_links_wheel_build_skip(req)
         if skip and not armv7_rebuild_instead_of_find_links_skip(req.name, reason):
-            print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
-            return True
+            if macos_intel_cryptography_rebuild_instead_of_find_links_skip(req, reason):
+                print_color(
+                    f"-- rebuild {requirement_line} on macOS Intel ({reason}; newer PyPI sdist needed)",
+                    Fore.CYAN,
+                )
+            else:
+                print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+                return True
     skip, reason = bounded_pin_without_find_links_skip(req)
     if skip:
         print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)

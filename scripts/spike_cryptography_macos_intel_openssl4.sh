@@ -23,12 +23,31 @@ rm -rf downloaded_wheels spike_dist spike_build
 mkdir -p downloaded_wheels spike_dist spike_build
 
 echo "========== pip wheel cryptography 49+ =========="
-python -m pip wheel 'cryptography>=49,<50' \
+python -m pip wheel 'cryptography>=49' \
   --no-binary cryptography \
   --wheel-dir downloaded_wheels \
   --no-cache-dir
 
-WHEEL="$(ls -1 downloaded_wheels/cryptography-49*.whl downloaded_wheels/cryptography-5*.whl 2>/dev/null | head -1)"
+WHEEL="$(python - <<'PY'
+from pathlib import Path
+
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+from packaging.version import Version
+
+candidates = []
+for path in Path("downloaded_wheels").glob("cryptography-*.whl"):
+    try:
+        name, ver, _build, _tags = parse_wheel_filename(path.name)
+    except InvalidWheelFilename:
+        continue
+    if str(name) != "cryptography" or Version(str(ver)) < Version("49"):
+        continue
+    candidates.append((Version(str(ver)), path.resolve()))
+if not candidates:
+    raise SystemExit(1)
+print(max(candidates)[1])
+PY
+)" || true
 if [ -z "${WHEEL}" ]; then
   echo "ERROR: no cryptography 49+ wheel produced" >&2
   exit 1
