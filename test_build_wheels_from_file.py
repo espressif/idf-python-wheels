@@ -97,6 +97,28 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
             bwf._dependent_requirement_skip_line("cryptography<43", force_interpreter=True),
         )
 
+    @patch.object(bwf, "macos_intel_cryptography_rebuild_instead_of_find_links_skip", return_value=True)
+    @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
+    @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
+    @patch.object(
+        bwf,
+        "find_links_wheel_build_skip",
+        return_value=(
+            True,
+            "find-links already has cryptography 49.0.0 matching >=2.1.4",
+        ),
+    )
+    def test_macos_intel_rebuilds_stale_cryptography_find_links(
+        self,
+        _mock_find_links,
+        _mock_pypi,
+        _mock_armv7,
+        _mock_rebuild,
+    ) -> None:
+        self.assertFalse(
+            bwf._dependent_requirement_skip_line("cryptography>=2.1.4", force_interpreter=True),
+        )
+
     @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
