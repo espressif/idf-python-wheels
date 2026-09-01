@@ -72,6 +72,17 @@ class TestNativeImportGuard(unittest.TestCase):
         names = {entry.name for entry in cfg.packages}
         self.assertIn("cffi", names)
         self.assertIn("psutil", names)
+        self.assertIn("pillow", names)
+        self.assertIn("pyyaml", names)
+        self.assertIn("brotli", names)
+        self.assertIn("pycryptodome", names)
+
+    def test_loads_deeper_native_imports(self) -> None:
+        guarded = native_import_guard_by_name()
+        self.assertEqual(guarded["pillow"].imports, ("from PIL import Image",))
+        self.assertEqual(guarded["pyyaml"].imports, ("from yaml import CSafeLoader",))
+        self.assertEqual(guarded["brotli"].imports, ("import brotli",))
+        self.assertEqual(guarded["pycryptodome"].imports, ("from Crypto.Cipher import AES",))
 
     def test_pure_any_wheel_name(self) -> None:
         self.assertTrue(is_pure_any_wheel_name("six-1.16.0-py2.py3-none-any.whl"))

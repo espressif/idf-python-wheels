@@ -56,3 +56,16 @@ packages:
     imports:
       - import psutil
       - print("psutil import OK", psutil.__version__)
+  # Linux --no-binary rebuilds: top-level import can succeed without loading the C extension.
+  - package_name: pillow
+    imports:
+      - from PIL import Image
+  - package_name: pyyaml
+    imports:
+      - from yaml import CSafeLoader
+  - package_name: brotli
+    imports:
+      - import brotli
+  - package_name: pycryptodome
+    imports:
+      - from Crypto.Cipher import AES
