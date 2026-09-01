@@ -17,7 +17,9 @@ from pathlib import Path
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
+from packaging.utils import InvalidWheelFilename
 from packaging.utils import canonicalize_name
+from packaging.utils import parse_wheel_filename
 
 from _helper_functions import _REPO_ROOT
 from _helper_functions import DEFAULT_WHEEL_DIR
@@ -30,10 +32,78 @@ from _helper_functions import manylinux_glibc_tags_in_name
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 
-# macOS: ``pip wheel --only-binary :all:`` so CI does not sdist-compile against the
-# runner SDK (higher ``macosx_*`` tags steal pip preference; local ``.so`` can SIGABRT).
-# ``--no-binary cryptography`` on Intel still wins (OpenSSL 4 rebuild).
+# macOS: ``pip wheel --only-binary :all:`` first so CI does not sdist-compile against
+# the runner SDK (higher ``macosx_*`` tags steal pip preference; local ``.so`` can SIGABRT).
+# Retry without that flag when a requirement or dependency has no binary wheel.
+# ``--no-binary cryptography`` on Intel still wins (OpenSSL 4 rebuild) and is not pruned.
 _MACOSX_PLAT_TAG = re.compile(r"macosx_(\d+)_(\d+)_([a-z0-9_]+)", re.IGNORECASE)
+# PEP 425: ``cp`` + one-digit major + remaining digits as minor (``cp38``, ``cp310``).
+_CPYTHON_INTERP = re.compile(r"^cp(?P<major>\d)(?P<minor>\d{1,})$")
+
+
+def _wheel_python_abi_key(wheel_name: str) -> tuple[str, str] | None:
+    """Sorted interpreter / ABI tags from a wheel filename (compressed sets joined)."""
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        return None
+    interpreters = tuple(sorted({tag.interpreter for tag in tags}))
+    abis = tuple(sorted({tag.abi for tag in tags}))
+    if not interpreters:
+        return None
+    return ",".join(interpreters), ",".join(abis)
+
+
+def _wheel_cpython_ranges(wheel_name: str) -> list[tuple[tuple[int, int], tuple[int, int] | None]]:
+    """CPython versions a wheel can serve: ``(min, max)`` with ``max`` None meaning unbounded."""
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        return []
+    ranges: list[tuple[tuple[int, int], tuple[int, int] | None]] = []
+    seen: set[tuple[tuple[int, int], tuple[int, int] | None]] = set()
+    for tag in tags:
+        match = _CPYTHON_INTERP.fullmatch(tag.interpreter)
+        if not match:
+            continue
+        ver = (int(match.group("major")), int(match.group("minor")))
+        if tag.abi == "abi3":
+            item: tuple[tuple[int, int], tuple[int, int] | None] = (ver, None)
+        elif tag.abi == tag.interpreter or tag.abi.startswith("cp"):
+            item = (ver, ver)
+        else:
+            continue
+        if item not in seen:
+            seen.add(item)
+            ranges.append(item)
+    return ranges
+
+
+def _cpython_ranges_overlap(
+    left: list[tuple[tuple[int, int], tuple[int, int] | None]],
+    right: list[tuple[tuple[int, int], tuple[int, int] | None]],
+) -> bool:
+    for a_min, a_max in left:
+        for b_min, b_max in right:
+            start = max(a_min, b_min)
+            ends = [bound for bound in (a_max, b_max) if bound is not None]
+            if not ends or start <= min(ends):
+                return True
+    return False
+
+
+def _wheels_compete_for_same_cpython(name_a: str, name_b: str) -> bool:
+    """True when pip could consider both wheels for the same CPython interpreter.
+
+    Exclusive ABIs (``cp311-cp311`` vs ``cp312-cp312``) do not compete. ``abi3``
+    wheels compete with each other and with exclusive wheels they can serve, so a
+    ``cp36-abi3`` PyPI tag still wins over a CI ``cp311-cp311`` sibling.
+    """
+    left = _wheel_cpython_ranges(name_a)
+    right = _wheel_cpython_ranges(name_b)
+    if left and right:
+        return _cpython_ranges_overlap(left, right)
+    return _wheel_python_abi_key(name_a) == _wheel_python_abi_key(name_b)
 
 
 def get_macos_only_binary_args() -> list[str]:
@@ -41,6 +111,85 @@ def get_macos_only_binary_args() -> list[str]:
     if platform.system() != "Darwin":
         return []
     return ["--only-binary", ":all:"]
+
+
+def without_only_binary_all(args: list[str]) -> list[str] | None:
+    """Return ``args`` without ``--only-binary :all:``, or ``None`` if that flag is absent."""
+    out: list[str] = []
+    found = False
+    i = 0
+    while i < len(args):
+        if args[i] == "--only-binary" and i + 1 < len(args) and args[i + 1] == ":all:":
+            found = True
+            i += 2
+            continue
+        out.append(args[i])
+        i += 1
+    return out if found else None
+
+
+def run_pip_wheel(
+    requirement: str,
+    extra_args: list[str] | None = None,
+    *,
+    find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``pip wheel``. On macOS, retry without ``--only-binary :all:`` if binaries are missing."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "wheel",
+        requirement,
+        *pip_wheel_invocation_args(find_links_dir),
+        *(extra_args or []),
+    ]
+    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    if out.returncode == 0:
+        return out
+    fallback = without_only_binary_all(cmd)
+    if fallback is None:
+        return out
+    print_color(
+        f"-- retry {requirement} without --only-binary :all: (no binary wheel for this requirement or a dependency)",
+        Fore.YELLOW,
+    )
+    return subprocess.run(fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+
+def _iter_unique_wheels(dest: Path):
+    """Yield ``*.whl`` under ``dest`` once per inode (``rglob`` can list symlink twins)."""
+    seen: set[object] = set()
+    for path in dest.rglob("*.whl"):
+        try:
+            if not path.is_file():
+                continue
+            st = path.stat()
+            # Windows FAT (and some NTFS views) report ``st_ino == 0`` for every file.
+            key: object = (st.st_dev, st.st_ino) if st.st_ino else path.resolve()
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        yield path
+
+
+def _macos_arch_families(arch: str) -> frozenset[str]:
+    """Machine families a ``macosx_*_<arch>`` tag can serve (``universal2`` is both)."""
+    token = arch.lower()
+    if token in {"universal2", "universal", "fat64"}:
+        return frozenset({"intel", "arm"})
+    if token in {"x86_64", "amd64", "intel", "i386", "i686"}:
+        return frozenset({"intel"})
+    if token in {"arm64", "aarch64", "arm64e"}:
+        return frozenset({"arm"})
+    return frozenset({token})
+
+
+def _macos_archs_compete(arch_a: str, arch_b: str) -> bool:
+    return bool(_macos_arch_families(arch_a) & _macos_arch_families(arch_b))
 
 
 def _macosx_deployment_and_arch(wheel_name: str) -> tuple[tuple[int, int], str] | None:
@@ -78,13 +227,18 @@ def prune_ci_macos_newer_than_pypi_mirror(
     Pip prefers the highest compatible ``macosx_*`` tag. A CI sdist build on
     ``macos-15-intel`` becomes ``macosx_15_0_x86_64`` and wins over the official
     ``macosx_10_9_x86_64`` PyPI copy on the same extra-index. Applies to every
-    distribution (not only psutil).
+    distribution (not only psutil). Only compares wheels that compete for the
+    same CPython (python+ABI family) and the same machine family (``x86_64`` /
+    ``intel`` / ``universal2``, or ``arm64`` / ``universal2``), so ``cp311-cp311``
+    is not dropped just because ``cp312-cp312`` has a lower tag. Intel
+    cryptography OpenSSL 4 rebuilds are kept even when a lower PyPI tag exists.
     """
     dest = Path(wheel_dir)
     if not dest.is_dir():
         return 0
-    groups: dict[tuple[str, str, str], list[tuple[tuple[int, int], Path]]] = {}
-    for path in dest.rglob("*.whl"):
+    keep_intel_cryptography = get_current_platform() == "macos_x86_64"
+    groups: dict[tuple[str, str], list[tuple[tuple[int, int], str, Path]]] = {}
+    for path in _iter_unique_wheels(dest):
         parsed = parse_wheel_name(path.name)
         if not parsed:
             continue
@@ -92,22 +246,31 @@ def prune_ci_macos_newer_than_pypi_mirror(
         if not tag:
             continue
         deployment, arch = tag
-        groups.setdefault((parsed[0], parsed[1], arch), []).append((deployment, path))
+        groups.setdefault((parsed[0], parsed[1]), []).append((deployment, arch, path))
 
     removed = 0
-    for (dist, version, arch), items in groups.items():
+    for (dist, version), items in groups.items():
+        if keep_intel_cryptography and dist == canonicalize_name("cryptography"):
+            continue
         if len(items) < 2:
             continue
-        lowest = min(deployment for deployment, _path in items)
-        for deployment, path in items:
-            if deployment <= lowest:
+        for deployment, arch, path in items:
+            lower_siblings = [
+                other_dep
+                for other_dep, other_arch, other in items
+                if other_dep < deployment
+                and _macos_archs_compete(arch, other_arch)
+                and _wheels_compete_for_same_cpython(path.name, other.name)
+            ]
+            if not lower_siblings:
                 continue
+            keep_tag = min(lower_siblings)
             print_color(
                 f"-- removed {path.name} (macosx_{deployment[0]}_{deployment[1]}_{arch}; "
-                f"keeping macosx_{lowest[0]}_{lowest[1]} for {dist}=={version})",
+                f"keeping macosx_{keep_tag[0]}_{keep_tag[1]} for {dist}=={version})",
                 Fore.YELLOW,
             )
-            path.unlink()
+            path.unlink(missing_ok=True)
             removed += 1
     return removed
 
@@ -129,16 +292,14 @@ def pip_wheel_standard_args(find_links_dir: Path | str = DEFAULT_WHEEL_DIR) -> l
 
 
 def pip_wheel_invocation_args(
-    requirement_name: str,
     find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
 ) -> list[str]:
-    """``pip wheel`` flags for a single requirement (may drop ``--no-build-isolation`` on ARMv7)."""
+    """``pip wheel`` flags (may drop ``--no-build-isolation`` on ARMv7)."""
     args = list(pip_wheel_standard_args(find_links_dir))
     if is_linux_armv7_runner():
         # cffi 2.x sdists fail metadata prep under host setuptools + --no-build-isolation
         # (project.license validation), including transitive cffi pulls (e.g. esptool → cryptography).
         # PEP 517 isolation matches build_requirements install on ARMv7 Docker.
-        del requirement_name  # per-requirement env still via armv7_pip_wheel_subprocess_env()
         args = [arg for arg in args if arg != "--no-build-isolation"]
     return args
 
@@ -178,19 +339,26 @@ def prune_ci_manylinux_newer_than_228(
     dest = Path(wheel_dir)
     canonical = canonicalize_name(package_name)
     version = str(package_version)
-    removed = 0
+    candidates: list[Path] = []
     for path in dest.glob("*.whl"):
         parsed = parse_wheel_name(path.name)
         if not parsed or parsed[0] != canonical or parsed[1] != version:
             continue
+        candidates.append(path)
+    mirrors = [path for path in candidates if _wheel_has_manylinux_228_tag(path.name)]
+    removed = 0
+    for path in candidates:
         glibc = _wheel_highest_manylinux_glibc(path.name)
-        if glibc is not None and glibc > (2, 28) and not _wheel_has_manylinux_228_tag(path.name):
-            print_color(
-                f"-- removed {path.name} (CI manylinux_{glibc[0]}_{glibc[1]}; PyPI 2_28 mirror kept)",
-                Fore.YELLOW,
-            )
-            path.unlink()
-            removed += 1
+        if glibc is None or glibc <= (2, 28) or _wheel_has_manylinux_228_tag(path.name):
+            continue
+        if mirrors and not any(_wheels_compete_for_same_cpython(path.name, mirror.name) for mirror in mirrors):
+            continue
+        print_color(
+            f"-- removed {path.name} (CI manylinux_{glibc[0]}_{glibc[1]}; PyPI 2_28 mirror kept)",
+            Fore.YELLOW,
+        )
+        path.unlink(missing_ok=True)
+        removed += 1
     return removed
 
 
@@ -199,14 +367,16 @@ def prune_ci_manylinux_newer_than_228_when_228_mirror_present(
     wheel_dir: Path | str = DEFAULT_WHEEL_DIR,
     package_names: frozenset[str] | None = None,
 ) -> int:
-    """Drop manylinux > ``2_28`` when a ``2_28`` wheel exists for the same dist+version.
+    """Drop manylinux > ``2_28`` when a competing ``2_28`` wheel exists.
 
     Used after merging matrix artifacts and after ``repair_wheels`` so CI or auditwheel
     outputs cannot coexist with PyPI ``manylinux_2_28`` mirrors on the upload index.
+    A ``2_28`` wheel for one exclusive ABI does not prune ``>2_28`` wheels for
+    another interpreter; ``abi3`` mirrors still prune competing newer tags.
     """
     dest = Path(wheel_dir)
     by_dist_version: dict[tuple[str, str], list[Path]] = {}
-    for path in dest.rglob("*.whl"):
+    for path in _iter_unique_wheels(dest):
         parsed = parse_wheel_name(path.name)
         if not parsed:
             continue
@@ -218,18 +388,22 @@ def prune_ci_manylinux_newer_than_228_when_228_mirror_present(
 
     removed = 0
     for (dist, version), paths in by_dist_version.items():
-        if not any(_wheel_has_manylinux_228_tag(p.name) for p in paths):
+        mirrors = [path for path in paths if _wheel_has_manylinux_228_tag(path.name)]
+        if not mirrors:
             continue
         for path in paths:
             glibc = _wheel_highest_manylinux_glibc(path.name)
-            if glibc is not None and glibc > (2, 28) and not _wheel_has_manylinux_228_tag(path.name):
-                print_color(
-                    f"-- removed {path.name} (manylinux_{glibc[0]}_{glibc[1]}; "
-                    f"keeping manylinux_2_28 for {dist}=={version})",
-                    Fore.YELLOW,
-                )
-                path.unlink()
-                removed += 1
+            if glibc is None or glibc <= (2, 28) or _wheel_has_manylinux_228_tag(path.name):
+                continue
+            if not any(_wheels_compete_for_same_cpython(path.name, mirror.name) for mirror in mirrors):
+                continue
+            print_color(
+                f"-- removed {path.name} (manylinux_{glibc[0]}_{glibc[1]}; "
+                f"keeping manylinux_2_28 for {dist}=={version})",
+                Fore.YELLOW,
+            )
+            path.unlink(missing_ok=True)
+            removed += 1
     return removed
 
 

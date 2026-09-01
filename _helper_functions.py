@@ -142,6 +142,28 @@ def _macos_x86_64_cryptography_versions_in_find_links(
     return versions
 
 
+# cryptography 49+ dropped official macOS x86_64 wheels and is built here against OpenSSL 4.
+# Older pins still have PyPI Intel wheels; their openssl-sys does not support OpenSSL 4.
+_CRYPTOGRAPHY_MACOS_INTEL_OPENSSL4_SDIST_MIN = Version("49")
+
+
+def cryptography_pin_needs_macos_intel_openssl4_sdist(req: Requirement) -> bool:
+    """True when this pin can resolve to cryptography 49+ (OpenSSL 4 Intel sdist)."""
+    spec = req.specifier
+    if not spec:
+        return True
+    if _CRYPTOGRAPHY_MACOS_INTEL_OPENSSL4_SDIST_MIN in spec:
+        return True
+    for item in spec:
+        if item.operator in (">=", ">", "==", "==="):
+            try:
+                if Version(str(item.version)) >= _CRYPTOGRAPHY_MACOS_INTEL_OPENSSL4_SDIST_MIN:
+                    return True
+            except InvalidVersion:
+                continue
+    return False
+
+
 def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
     req: Requirement,
     find_links_reason: str,
@@ -151,11 +173,14 @@ def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
 
     Official 49+ wheels dropped macOS x86_64. A matching older Intel wheel (or a
     Linux/Windows wheel seeded into find-links) must not skip the OpenSSL 4 build
-    for a newer PyPI release. Obsolete upper-bound pins still skip.
+    for a newer PyPI release. Pins that cannot reach 49+ (``<43``, ``<45``,
+    ``<49``) keep the PyPI Intel wheel: those sdists fail against OpenSSL 4.
     """
     if get_current_platform() != "macos_x86_64":
         return False
     if canonicalize_name(req.name) != canonicalize_name("cryptography"):
+        return False
+    if not cryptography_pin_needs_macos_intel_openssl4_sdist(req):
         return False
     if "none match" in find_links_reason or "newer than obsolete pin" in find_links_reason:
         return False
@@ -170,6 +195,8 @@ def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
         latest_ver = Version(latest[0])
     except InvalidVersion:
         return True
+    if latest_ver < _CRYPTOGRAPHY_MACOS_INTEL_OPENSSL4_SDIST_MIN:
+        return False
     local = _macos_x86_64_cryptography_versions_in_find_links(find_links_dir)
     if local and max(local) >= latest_ver:
         return False
@@ -518,13 +545,19 @@ def force_interpreter_skip_package(canonical_dist_name: str) -> bool:
 
 
 def get_cryptography_macos_intel_pip_wheel_args(requirement_name: str) -> list[str]:
-    """``--no-binary cryptography`` on macOS Intel (OpenSSL 4 sdist build in CI)."""
+    """``--no-binary cryptography`` on macOS Intel for 49+ (OpenSSL 4 sdist; no PyPI x86_64)."""
     if get_current_platform() != "macos_x86_64":
         return []
-    match = re.match(r"^([a-zA-Z0-9_.-]+)", str(requirement_name).strip())
-    if not match:
+    line = str(requirement_name).strip()
+    if not line:
         return []
-    if canonicalize_name(match.group(1)) != canonicalize_name("cryptography"):
+    try:
+        req = Requirement(line)
+    except InvalidRequirement:
+        return []
+    if canonicalize_name(req.name) != canonicalize_name("cryptography"):
+        return []
+    if not cryptography_pin_needs_macos_intel_openssl4_sdist(req):
         return []
     return ["--no-binary", "cryptography"]
 

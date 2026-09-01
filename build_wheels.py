@@ -6,8 +6,6 @@
 import json
 import os
 import re
-import subprocess
-import sys
 
 from typing import Dict
 from typing import List
@@ -43,8 +41,9 @@ from _helper_functions import remove_find_links_wheels_for_package
 from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
-from wheel_compat_policy import pip_wheel_invocation_args
 from wheel_compat_policy import pip_wheel_or_mirror_success
+from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
+from wheel_compat_policy import run_pip_wheel
 from yaml_list_adapter import YAMLListAdapter
 
 # GLOBAL VARIABLES
@@ -348,6 +347,8 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
             else:
                 print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
                 skipped_wheels += 1
+                # Find-links skip never runs pip_wheel_or_mirror_success.
+                prune_ci_macos_newer_than_pypi_mirror(wheel_dir=dir)
                 continue
         skip, reason = bounded_pin_without_find_links_skip(requirement, dir)
         if skip:
@@ -361,40 +362,28 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
                     f"-- removed {removed} find-links wheel(s) for {requirement.name} (ARMv7 sdist rebuild)",
                     Fore.YELLOW,
                 )
-        # non classic requirement wheel build
+        # non classic requirement wheel build (e.g. '--only-binary cryptography' from IDF constraints)
         if non_classic_requirement:
             pattern = re.compile(r"(--[^ ]*)(.*)")
             match = pattern.search(non_classic_requirement[0])
-            if match:
-                argument = match.group(1).strip()
-                arg_param = match.group(2).strip()
-            if arg_param in requirement.name:
-                out = subprocess.run(
-                    [
-                        f"{sys.executable}",
-                        "-m",
-                        "pip",
-                        "wheel",
-                        f"{requirement}",
-                        "--find-links",
-                        f"{dir}",
-                        "--find-links",
-                        "https://pypi.org/simple/",
-                        "--wheel-dir",
-                        f"{dir}",
-                        "--no-cache-dir",
-                        "--no-build-isolation",
-                        f"{argument}",
-                        f"{arg_param}",
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+            argument = match.group(1).strip() if match else ""
+            arg_param = match.group(2).strip() if match else ""
+            if arg_param and arg_param in requirement.name:
+                extra = [argument, arg_param] if argument else []
+                out = run_pip_wheel(
+                    str(requirement),
+                    extra,
+                    find_links_dir=dir,
                     env=armv7_pip_wheel_subprocess_env(str(requirement)),
                 )
                 print(out.stdout.decode("utf-8", errors="replace"))
                 if out.stderr:
                     print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
                 non_classic_requirement.remove(non_classic_requirement[0])
+                if pip_wheel_or_mirror_success(str(requirement), out.returncode, wheel_dir=dir):
+                    succeeded_wheels += 1
+                else:
+                    failed_wheels += 1
                 continue
 
         # requirement wheel build
@@ -403,20 +392,10 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
         crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(str(requirement))
         extra_pip_args = get_pip_wheel_extra_args(str(requirement))
 
-        out = subprocess.run(
-            [
-                f"{sys.executable}",
-                "-m",
-                "pip",
-                "wheel",
-                f"{requirement}",
-            ]
-            + pip_wheel_invocation_args(str(requirement), dir)
-            + no_binary_args
-            + crypto_intel_args
-            + extra_pip_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        out = run_pip_wheel(
+            str(requirement),
+            no_binary_args + crypto_intel_args + extra_pip_args,
+            find_links_dir=dir,
             env=armv7_pip_wheel_subprocess_env(str(requirement)),
         )
 

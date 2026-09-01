@@ -16,6 +16,7 @@ from typing import Any
 
 import yaml
 
+from packaging.specifiers import InvalidSpecifier
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion
@@ -48,11 +49,14 @@ def _version_matches_yaml_spec(raw: Any, version: Version) -> bool:
     items = _yaml_scalar_or_list(raw)
     if not items:
         return True
-    specs = [SpecifierSet(item) for item in items]
-    operators = [spec.operator for spec_set in specs for spec in spec_set]
-    if operators and all(op in ("==", "===") for op in operators):
-        return any(version in spec_set for spec_set in specs)
-    return version in SpecifierSet(",".join(items))
+    try:
+        specs = [SpecifierSet(item) for item in items]
+        operators = [spec.operator for spec_set in specs for spec in spec_set]
+        if operators and all(op in ("==", "===") for op in operators):
+            return any(version in spec_set for spec_set in specs)
+        return version in SpecifierSet(",".join(items))
+    except InvalidSpecifier as exc:
+        raise ValueError(f"invalid native_import_guard.yaml version/python specifier {items!r}: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -186,18 +190,35 @@ def wheel_top_level_modules(
     return tuple(names)
 
 
+def _is_importable_module_name(name: str) -> bool:
+    """True when ``name`` is safe to pass to ``import`` (identifier or dotted identifiers)."""
+    return bool(name) and all(part.isidentifier() for part in name.split("."))
+
+
 def default_native_import_statements(
     wheel_path: Path | str,
     skip_top_level: frozenset[str] | None = None,
 ) -> tuple[str, ...]:
-    """``import <top_level>`` statements for a native wheel without custom YAML imports."""
-    tops = wheel_top_level_modules(wheel_path, skip_top_level)
-    if tops:
-        return tuple(f"import {mod}" for mod in tops)
-    parsed = parse_wheel_name(Path(wheel_path).name)
-    if not parsed:
+    """One ``import <top_level>`` for a native wheel without custom YAML imports.
+
+    Installs in ``test_wheels_install.py`` use ``--no-deps``. Guessing the import
+    from the distribution name (when ``top_level.txt`` is missing) or importing
+    every top-level name often fails. Prefer the public name that matches the
+    distribution; otherwise the first public identifier. Skip the probe if none.
+    """
+    tops = [name for name in wheel_top_level_modules(wheel_path, skip_top_level) if _is_importable_module_name(name)]
+    if not tops:
         return ()
-    return (f"import {parsed[0].replace('-', '_')}",)
+    parsed = parse_wheel_name(Path(wheel_path).name)
+    dist_mod = parsed[0].replace("-", "_") if parsed else ""
+    public = [name for name in tops if not name.startswith("_")]
+    if dist_mod in tops:
+        chosen = dist_mod
+    elif public:
+        chosen = public[0]
+    else:
+        chosen = tops[0]
+    return (f"import {chosen}",)
 
 
 def resolve_native_import_statements(
@@ -210,8 +231,10 @@ def resolve_native_import_statements(
     """Import statements for a wheel, or ``None`` to skip the probe.
 
     First matching YAML row (name + platform / python / version) wins: ``skip: true``
-    skips; ``imports`` override the default. Unlisted platform wheels use
-    ``top_level.txt`` when ``probe_unlisted`` is true.
+    skips; ``imports`` override the default. A row that does not match its filters
+    is ignored (the package is treated as unlisted). Unlisted platform wheels use
+    ``top_level.txt`` when ``probe_unlisted`` is true. Use ``skip: true`` when a
+    probe should not run.
     """
     path = Path(wheel_path)
     parsed = parse_wheel_name(path.name)
@@ -241,3 +264,39 @@ def resolve_native_import_statements(
         return None
     stmts = default_native_import_statements(path, cfg.skip_top_level)
     return stmts or None
+
+
+def package_import_statements(
+    package_name: str,
+    *,
+    config: NativeImportGuardConfig | None = None,
+    repo_root: Path | None = None,
+    current_platform: str | None = None,
+    python_version: str | None = None,
+    wheel_version: str | None = None,
+) -> tuple[str, ...] | None:
+    """YAML ``imports`` for a distribution name after platform / python / version filters.
+
+    Used by ``scripts/run_native_import_probe.py`` (no wheel path). ``skip`` and
+    unmatched filters return ``None``; unlisted names are not default-probed.
+    """
+    cfg = config if config is not None else load_native_import_guard(repo_root)
+    plat = current_platform if current_platform is not None else get_current_platform()
+    py_ver = python_version if python_version is not None else f"{sys.version_info.major}.{sys.version_info.minor}"
+    canonical = canonicalize_name(package_name)
+    for entry in cfg.packages:
+        if entry.name != canonical:
+            continue
+        if not _native_import_entry_matches(
+            entry,
+            current_platform=plat,
+            wheel_version=wheel_version,
+            python_version=py_ver,
+        ):
+            continue
+        if entry.skip:
+            return None
+        if entry.imports:
+            return entry.imports
+        break
+    return None

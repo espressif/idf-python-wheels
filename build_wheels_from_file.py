@@ -8,8 +8,6 @@ from __future__ import annotations
 import argparse
 import os
 import platform
-import subprocess
-import sys
 
 from pathlib import Path
 
@@ -32,12 +30,19 @@ from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_l
 from _helper_functions import print_color
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
-from wheel_compat_policy import pip_wheel_invocation_args
 from wheel_compat_policy import pip_wheel_or_mirror_success
+from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
+from wheel_compat_policy import run_pip_wheel
 
 
 def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:
-    """Return pip --no-binary for this package so pip cannot reuse e.g. cp311-abi3 wheels on 3.13."""
+    """Return pip --no-binary for this package so pip cannot reuse e.g. cp311-abi3 wheels on 3.13.
+
+    Never used on macOS: ``--no-binary`` would override ``--only-binary :all:`` and
+    sdist-compile a higher ``macosx_*`` tag (the psutil 7.2.2 SIGABRT path).
+    """
+    if platform.system() != "Linux":
+        return []
     line = requirement_line.strip()
     if not line:
         return []
@@ -51,8 +56,8 @@ def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:
 
 
 def _apply_force_interpreter_binary(cli_flag: bool) -> bool:
-    """Linux/macOS only: forcing sdist builds for cryptography etc. is unreliable on Windows CI."""
-    return cli_flag and platform.system() != "Windows"
+    """Linux only. Windows source builds are unreliable; macOS prefers PyPI ``--only-binary``."""
+    return bool(cli_flag) and platform.system() == "Linux"
 
 
 def _pypi_preflight_skip_line(requirement_line: str) -> bool:
@@ -89,6 +94,8 @@ def _dependent_requirement_skip_line(requirement_line: str, *, force_interpreter
                 )
             else:
                 print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+                # Find-links skip never runs pip_wheel_or_mirror_success.
+                prune_ci_macos_newer_than_pypi_mirror()
                 return True
     skip, reason = bounded_pin_without_find_links_skip(req)
     if skip:
@@ -126,7 +133,8 @@ parser.add_argument(
     help=(
         "For each requirement, pass --no-binary <pkg> so pip builds a wheel for the current "
         "interpreter instead of reusing a compatible abi3 / older cpXY wheel from --find-links. "
-        "Ignored on Windows (source builds for e.g. cryptography are not used in CI there). "
+        "Ignored on Windows (source builds for e.g. cryptography are not used in CI there) "
+        "and on macOS (``--only-binary :all:`` keeps official macosx tags). "
         "Some packages are always skipped (e.g. cryptography, pydantic-core, argon2-cffi-bindings, PyNaCl, PyObjC)."
     ),
 )
@@ -175,21 +183,9 @@ if requirements_dir:
         extra_pip_args = get_pip_wheel_extra_args(requirement)
         force_interpreter_args = _force_interpreter_no_binary_args(requirement) if force_interpreter else []
 
-        out = subprocess.run(
-            [
-                f"{sys.executable}",
-                "-m",
-                "pip",
-                "wheel",
-                requirement,
-            ]
-            + pip_wheel_invocation_args(requirement)
-            + no_binary_args
-            + crypto_intel_args
-            + extra_pip_args
-            + force_interpreter_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        out = run_pip_wheel(
+            requirement,
+            no_binary_args + crypto_intel_args + extra_pip_args + force_interpreter_args,
             env=armv7_pip_wheel_subprocess_env(requirement),
         )
 
@@ -238,21 +234,9 @@ else:
         extra_pip_args = get_pip_wheel_extra_args(requirement)
         force_interpreter_args = _force_interpreter_no_binary_args(requirement) if force_interpreter else []
 
-        out = subprocess.run(
-            [
-                f"{sys.executable}",
-                "-m",
-                "pip",
-                "wheel",
-                f"{requirement}",
-            ]
-            + pip_wheel_invocation_args(requirement)
-            + no_binary_args
-            + crypto_intel_args
-            + extra_pip_args
-            + force_interpreter_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        out = run_pip_wheel(
+            requirement,
+            no_binary_args + crypto_intel_args + extra_pip_args + force_interpreter_args,
             env=armv7_pip_wheel_subprocess_env(requirement),
         )
 

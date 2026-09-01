@@ -5,7 +5,8 @@
 #  run imports — or skip — and fail CI if import crashes or errors."
 #
 # Top-level:
-#   probe_unlisted   — probe platform wheels not listed below via import <top_level> (default true)
+#   probe_unlisted   — probe unlisted platform wheels via one import from top_level.txt
+#                      (default true; skipped when top_level.txt is missing — installs use --no-deps)
 #   skip_pure_any    — skip *-none-any.whl (default true)
 #   skip_top_level   — top_level.txt names ignored when generating default imports
 #
@@ -17,6 +18,8 @@
 #                   macos_x86_64 | macos_arm64 (string or list). Omitted = all platforms.
 #   python        — python_version specifier(s), e.g. '>=3.10' or ['==3.8', '==3.9']
 #   version       — package version specifier(s), e.g. '>=49' or ['>=1.0', '<2']
+#   Unmatched filters treat the package as unlisted (probe_unlisted default import).
+#   Use skip: true when a probe should not run.
 #
 # ``import cffi`` alone is not enough — a broken auditwheel manylinux tag can segfault only in _cffi_backend.
 
