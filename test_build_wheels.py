@@ -42,8 +42,10 @@ from wheel_compat_policy import pip_wheel_or_mirror_success
 from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
 from wheel_compat_policy import prune_ci_manylinux_newer_than_228
 from wheel_compat_policy import prune_ci_manylinux_newer_than_228_when_228_mirror_present
+from wheel_compat_policy import run_pip_wheel
 from wheel_compat_policy import should_skip_linux_auditwheel_for_pypi_mirror
 from wheel_compat_policy import should_skip_macos_delocate_for_pypi_mirror
+from wheel_compat_policy import without_only_binary_all
 from yaml_list_adapter import YAMLListAdapter
 
 
@@ -408,21 +410,21 @@ class TestPipWheelInvocationArgs(unittest.TestCase):
     def test_armv7_cffi_uses_build_isolation(self, _armv7: object) -> None:
         from wheel_compat_policy import pip_wheel_invocation_args
 
-        args = pip_wheel_invocation_args("cffi>=1.15.0")
+        args = pip_wheel_invocation_args()
         self.assertNotIn("--no-build-isolation", args)
 
     @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=True)
     def test_armv7_any_package_uses_build_isolation(self, _armv7: object) -> None:
         from wheel_compat_policy import pip_wheel_invocation_args
 
-        args = pip_wheel_invocation_args("esptool~=4.9")
+        args = pip_wheel_invocation_args()
         self.assertNotIn("--no-build-isolation", args)
 
     @patch("wheel_compat_policy.is_linux_armv7_runner", return_value=False)
     def test_non_armv7_keeps_no_build_isolation(self, _armv7: object) -> None:
         from wheel_compat_policy import pip_wheel_invocation_args
 
-        args = pip_wheel_invocation_args("cffi>=1.15.0")
+        args = pip_wheel_invocation_args()
         self.assertIn("--no-build-isolation", args)
 
     @patch("wheel_compat_policy.platform.system", return_value="Darwin")
@@ -430,7 +432,7 @@ class TestPipWheelInvocationArgs(unittest.TestCase):
     def test_macos_pip_wheel_only_binary_all(self, _armv7: object, _sys: object) -> None:
         from wheel_compat_policy import pip_wheel_invocation_args
 
-        args = pip_wheel_invocation_args("psutil")
+        args = pip_wheel_invocation_args()
         only_at = args.index("--only-binary")
         self.assertEqual(args[only_at + 1], ":all:")
 
@@ -492,6 +494,105 @@ class TestMacosPypiMirrorPolicy(unittest.TestCase):
             only.write_bytes(b"local")
             self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 0)
             self.assertTrue(only.exists())
+
+    def test_prune_does_not_drop_other_interpreter_exclusive_abi(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep_311 = links / "cffi-1.17.1-cp311-cp311-macosx_10_9_x86_64.whl"
+            keep_312 = links / "cffi-1.17.1-cp312-cp312-macosx_15_0_x86_64.whl"
+            keep_311.write_bytes(b"pypi")
+            keep_312.write_bytes(b"ci")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 0)
+            self.assertTrue(keep_311.exists())
+            self.assertTrue(keep_312.exists())
+
+    @patch("wheel_compat_policy.get_current_platform", return_value="macos_x86_64")
+    def test_prune_keeps_intel_cryptography_rebuild(self, _plat: object) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            pypi = links / "cryptography-47.0.0-cp38-abi3-macosx_10_9_x86_64.whl"
+            rebuild = links / "cryptography-47.0.0-cp38-abi3-macosx_10_12_x86_64.whl"
+            pypi.write_bytes(b"pypi")
+            rebuild.write_bytes(b"openssl4")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 0)
+            self.assertTrue(pypi.exists())
+            self.assertTrue(rebuild.exists())
+
+    @patch("wheel_compat_policy.get_current_platform", return_value="macos_arm64")
+    def test_prune_still_drops_cryptography_on_arm(self, _plat: object) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "cryptography-47.0.0-cp38-abi3-macosx_10_9_x86_64.whl"
+            drop = links / "cryptography-47.0.0-cp38-abi3-macosx_15_0_x86_64.whl"
+            keep.write_bytes(b"pypi")
+            drop.write_bytes(b"ci")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
+
+    def test_prune_abi3_still_drops_competing_exclusive_higher_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl"
+            drop = links / "psutil-7.2.2-cp311-cp311-macosx_15_0_x86_64.whl"
+            keep.write_bytes(b"pypi")
+            drop.write_bytes(b"ci")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
+
+    def test_prune_x86_64_loses_to_lower_universal2_sibling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "cffi-1.17.1-cp311-cp311-macosx_11_0_universal2.whl"
+            drop = links / "cffi-1.17.1-cp311-cp311-macosx_15_0_x86_64.whl"
+            keep.write_bytes(b"pypi")
+            drop.write_bytes(b"ci")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
+
+    def test_cpython_ranges_parse_three_digit_tags(self) -> None:
+        from wheel_compat_policy import _wheel_cpython_ranges
+        from wheel_compat_policy import _wheels_compete_for_same_cpython
+
+        self.assertEqual(
+            _wheel_cpython_ranges("cryptography-49.0.0-cp311-abi3-macosx_10_12_x86_64.whl"),
+            [((3, 11), None)],
+        )
+        self.assertEqual(
+            _wheel_cpython_ranges("cffi-1.17.1-cp310-cp310-macosx_10_9_x86_64.whl"),
+            [((3, 10), (3, 10))],
+        )
+        self.assertTrue(
+            _wheels_compete_for_same_cpython(
+                "psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl",
+                "psutil-7.2.2-cp311-cp311-macosx_15_0_x86_64.whl",
+            )
+        )
+        self.assertTrue(
+            _wheels_compete_for_same_cpython(
+                "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.whl",
+                "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl",
+            )
+        )
+        self.assertFalse(
+            _wheels_compete_for_same_cpython(
+                "cffi-1.17.1-cp311-cp311-macosx_10_9_x86_64.whl",
+                "cffi-1.17.1-cp312-cp312-macosx_15_0_x86_64.whl",
+            )
+        )
+
+    def test_prune_intel_and_x86_64_compete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep = links / "psutil-7.2.2-cp36-abi3-macosx_10_9_intel.whl"
+            drop = links / "psutil-7.2.2-cp36-abi3-macosx_15_0_x86_64.whl"
+            keep.write_bytes(b"pypi")
+            drop.write_bytes(b"ci")
+            self.assertEqual(prune_ci_macos_newer_than_pypi_mirror(wheel_dir=links), 1)
+            self.assertTrue(keep.exists())
+            self.assertFalse(drop.exists())
 
 
 class TestParseWheelName(unittest.TestCase):
@@ -881,6 +982,36 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             self.assertEqual(env["PIP_NO_BINARY"], "cffi,argon2-cffi-bindings")
 
 
+class TestRunPipWheelPreferBinary(unittest.TestCase):
+    def test_without_only_binary_all_strips_flag(self) -> None:
+        stripped = without_only_binary_all(["pip", "wheel", "pkg", "--only-binary", ":all:", "--no-deps"])
+        self.assertEqual(stripped, ["pip", "wheel", "pkg", "--no-deps"])
+        self.assertIsNone(without_only_binary_all(["pip", "wheel", "pkg"]))
+
+    @patch("wheel_compat_policy.pip_wheel_invocation_args", return_value=["--only-binary", ":all:"])
+    @patch("wheel_compat_policy.subprocess.run")
+    def test_retries_without_only_binary_when_first_pip_fails(self, mock_run, _args) -> None:
+        fail = type("R", (), {"returncode": 1, "stdout": b"", "stderr": b"no binary"})()
+        ok = type("R", (), {"returncode": 0, "stdout": b"sdist ok", "stderr": b""})()
+        mock_run.side_effect = [fail, ok]
+        out = run_pip_wheel("sphinx_selective_exclude==1.0.3")
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(mock_run.call_count, 2)
+        first_cmd = mock_run.call_args_list[0][0][0]
+        retry_cmd = mock_run.call_args_list[1][0][0]
+        self.assertIn("--only-binary", first_cmd)
+        self.assertNotIn("--only-binary", retry_cmd)
+
+    @patch("wheel_compat_policy.pip_wheel_invocation_args", return_value=["--find-links", "."])
+    @patch("wheel_compat_policy.subprocess.run")
+    def test_no_retry_when_only_binary_absent(self, mock_run, _args) -> None:
+        fail = type("R", (), {"returncode": 1, "stdout": b"", "stderr": b"fail"})()
+        mock_run.return_value = fail
+        out = run_pip_wheel("cffi")
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(mock_run.call_count, 1)
+
+
 class TestPipWheelOrMirrorSuccess(unittest.TestCase):
     @patch("wheel_compat_policy.mirror_pypi_manylinux228_wheel", return_value=True)
     def test_pip_success_still_mirrors_and_returns_true(self, mock_mirror):
@@ -987,6 +1118,30 @@ class TestPruneCiManylinux228(unittest.TestCase):
             self.assertTrue(compound.exists())
             self.assertFalse(ci_only.exists())
 
+    def test_prune_when_228_mirror_keeps_other_interpreter_exclusive_abi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep_228 = links / "cffi-1.17.1-cp311-cp311-manylinux_2_28_x86_64.whl"
+            keep_234 = links / "cffi-1.17.1-cp312-cp312-manylinux_2_34_x86_64.whl"
+            keep_228.write_bytes(b"")
+            keep_234.write_bytes(b"")
+            removed = prune_ci_manylinux_newer_than_228_when_228_mirror_present(wheel_dir=links)
+            self.assertEqual(removed, 0)
+            self.assertTrue(keep_228.exists())
+            self.assertTrue(keep_234.exists())
+
+    def test_prune_named_version_keeps_other_interpreter_exclusive_abi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            keep_228 = links / "cffi-1.17.1-cp311-cp311-manylinux_2_28_x86_64.whl"
+            keep_234 = links / "cffi-1.17.1-cp312-cp312-manylinux_2_34_x86_64.whl"
+            keep_228.write_bytes(b"")
+            keep_234.write_bytes(b"")
+            removed = prune_ci_manylinux_newer_than_228("cffi", "1.17.1", wheel_dir=links)
+            self.assertEqual(removed, 0)
+            self.assertTrue(keep_228.exists())
+            self.assertTrue(keep_234.exists())
+
 
 class TestSkipAuditwheelForPypiMirror(unittest.TestCase):
     @patch("platform.machine", return_value="x86_64")
@@ -1017,6 +1172,15 @@ class TestCryptographyMacosIntelBuild(unittest.TestCase):
     def test_no_binary_for_cryptography_on_intel(self):
         args = get_cryptography_macos_intel_pip_wheel_args("cryptography>=49")
         self.assertEqual(args, ["--no-binary", "cryptography"])
+        self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("cryptography"), ["--no-binary", "cryptography"])
+        self.assertEqual(
+            get_cryptography_macos_intel_pip_wheel_args("cryptography>=50"), ["--no-binary", "cryptography"]
+        )
+
+    def test_no_binary_skipped_for_pre_49_cryptography_pins(self):
+        self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("cryptography<43,>=2.1.4"), [])
+        self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("cryptography<45,>=2.1.4"), [])
+        self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("cryptography<49,>=2.1.4"), [])
 
     def test_no_binary_only_for_cryptography(self):
         self.assertEqual(get_cryptography_macos_intel_pip_wheel_args("requests"), [])
@@ -1077,6 +1241,32 @@ class TestCryptographyMacosIntelBuild(unittest.TestCase):
             macos_intel_cryptography_rebuild_instead_of_find_links_skip(
                 req,
                 "find-links has cryptography up to 49.0.0 but none match <43,>=2.1.4",
+            )
+        )
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["42.0.8"])
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_do_not_rebuild_pre_49_pin_behind_pypi(self, _mock_plat, _mock_pypi):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "cryptography-41.0.7-cp38-abi3-macosx_10_12_x86_64.whl").write_bytes(b"")
+            req = Requirement("cryptography<43,>=2.1.4")
+            self.assertFalse(
+                macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                    req,
+                    "find-links already has cryptography 41.0.7 matching <43,>=2.1.4",
+                    links,
+                )
+            )
+
+    @patch("_helper_functions.matching_release_version_strings", return_value=["44.0.3"])
+    @patch("_helper_functions.get_current_platform", return_value="macos_x86_64")
+    def test_do_not_rebuild_cryptography_lt_45_behind_pypi(self, _mock_plat, _mock_pypi):
+        req = Requirement("cryptography<45,>=2.1.4")
+        self.assertFalse(
+            macos_intel_cryptography_rebuild_instead_of_find_links_skip(
+                req,
+                "find-links already has cryptography 41.0.7 matching <45,>=2.1.4",
             )
         )
 

@@ -149,7 +149,7 @@ The syntax matches [`exclude_list.yaml`](./exclude_list.yaml) / [`include_list.y
 
 Top-level options:
 
-* `probe_unlisted` — if true (default), every other **platform** wheel is probed with `import <top_level>` from the wheel’s `top_level.txt`
+* `probe_unlisted` — if true (default), every other **platform** wheel is probed with one `import <top_level>` from the wheel’s `top_level.txt` (skipped when that file is missing; installs use `--no-deps`)
 * `skip_pure_any` — if true (default), skip `*-none-any.whl`
 * `skip_top_level` — names ignored when generating that default import (`test`, `tests`, `testing`)
 
@@ -158,7 +158,7 @@ Each `packages:` entry:
 * `package_name` — PyPI distribution name (legacy key `name` is accepted)
 * `imports` — Python statement(s) to run after install (list; multiline allowed)
 * `skip` — if true, do not probe when the filters match
-* `platform` / `python` / `version` — optional, same tokens as `exclude_list.yaml` (omitted = all)
+* `platform` / `python` / `version` — optional, same tokens as `exclude_list.yaml` (omitted = all). Unmatched filters do not skip the probe; the wheel is treated as unlisted (`probe_unlisted` default import). Use `skip: true` when a probe should not run.
 
 example:
 
@@ -171,7 +171,7 @@ packages:
       - import _cffi_backend
 ```
 
-This would mean: load the real C extension for `cffi` (not `import cffi` alone). The same names are referenced in [`repair_wheels.py`](./repair_wheels.py) for ARMv7 manylinux repair policy.
+This would mean: load the real C extension for `cffi` (not `import cffi` alone). [`test_wheels_install.py`](./test_wheels_install.py) runs these probes after `--no-deps` install. Unlisted platform wheels — including packages whose YAML row does not match the current platform / python / version — are probed only when `top_level.txt` has a valid import name (the distribution name is not guessed).
 
 
 ### build_requirements.txt
@@ -214,7 +214,7 @@ Upstream [dropped x86_64 macOS support](https://github.com/pyca/cryptography/com
 
 A local sdist build on GitHub `macos-15-*` runners often stamps a **higher** `macosx_*` tag (`macosx_15_0_x86_64`, …) than the official cibuildwheel tag (`macosx_10_9_x86_64`, `macosx_11_0_arm64`). Pip prefers the highest compatible tag, so the extra-index CI copy wins over PyPI. For **psutil 7.2.2** that locally compiled `_psutil_osx.abi3.so` SIGABRT’d ESP-IDF `export.sh` / `test_pytest_macos`.
 
-macOS `pip wheel` therefore passes **`--only-binary :all:`** (Intel **cryptography** still uses `--no-binary cryptography` for the OpenSSL 4 rebuild above). [`repair_wheels.py`](./repair_wheels.py) **skips delocate** except that Intel cryptography rebuild, and **prunes** any higher `macosx_*` sibling for the same distribution/version/arch so it cannot be uploaded. After install, every platform wheel is import-probed. Leftover higher-tag objects already on the extra-index (for example [psutil 7.2.2](https://dl.espressif.com/pypi/psutil/)) must be deleted from the bucket; a later upload only overwrites the same filename.
+macOS `pip wheel` therefore passes **`--only-binary :all:`** (Intel **cryptography** still uses `--no-binary cryptography` for the OpenSSL 4 rebuild above). [`repair_wheels.py`](./repair_wheels.py) **skips delocate** except that Intel cryptography rebuild, and **prunes** any higher `macosx_*` sibling that competes for the same distribution, version, CPython (python+ABI family), and machine family (`x86_64` / `intel` / `universal2`, or `arm64` / `universal2`) so it cannot be uploaded. After install, every platform wheel is import-probed. Leftover higher-tag objects already on the extra-index (for example [psutil 7.2.2](https://dl.espressif.com/pypi/psutil/)) must be deleted from the bucket; a later upload only overwrites the same filename.
 
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.

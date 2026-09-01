@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 
 from pathlib import Path
@@ -19,19 +18,17 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
-def _guard_import_blocks(package_names: list[str]) -> dict[str, str]:
-    """Return canonical name → import probe source for requested packages."""
+def _guard_import_blocks(package_names: list[str]) -> dict[str, tuple[str, ...]]:
+    """Return canonical name → import probe statements for requested packages."""
     from packaging.utils import canonicalize_name
 
-    from native_import_guard import load_native_import_guard
+    from native_import_guard import package_import_statements
 
-    wanted = {canonicalize_name(name) for name in package_names}
-    blocks: dict[str, str] = {}
-    for entry in load_native_import_guard(_ROOT).packages:
-        if entry.name not in wanted or not entry.imports:
-            continue
-        if entry.name not in blocks:
-            blocks[entry.name] = "\n".join(entry.imports)
+    blocks: dict[str, tuple[str, ...]] = {}
+    for name in package_names:
+        stmts = package_import_statements(name, repo_root=_ROOT)
+        if stmts:
+            blocks[canonicalize_name(name)] = stmts
     return blocks
 
 
@@ -49,15 +46,19 @@ def main() -> int:
     failed = 0
     from packaging.utils import canonicalize_name
 
+    from native_import_probe import run_import_probes
+
     for name in args.packages:
-        code = blocks.get(canonicalize_name(name))
-        if code is None:
+        stmts = blocks.get(canonicalize_name(name))
+        if stmts is None:
             print(f"ERROR: no guard entry for {name!r}", file=sys.stderr)
             failed += 1
             continue
         print(f"--- probe {name} ---")
-        result = subprocess.run([sys.executable, "-c", code], check=False)
-        if result.returncode != 0:
+        ok, msg = run_import_probes(stmts)
+        if msg:
+            print(msg)
+        if not ok:
             print(f"FAILED: {name}", file=sys.stderr)
             failed += 1
         else:

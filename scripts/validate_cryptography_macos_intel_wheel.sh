@@ -153,7 +153,8 @@ while IFS=$'\t' read -r WHEEL WHEEL_PYTHON; do
   # shellcheck disable=SC1091
   source "${WORKDIR}/venv/bin/activate"
   pip install --upgrade pip
-  pip install pyyaml packaging
+  # Probe loads native_import_guard -> _helper_functions (colorama, packaging, PyYAML).
+  pip install -r "${ROOT}/build_requirements.txt"
   pip install --no-index --find-links "${WHEELS_DIR}" "${WHEEL}"
   python "${ROOT}/scripts/run_native_import_probe.py" cryptography
   deactivate 2>/dev/null || true

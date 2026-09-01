@@ -5,9 +5,12 @@
 #  run imports — or skip — and fail CI if import crashes or errors."
 #
 # Top-level:
-#   probe_unlisted   — probe platform wheels not listed below via import <top_level> (default true)
+#   probe_unlisted   — probe unlisted platform wheels via one import from top_level.txt
+#                      (default true; skipped when top_level.txt is missing — installs use --no-deps)
 #   skip_pure_any    — skip *-none-any.whl (default true)
-#   skip_top_level   — top_level.txt names ignored when generating default imports
+#   skip_top_level      — top_level.txt names ignored when generating default imports
+#   skip_name_prefixes  — skip unlisted packages whose canonical name is this token
+#                         or starts with ``<token>-`` (e.g. pyobjc → pyobjc-framework-*)
 #
 # Each packages: entry (same filter tokens as exclude_list.yaml / include_list.yaml):
 #   package_name  — PyPI distribution name (legacy key ``name`` is also accepted)
@@ -17,6 +20,8 @@
 #                   macos_x86_64 | macos_arm64 (string or list). Omitted = all platforms.
 #   python        — python_version specifier(s), e.g. '>=3.10' or ['==3.8', '==3.9']
 #   version       — package version specifier(s), e.g. '>=49' or ['>=1.0', '<2']
+#   Unmatched filters treat the package as unlisted (probe_unlisted default import).
+#   Use skip: true when a probe should not run.
 #
 # ``import cffi`` alone is not enough — a broken auditwheel manylinux tag can segfault only in _cffi_backend.
 
@@ -26,8 +31,15 @@ skip_top_level:
   - test
   - tests
   - testing
+# Framework wheels import sibling PyObjC packages; installs use --no-deps.
+skip_name_prefixes:
+  - pyobjc
 
 packages:
+  # Needs libdbus; ARMv7 test images fail ``import dbus`` even when the wheel is valid.
+  - package_name: dbus-python
+    skip: true
+    platform: linux_armv7
   - package_name: cffi
     imports:
       - import _cffi_backend
