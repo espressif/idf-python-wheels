@@ -9,37 +9,26 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_GUARD_PATH = _ROOT / "native_import_guard.yaml"
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
-def _guard_import_blocks(package_names: list[str]) -> dict[str, str]:
-    """Return canonical name → import probe source for requested packages."""
-    import yaml
-
+def _guard_import_blocks(package_names: list[str]) -> dict[str, tuple[str, ...]]:
+    """Return canonical name → import probe statements for requested packages."""
     from packaging.utils import canonicalize_name
 
-    data = yaml.safe_load(_GUARD_PATH.read_text(encoding="utf-8")) or {}
-    wanted = {canonicalize_name(name) for name in package_names}
-    blocks: dict[str, str] = {}
-    for entry in data.get("packages") or []:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        imports = entry.get("imports")
-        if not name or not imports:
-            continue
-        canon = canonicalize_name(str(name))
-        if canon not in wanted:
-            continue
-        stmts = [str(stmt).strip() for stmt in imports if str(stmt).strip()]
+    from native_import_guard import package_import_statements
+
+    blocks: dict[str, tuple[str, ...]] = {}
+    for name in package_names:
+        stmts = package_import_statements(name, repo_root=_ROOT)
         if stmts:
-            blocks[canon] = "\n".join(stmts)
+            blocks[canonicalize_name(name)] = stmts
     return blocks
 
 
@@ -57,15 +46,19 @@ def main() -> int:
     failed = 0
     from packaging.utils import canonicalize_name
 
+    from native_import_probe import run_import_probes
+
     for name in args.packages:
-        code = blocks.get(canonicalize_name(name))
-        if code is None:
+        stmts = blocks.get(canonicalize_name(name))
+        if stmts is None:
             print(f"ERROR: no guard entry for {name!r}", file=sys.stderr)
             failed += 1
             continue
         print(f"--- probe {name} ---")
-        result = subprocess.run([sys.executable, "-c", code], check=False)
-        if result.returncode != 0:
+        ok, msg = run_import_probes(stmts)
+        if msg:
+            print(msg)
+        if not ok:
             print(f"FAILED: {name}", file=sys.stderr)
             failed += 1
         else:
