@@ -23,6 +23,12 @@ case "${VERSION_CODENAME:-}" in
   *)        LIBFFI_RUNTIME= ;;
 esac
 
+_armv7_prepare_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=os_dependencies/debian_eol_apt.sh
+. "${_armv7_prepare_dir}/debian_eol_apt.sh"
+debian_prepare_eol_apt / "${VERSION_CODENAME:-}"
+unset _armv7_prepare_dir
+
 apt-get update -qq
 apt-get install -y --no-install-recommends \
   ca-certificates \
