@@ -15,7 +15,12 @@ apt-get install -y cmake build-essential
 
 # PyGObject needs build dependencies https://pygobject.readthedocs.io/en/latest/getting_started.html
 # Install both dev packages (for building) and runtime libraries (for auditwheel repair)
-apt-get install -y libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev libglib2.0-dev
+apt-get install -y libgirepository1.0-dev gcc libcairo2-dev pkg-config libglib2.0-dev
+# Wheels build against the interpreter on PATH (the Docker images ship CPython in /usr/local),
+# so the distro headers only help builds that target the distro python. They are uninstallable
+# on the bullseye armhf images: those carry libpython3.9-stdlib from bullseye-security, which no
+# longer exists on archive.debian.org, while main only offers the matching -dev at 3.9.2-1.
+apt-get install -y python3-dev || echo "python3-dev has no installable version here; skipping"
 # gir1.2-gtk-4.0 not available on all distros/architectures (e.g. Debian armhf)
 apt-get install -y gir1.2-gtk-4.0 || true
 # Try to install girepository-2.0 packages if available (may not exist in older distros)
