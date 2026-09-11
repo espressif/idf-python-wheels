@@ -84,9 +84,22 @@ class TestNativeImportGuard(unittest.TestCase):
     def test_loads_deeper_native_imports(self) -> None:
         guarded = native_import_guard_by_name()
         self.assertEqual(guarded["pillow"].imports, ("from PIL import Image",))
-        self.assertEqual(guarded["pyyaml"].imports, ("from yaml import CSafeLoader",))
         self.assertEqual(guarded["brotli"].imports, ("import brotli",))
         self.assertEqual(guarded["pycryptodome"].imports, ("from Crypto.Cipher import AES",))
+
+    def test_pyyaml_requires_csafeloader_except_on_macos_arm64_python38(self) -> None:
+        self.assertEqual(
+            package_import_statements("pyyaml", current_platform="linux_x86_64", python_version="3.8"),
+            ("from yaml import CSafeLoader",),
+        )
+        self.assertEqual(
+            package_import_statements("pyyaml", current_platform="macos_arm64", python_version="3.9"),
+            ("from yaml import CSafeLoader",),
+        )
+        self.assertEqual(
+            package_import_statements("pyyaml", current_platform="macos_arm64", python_version="3.8"),
+            ("import yaml",),
+        )
 
     def test_pure_any_wheel_name(self) -> None:
         self.assertTrue(is_pure_any_wheel_name("six-1.16.0-py2.py3-none-any.whl"))

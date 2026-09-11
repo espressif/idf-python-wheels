@@ -72,6 +72,13 @@ packages:
   - package_name: pillow
     imports:
       - from PIL import Image
+  # PyPI has no macOS arm64 wheel for PyYAML on Python 3.8, so we build the sdist without
+  # libyaml and ship a working pure-Python wheel that has no CSafeLoader.
+  - package_name: pyyaml
+    platform: macos_arm64
+    python: '==3.8'
+    imports:
+      - import yaml
   - package_name: pyyaml
     imports:
       - from yaml import CSafeLoader
