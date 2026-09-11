@@ -34,6 +34,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
             bwf._dependent_requirement_skip_line("requests>=2.28.0", force_interpreter=True),
         )
 
+    @patch.object(bwf, "prune_ci_macos_newer_than_pypi_mirror")
     @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
@@ -48,11 +49,13 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         _mock_find_links,
         _mock_pypi,
         _mock_armv7_pin,
+        _mock_prune,
     ) -> None:
         self.assertTrue(
             bwf._dependent_requirement_skip_line("cryptography>=2.1.4", force_interpreter=True),
         )
 
+    @patch.object(bwf, "prune_ci_macos_newer_than_pypi_mirror")
     @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
     @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
@@ -70,11 +73,13 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         _mock_pypi,
         _mock_armv7_pin,
         _mock_armv7,
+        _mock_prune,
     ) -> None:
         self.assertTrue(
             bwf._dependent_requirement_skip_line("cryptography>=2.1.4", force_interpreter=True),
         )
 
+    @patch.object(bwf, "prune_ci_macos_newer_than_pypi_mirror")
     @patch("_helper_functions.is_linux_armv7_runner", return_value=True)
     @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
@@ -92,6 +97,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         _mock_pypi,
         _mock_armv7_pin,
         _mock_armv7,
+        _mock_prune,
     ) -> None:
         self.assertTrue(
             bwf._dependent_requirement_skip_line("cryptography<43", force_interpreter=True),
@@ -119,6 +125,7 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
             bwf._dependent_requirement_skip_line("cryptography>=2.1.4", force_interpreter=True),
         )
 
+    @patch.object(bwf, "prune_ci_macos_newer_than_pypi_mirror")
     @patch.object(bwf, "bounded_pin_without_find_links_skip", return_value=(False, ""))
     @patch.object(bwf, "_pypi_preflight_skip_line", return_value=False)
     @patch.object(
@@ -131,10 +138,22 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
         _mock_find_links,
         _mock_pypi,
         _mock_armv7,
+        mock_prune,
     ) -> None:
         self.assertTrue(
             bwf._dependent_requirement_skip_line("cryptography>=2.1.4", force_interpreter=False),
         )
+        mock_prune.assert_called_once()
+
+    @patch.object(bwf.platform, "system", return_value="Darwin")
+    def test_force_interpreter_ignored_on_macos(self, _sys) -> None:
+        self.assertFalse(bwf._apply_force_interpreter_binary(True))
+        self.assertEqual(bwf._force_interpreter_no_binary_args("cffi>=1.15"), [])
+
+    @patch.object(bwf.platform, "system", return_value="Linux")
+    def test_force_interpreter_no_binary_on_linux(self, _sys) -> None:
+        self.assertTrue(bwf._apply_force_interpreter_binary(True))
+        self.assertEqual(bwf._force_interpreter_no_binary_args("cffi>=1.15"), ["--no-binary", "cffi"])
 
 
 if __name__ == "__main__":

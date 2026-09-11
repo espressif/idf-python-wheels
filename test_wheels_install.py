@@ -14,9 +14,10 @@ platform are deleted from ``downloaded_wheels`` so CI ``wheels-tested-*`` artifa
 do not carry wheels for other Python versions. CI downloads ``wheels-repaired-<arch>``
 per matrix row (not the full merge) so ARMv7 vs ARMv7 Legacy binaries are not mixed.
 
-After ``pip install``, :func:`_run_native_import_probes` imports native extensions listed
-in ``native_import_guard.yaml`` (e.g. ``from cryptography import x509``) so wheels that
-install cleanly but fail at load time (OpenSSL symbol mismatches) fail CI before upload.
+After ``pip install``, :func:`_run_native_import_probes` applies
+``native_import_guard.yaml`` (custom imports, skip filters, and default
+``import <top_level>`` when ``probe_unlisted`` is true) so wheels that
+install cleanly but fail at load time (OpenSSL / SIGABRT) fail CI before upload.
 
 Wheels are ZIP archives (PEP 427). pip opens them with the zipfile module; a
 BadZipFile / "Bad magic number" error means the bytes on disk are not a valid
@@ -39,11 +40,12 @@ from packaging.utils import canonicalize_name
 from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import armv7_wheel_matches_forced_plat
 from _helper_functions import get_current_platform
-from _helper_functions import native_import_guard_by_name
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel
 from _helper_functions import wheel_archive_is_readable
+from native_import_guard import load_native_import_guard
+from native_import_guard import resolve_native_import_statements
 from native_import_probe import run_import_probes
 from yaml_list_adapter import YAMLListAdapter
 
@@ -100,8 +102,12 @@ def _should_skip_native_import_probe(dist_name: str) -> bool:
 
 
 def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[tuple[str, str]]]:
-    """Import native extensions after install; catch load-time ABI/OpenSSL mismatches."""
-    guarded = native_import_guard_by_name()
+    """Import native extensions after install; catch load-time ABI/OpenSSL mismatches.
+
+    Resolution is ``native_import_guard.yaml`` (custom imports, skip filters,
+    ``probe_unlisted`` default ``import <top_level>``).
+    """
+    config = load_native_import_guard()
     native_failed = 0
     failed_wheels: list[tuple[str, str]] = []
     if not installed_wheels:
@@ -110,7 +116,10 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
     print_color("---------- NATIVE IMPORT PROBES ----------")
     for wheel_path in installed_wheels:
         parsed = parse_wheel_name(wheel_path.name)
-        if not parsed or parsed[0] not in guarded:
+        if not parsed:
+            continue
+        stmts = resolve_native_import_statements(wheel_path, config=config)
+        if stmts is None:
             continue
         if _should_skip_native_import_probe(parsed[0]):
             print_color(
@@ -118,7 +127,7 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
                 Fore.YELLOW,
             )
             continue
-        ok, msg = run_import_probes(guarded[parsed[0]].imports)
+        ok, msg = run_import_probes(stmts)
         if ok:
             print_color(f"-- {wheel_path.name}", Fore.GREEN)
             if msg:

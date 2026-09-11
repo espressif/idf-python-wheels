@@ -8,11 +8,19 @@
 #
 # Sourced from macos.sh / spike CI: restore caller ``set`` options so ``-u``/``pipefail``
 # do not leak into the rest of that shell.
+#
+# errexit needs ``$-`` on top of the snapshot: bash clears errexit inside the command
+# substitution of an assignment, so ``$(set +o)`` reports it as off and would disable a
+# caller's ``set -e`` on restore.
 
 _openssl4_saved_opts="$(set +o)"
+_openssl4_saved_flags="$-"
 _openssl4_restore_shell() {
   eval "${_openssl4_saved_opts}"
-  unset _openssl4_saved_opts prefix
+  case "${_openssl4_saved_flags}" in
+    *e*) set -e ;;
+  esac
+  unset _openssl4_saved_opts _openssl4_saved_flags prefix
   unset -f _append_github_env _brew_openssl4_prefix _install_openssl4_from_source \
     _configure_openssl4_env _openssl4_restore_shell 2>/dev/null || true
 }

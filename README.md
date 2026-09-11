@@ -143,30 +143,35 @@ The syntax can be also converted into a sentence: "For assembled **main requirem
 
 
 ### native_import_guard.yaml
-File for **native ARMv7 import checks** after wheels are installed in CI ([`test_wheels_install.py`](./test_wheels_install.py)). It does not change the requirements list.
+File for **native import checks** after wheels are installed in CI ([`test_wheels_install.py`](./test_wheels_install.py), all test-wheels-install runners). It does not change the requirements list.
 
-For every `name` there is:
+The syntax matches [`exclude_list.yaml`](./exclude_list.yaml) / [`include_list.yaml`](./include_list.yaml): “After installing the wheel for `package_name` (on `platform`, for `python`, at `version`), run `imports` — or `skip` — and fail CI if import crashes or errors.”
 
-* `imports` — Python statement(s) to run after install (list of strings; multiline allowed)
+Top-level options:
 
-native_import_guard template:
+* `probe_unlisted` — if true (default), every other **platform** wheel is probed with one `import <top_level>` from the wheel’s `top_level.txt` (skipped when that file is missing; installs use `--no-deps`)
+* `skip_pure_any` — if true (default), skip `*-none-any.whl`
+* `skip_top_level` — names ignored when generating that default import (`test`, `tests`, `testing`)
 
-    packages:
-      - name: '<distribution_name>'
-        imports:
-          - import _cffi_backend
+Each `packages:` entry:
 
-The syntax can be converted into a sentence: "After installing the wheel for `name` on ARMv7, run `imports` and fail CI if import crashes or errors."
+* `package_name` — PyPI distribution name (legacy key `name` is accepted)
+* `imports` — Python statement(s) to run after install (list; multiline allowed)
+* `skip` — if true, do not probe when the filters match
+* `platform` / `python` / `version` — optional, same tokens as `exclude_list.yaml` (omitted = all). Unmatched filters do not skip the probe; the wheel is treated as unlisted (`probe_unlisted` default import). Use `skip: true` when a probe should not run.
 
 example:
 
 ```yaml
-    - name: 'cffi'
-      imports:
-        - import _cffi_backend
+probe_unlisted: true
+skip_pure_any: true
+packages:
+  - package_name: cffi
+    imports:
+      - import _cffi_backend
 ```
 
-This would mean: load the real C extension for `cffi` on ARMv7 (not `import cffi` alone). The same names are referenced in [`repair_wheels.py`](./repair_wheels.py) for ARMv7 manylinux repair policy.
+This would mean: load the real C extension for `cffi` (not `import cffi` alone). [`test_wheels_install.py`](./test_wheels_install.py) runs these probes after `--no-deps` install. Unlisted platform wheels — including packages whose YAML row does not match the current platform / python / version — are probed only when `top_level.txt` has a valid import name (the distribution name is not guessed).
 
 
 ### build_requirements.txt
@@ -204,6 +209,12 @@ Mitigations in this repo:
 **macOS Intel wheel builds** always run [`os_dependencies/macos_openssl4_intel.sh`](./os_dependencies/macos_openssl4_intel.sh) (OpenSSL 4, `OPENSSL_DIR`, `OPENSSL_STATIC=1`) and pass `--no-binary cryptography` so `cryptography` is built from sdist against OpenSSL 4, then repaired with [`delocate`](./repair_wheels.py). Find-links does **not** skip that sdist when it only has an older Intel wheel (or a wheel for another platform): 50.x and later are rebuilt the same way as 49.0.0 whenever PyPI has a newer matching release. Linux, Windows, and macOS ARM continue to use PyPI cryptography wheels as before.
 
 Upstream [dropped x86_64 macOS support](https://github.com/pyca/cryptography/compare/48.0.1...49.0.0) in 49+; this path is maintained locally until ESP-IDF drops Intel Mac. Scheduled CI runs [`validate_cryptography_macos_intel_wheel.sh`](./scripts/validate_cryptography_macos_intel_wheel.sh) after macOS Intel builds and after [`delocate`](./repair_wheels.py) repair. For a local isolated rebuild smoke test, use [`spike_cryptography_macos_intel_openssl4.sh`](./scripts/spike_cryptography_macos_intel_openssl4.sh).
+
+### macOS: prefer PyPI wheels (avoid CI ``macosx_*`` tag stealing)
+
+A local sdist build on GitHub `macos-15-*` runners often stamps a **higher** `macosx_*` tag (`macosx_15_0_x86_64`, …) than the official cibuildwheel tag (`macosx_10_9_x86_64`, `macosx_11_0_arm64`). Pip prefers the highest compatible tag, so the extra-index CI copy wins over PyPI. For **psutil 7.2.2** that locally compiled `_psutil_osx.abi3.so` SIGABRT’d ESP-IDF `export.sh` / `test_pytest_macos`.
+
+macOS `pip wheel` therefore passes **`--only-binary :all:`** (Intel **cryptography** still uses `--no-binary cryptography` for the OpenSSL 4 rebuild above). [`repair_wheels.py`](./repair_wheels.py) **skips delocate** except that Intel cryptography rebuild, and **prunes** any higher `macosx_*` sibling that competes for the same distribution, version, CPython (python+ABI family), and machine family (`x86_64` / `intel` / `universal2`, or `arm64` / `universal2`) so it cannot be uploaded. After install, every platform wheel is import-probed. Leftover higher-tag objects already on the extra-index (for example [psutil 7.2.2](https://dl.espressif.com/pypi/psutil/)) must be deleted from the bucket; a later upload only overwrites the same filename.
 
 ## Activity Diagram
 The main file is `build-wheels-platforms.yml` which is scheduled to run periodically to build Python wheels for any requirement of all [ESP-IDF]-supported versions.
