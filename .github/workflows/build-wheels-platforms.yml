@@ -18,6 +18,9 @@ jobs:
     needs: get-supported-versions
     name: Build for ${{ matrix.os }} (Python ${{matrix.python-version}})
     runs-on: ${{ matrix.runner }}
+    env:
+      MIN_IDF_MAJOR_VERSION: ${{ needs.get-supported-versions.outputs.min_idf_major_version }}
+      MIN_IDF_MINOR_VERSION: ${{ needs.get-supported-versions.outputs.min_idf_minor_version }}
     strategy:
       fail-fast: false
       matrix:
@@ -76,11 +79,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Set IDF version environment variables
+      - name: Check IDF version environment variables
+        shell: bash
         run: |
-          echo "MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}" >> $GITHUB_ENV
-          echo "MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }}" >> $GITHUB_ENV
-          echo "Setting MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}, MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }}"
+          echo "Building for IDF v${MIN_IDF_MAJOR_VERSION}.${MIN_IDF_MINOR_VERSION} and newer"
+          if [ -z "${MIN_IDF_MAJOR_VERSION}" ] || [ -z "${MIN_IDF_MINOR_VERSION}" ]; then
+            echo "::error::Minimal IDF version not resolved by the Get Supported Versions job."
+            exit 1
+          fi
 
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
@@ -145,8 +151,8 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }} \
-            -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
+            -e MIN_IDF_MAJOR_VERSION="${MIN_IDF_MAJOR_VERSION}" \
+            -e MIN_IDF_MINOR_VERSION="${MIN_IDF_MINOR_VERSION}" \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
@@ -173,8 +179,8 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }} \
-            -e MIN_IDF_MINOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_minor_version }} \
+            -e MIN_IDF_MAJOR_VERSION="${MIN_IDF_MAJOR_VERSION}" \
+            -e MIN_IDF_MINOR_VERSION="${MIN_IDF_MINOR_VERSION}" \
             -e GH_TOKEN="${GH_TOKEN}" \
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
