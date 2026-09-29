@@ -37,9 +37,16 @@ Also `README.md` file and `pyproject.toml` is automatically updated with the scr
 ### Supported Versions Action
 This workflow is reusable action and it is possible to be called in other projects - it will generate `supported_versions.json` file with the following structure, which can be parsed and used in caller workflow to avoid developer interaction of changing the supported versions.
 
-Also it sets the `min_idf_major_version` and `min_idf_minor_version` as a GitHub env variables so this can be used as well like this:
+Also it provides the `min_idf_major_version` and `min_idf_minor_version` outputs. Map them to environment variables on the job, so they are available to every step regardless of the runner shell (`>> $GITHUB_ENV` is Bash syntax and is silently discarded on Windows runners, where the default shell is PowerShell):
 
-`echo "MIN_IDF_MAJOR_VERSION=${{ needs.get-supported-versions.outputs.min_idf_major_version }}" >> $GITHUB_ENV`
+```yaml
+jobs:
+  build-wheels:
+    needs: get-supported-versions
+    env:
+      MIN_IDF_MAJOR_VERSION: ${{ needs.get-supported-versions.outputs.min_idf_major_version }}
+      MIN_IDF_MINOR_VERSION: ${{ needs.get-supported-versions.outputs.min_idf_minor_version }}
+```
 
     {
         "supported_idf": [
