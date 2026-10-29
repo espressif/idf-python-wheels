@@ -456,20 +456,9 @@ def armv7_wheel_matches_forced_plat(
         return False
     if not only_plat:
         return True
-    has_31 = (2, 31) in wheel_tags
-    has_36 = (2, 36) in wheel_tags
-    if repair:
-        # ``repair_wheels.py``: auditwheel may emit compat 2_31 tags alongside 2_36.
-        if required == (2, 31) and has_36:
-            return False
-        return True
-    # ``test_wheels_install.py``: reject dual 2_31 + 2_36 tags on Legacy (2_31) tests — those
-    # are Bookworm auditwheel compat filenames. Bookworm (2_36) tests accept them when 2_36 is present.
-    if has_31 and has_36:
-        return required == (2, 36)
-    if required == (2, 31) and has_36:
-        return False
-    return True
+    # Lineage is the highest glibc tag. A Bookworm auditwheel name lists
+    # manylinux_2_31 beside manylinux_2_36; the highest tag selects the lineage.
+    return max(wheel_tags) == required
 
 
 def _force_no_binary_linux_normalized(repo_root: Path | None = None) -> frozenset[str]:
@@ -529,11 +518,15 @@ FORCE_INTERPRETER_BINARY_SKIP_EXACT = frozenset(
         canonicalize_name("cryptography"),
         canonicalize_name("protobuf"),
         canonicalize_name("psutil"),
+        canonicalize_name("pycryptodome"),
         canonicalize_name("pydantic-core"),
         canonicalize_name("pynacl"),
         canonicalize_name("rpds-py"),
         canonicalize_name("ruamel.yaml.clib"),
         canonicalize_name("tibs"),
+        # setuptools names the limited-API module ``_binding.abi3-<platform>.so``.
+        # CPython only imports ``_binding.abi3.so``, which is what the PyPI wheel ships.
+        canonicalize_name("tree-sitter-c"),
     }
 )
 
@@ -922,10 +915,12 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
 
     Evaluates markers against the CURRENT running Python environment.
 
-    Uses YAMLListAdapter with exclude=True, so the logic is inverted:
-    - If marker evaluates to True -> wheel satisfies "keep" condition, skip
-    - If version is in the (inverted) specifier -> wheel satisfies "keep" condition, skip
-    - Otherwise -> wheel should be excluded
+    Uses YAMLListAdapter with exclude=True, so each requirement is a keep rule:
+    - A marker that does not match this environment skips a versioned rule.
+      An unversioned rule with a false marker excludes the wheel here.
+    - A matching rule keeps the wheel when it has no specifier, or the wheel
+      version is inside its specifier.
+    - The wheel is excluded only when at least one rule applies and none keep it.
 
     Args:
         wheel_name: The wheel filename (e.g., "requests-2.31.0-py3-none-any.whl")
@@ -939,29 +934,40 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
         return False, ""
 
     canonical_name, wheel_version = parsed
+    applicable = False
+    reject_req: Requirement | None = None
 
     for req in exclude_requirements:
-        # Check if package name matches (using canonical names)
         if canonicalize_name(req.name) != canonical_name:
             continue
 
-        # With exclude=True, if marker evaluates to True -> KEEP the wheel
-        if req.marker and req.marker.evaluate():
+        marker_matches = req.marker is None or bool(req.marker.evaluate())
+        if req.marker is not None and not marker_matches:
+            # Versioned keep-rule for another Python or platform. Unversioned means
+            # "not kept in this environment" (for example Windows dbus-python).
+            if not req.specifier:
+                applicable = True
+                reject_req = req
             continue
 
-        # With exclude=True, if version is in the (inverted) specifier -> KEEP the wheel
-        if req.specifier and wheel_version:
+        applicable = True
+        if not req.specifier:
+            if req.marker is None:
+                reject_req = req
+                continue
+            return False, ""
+
+        if wheel_version:
             try:
                 if Version(wheel_version) in req.specifier:
-                    continue
-            except Exception:
+                    return False, ""
+            except InvalidVersion:
                 pass
+        reject_req = req
 
-        # Name matches, and marker is False (or absent), and version not in specifier (or absent)
-        # -> EXCLUDE the wheel
-        return True, f"matches exclude rule: {req}"
-
-    return False, ""
+    if not applicable or reject_req is None:
+        return False, ""
+    return True, f"matches exclude rule: {reject_req}"
 
 
 def get_wheel_python_version(wheel_name: str) -> str | None:

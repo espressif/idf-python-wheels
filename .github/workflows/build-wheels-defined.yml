@@ -302,6 +302,7 @@ jobs:
 
       - name: Build wheels - ARMv7 (in Docker)
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} current image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -309,7 +310,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bookworm \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version
@@ -380,8 +381,9 @@ jobs:
       matrix:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
         exclude:
-          # Python 3.14 doesn't have bullseye images for ARM
+          # Bullseye images stop at Python 3.13. Legacy is not built for 3.14+.
           - python-version: '3.14'
+          - python-version: '3.15'
     steps:
       - name: Set up QEMU for ARMv7
         uses: docker/setup-qemu-action@v4
@@ -392,8 +394,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Build wheels - ARMv7 Legacy (in Docker)
-        # Build on Bullseye (glibc 2.31) for compatibility with older systems
+        # Bullseye (glibc 2.31). Python 3.14+ is excluded; there is no bullseye image.
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -401,7 +404,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bullseye \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version

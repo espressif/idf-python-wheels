@@ -407,18 +407,23 @@ def prune_ci_manylinux_newer_than_228_when_228_mirror_present(
     return removed
 
 
+# Official abi3 wheels. Rebuilding them mis-names the extension; repairing the
+# PyPI ``manylinux_2_28`` file retags it to the host ``2_34``.
+_KEEP_PYPI_MANYLINUX_228 = frozenset({canonicalize_name("tree-sitter-c")})
+
+
 def should_skip_linux_auditwheel_for_pypi_mirror(wheel_name: str) -> bool:
     """Skip auditwheel on PyPI ``manylinux_2_28`` mirrors (repair retags to host ``2_34``)."""
     machine = platform.machine().lower()
     if machine not in ("x86_64", "amd64", "aarch64", "arm64"):
         return False
     parsed = parse_wheel_name(wheel_name)
-    if not parsed:
+    if not parsed or not _wheel_has_manylinux_228_tag(wheel_name):
         return False
+    if parsed[0] in _KEEP_PYPI_MANYLINUX_228:
+        return True
     pkg_key = parsed[0].replace("-", "_")
-    if pkg_key not in _force_no_binary_linux_normalized(_REPO_ROOT):
-        return False
-    return _wheel_has_manylinux_228_tag(wheel_name)
+    return pkg_key in _force_no_binary_linux_normalized(_REPO_ROOT)
 
 
 def _mirrored_manylinux228_version(package_name: str, wheel_dir: Path) -> str | None:

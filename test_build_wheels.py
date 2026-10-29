@@ -34,6 +34,7 @@ from _helper_functions import merge_requirements
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
 from build_wheels import _add_into_requirements
+from build_wheels import exclude_from_requirements
 from build_wheels import get_used_idf_branches
 from wheel_compat_policy import _mirrored_manylinux228_version
 from wheel_compat_policy import get_macos_only_binary_args
@@ -184,6 +185,42 @@ class TestYAMLListAdapterIntegration(unittest.TestCase):
         except FileNotFoundError:
             self.skipTest("exclude_list.yaml not found")
 
+    def test_dbus_python_1_2_is_linux_315_only(self):
+        """dbus-python<1.3 is replaced on Linux 3.15 and stays off Windows.
+
+        An unversioned Linux requirement must stay on 1.2.x before 3.15. Leaving it
+        unpinned installs 1.5.1, which needs ninja and fails on Bullseye.
+        """
+        incoming = {
+            Requirement('dbus-python<1.3; python_version > "3.10"'),
+            Requirement('dbus-python; sys_platform == "linux"'),
+        }
+        linux = YAMLListAdapter("exclude_list.yaml", exclude=True, current_platform="linux_x86_64")
+        linux_reqs = exclude_from_requirements(incoming, linux.requirements, print_requirements=False)
+        linux_315 = {"python_version": "3.15", "sys_platform": "linux"}
+        linux_313 = {"python_version": "3.13", "sys_platform": "linux"}
+
+        def active(env: dict) -> list:
+            return [req for req in linux_reqs if req.marker is None or req.marker.evaluate(env)]
+
+        active_315 = active(linux_315)
+        active_313 = active(linux_313)
+        self.assertTrue(active_315)
+        self.assertTrue(active_313)
+        self.assertTrue(all(req.specifier.contains("1.5.1") for req in active_315))
+        self.assertTrue(all(not req.specifier.contains("1.2.18") for req in active_315))
+        self.assertTrue(all(req.specifier.contains("1.2.18") for req in active_313))
+        self.assertTrue(all(not req.specifier.contains("1.5.1") for req in active_313))
+
+        windows = YAMLListAdapter("exclude_list.yaml", exclude=True, current_platform="windows")
+        windows_reqs = exclude_from_requirements(incoming, windows.requirements, print_requirements=False)
+        for env in (
+            {"python_version": "3.11", "sys_platform": "win32"},
+            {"python_version": "3.15", "sys_platform": "win32"},
+        ):
+            active = [req for req in windows_reqs if req.marker is None or req.marker.evaluate(env)]
+            self.assertEqual(active, [])
+
 
 def _current_platform_wheel_tag():
     """Return a wheel platform tag matching the current OS for is_wheel_compatible tests."""
@@ -291,6 +328,29 @@ class TestWheelCompatibility(unittest.TestCase):
         from test_wheels_install import _armv7_skip_cryptography_native_probe
 
         self.assertFalse(_armv7_skip_cryptography_native_probe("cryptography"))
+
+    @patch.dict(
+        os.environ,
+        {"AUDITWHEEL_PLAT": "manylinux_2_31_armv7l", "AUDITWHEEL_ONLY_PLAT": "1"},
+        clear=False,
+    )
+    @patch("test_wheels_install.sys.platform", "linux")
+    @patch("test_wheels_install.platform.machine", return_value="armv7l")
+    @patch("test_wheels_install.platform.system", return_value="Linux")
+    @patch(
+        "test_wheels_install.run_import_probes",
+        return_value=(False, "ImportError: libssl.so.3: cannot open shared object file"),
+    )
+    def test_armv7_legacy_drops_cryptography_linked_to_openssl3(self, _probe, _sys, _machine):
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "cryptography-50.0.2-cp313-abi3-manylinux_2_31_armv7l.whl"
+            wheel.write_bytes(b"x")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 0)
+            self.assertEqual(failures, [])
+            self.assertFalse(wheel.exists())
 
     @patch("test_wheels_install.platform.machine", return_value="x86_64")
     @patch("test_wheels_install.platform.system", return_value="Linux")
@@ -675,6 +735,33 @@ class TestShouldExcludeWheel(unittest.TestCase):
         result, _ = self.should_exclude_wheel("numpy-1.24.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
         self.assertFalse(result)
 
+    def test_versioned_rule_for_other_python_does_not_drop_the_old_pin(self):
+        """A >=1.3 keep-rule for Python >=3.15 must not drop dbus-python 1.2.18 on 3.13."""
+        from packaging.markers import Marker
+
+        requirements = {
+            Requirement('dbus-python<1.3; python_version < "3.15"'),
+            Requirement('dbus-python>=1.3; python_version >= "3.15"'),
+        }
+        original = Marker.evaluate
+
+        def evaluate(self, environment=None, context=None):
+            env = {"python_version": "3.13", "sys_platform": "linux"}
+            return original(self, environment=env, context=context)
+
+        with patch("packaging.markers.Marker.evaluate", evaluate):
+            old_pin, _ = self.should_exclude_wheel(
+                "dbus_python-1.2.18-cp313-cp313-manylinux_2_34_x86_64.whl",
+                requirements,
+            )
+            new_pin, reason = self.should_exclude_wheel(
+                "dbus_python-1.5.1-cp313-cp313-manylinux_2_34_x86_64.whl",
+                requirements,
+            )
+        self.assertFalse(old_pin)
+        self.assertTrue(new_pin)
+        self.assertIn("dbus-python", reason)
+
     def test_exclude_with_version_range(self):
         """Test excluding a package with version range (inverted specifier)."""
         # With exclude=True, ==9.5.0 becomes !=9.5.0
@@ -854,6 +941,8 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             "rpds-py",
             "cryptography",
             "psutil",
+            "pycryptodome",
+            "tree-sitter-c",
         ):
             self.assertTrue(force_interpreter_skip_package(canonicalize_name(name)))
 
@@ -1153,6 +1242,11 @@ class TestSkipAuditwheelForPypiMirror(unittest.TestCase):
     def test_does_not_skip_ci_manylinux_234_only(self, _machine):
         name = "cryptography-49.0.0-cp312-abi3-manylinux_2_34_x86_64.whl"
         self.assertFalse(should_skip_linux_auditwheel_for_pypi_mirror(name))
+
+    @patch("platform.machine", return_value="x86_64")
+    def test_skips_tree_sitter_c_manylinux_228_wheel(self, _machine):
+        name = "tree_sitter_c-0.24.2-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+        self.assertTrue(should_skip_linux_auditwheel_for_pypi_mirror(name))
 
 
 class TestCryptographyMacosIntelBuild(unittest.TestCase):

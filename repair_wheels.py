@@ -155,11 +155,11 @@ def _armv7_retag_stage_path() -> Path:
 
 
 def _retag_linux_armv7_wheel_to_plat(wheel_path: Path, plat: str) -> Optional[Path]:
-    """Retag a piwheels ``linux_armv7l`` wheel to ``AUDITWHEEL_PLAT`` without auditwheel relink.
+    """Retag a piwheels ``linux_armv7l`` wheel to ``plat`` without auditwheel relink.
 
-    ARMv7 (Bookworm) and ARMv7 Legacy (Bullseye) both produce ``*-linux_armv7l.whl`` names
-    with different ELF bytes. Retagging to ``manylinux_2_36_armv7l`` vs ``manylinux_2_31_armv7l``
-    gives distinct index keys while keeping piwheels-built binaries intact.
+    Current and legacy builds both produce ``*-linux_armv7l.whl``. The platform tag
+    is the repair container: Bookworm ``manylinux_2_36`` for current, Bullseye
+    ``manylinux_2_31`` for legacy.
 
     Writes to a container-local staging file first (many-entry wheels such as pycryptodome
     can fail when rebuilt directly on the QEMU bind-mounted ``downloaded_wheels`` tree).
@@ -339,17 +339,30 @@ def repair_wheel_macos(wheel_path: Path, temp_dir: Path) -> subprocess.Completed
     return result
 
 
-def repair_wheel_linux(wheel_path: Path, temp_dir: Path) -> subprocess.CompletedProcess[str]:
+def _forced_plat_phrase(wheel_plat: str, plat_env: str) -> str:
+    """Describe the tag the filename check required, and the container tag when they differ."""
+    if not plat_env or wheel_plat == plat_env:
+        return f"AUDITWHEEL_PLAT={wheel_plat!r}"
+    return f"build-image plat {wheel_plat!r} (repair container AUDITWHEEL_PLAT={plat_env!r})"
+
+
+def repair_wheel_linux(
+    wheel_path: Path,
+    temp_dir: Path,
+    plat: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Repair Linux wheel using auditwheel.
 
     Uses --strip option to strip debugging symbols which can help with
     ELF alignment issues on ARM (fixes "ELF load command address/offset not properly aligned" errors).
 
-    If ``AUDITWHEEL_PLAT`` is set (e.g. in CI for ARMv7 vs ARMv7 Legacy), it is passed as
-    ``auditwheel repair --plat ...`` so repaired wheels get distinct PEP 425 platform tags
-    when build lineages would otherwise emit the same filename.
+    ``plat`` is the tag the filename check will require. When omitted, ``AUDITWHEEL_PLAT``
+    is used. Passing it explicitly keeps ``auditwheel repair --plat`` and that check on one value.
     """
-    plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    if plat is None:
+        plat = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+    else:
+        plat = plat.strip()
     only_plat = os.environ.get("AUDITWHEEL_ONLY_PLAT", "").strip().lower() in ("1", "true", "yes")
 
     cmd = ["auditwheel", "repair", str(wheel_path), "-w", str(temp_dir), "--strip"]
@@ -453,19 +466,23 @@ def main() -> None:
             continue
 
         plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
+        wheel_plat = plat_env
         if current_platform == "Linux" and current_arch == "armv7l" and plat_env and _is_linux_tag_wheel(wheel.name):
             retagged = _retag_linux_armv7_wheel_to_plat(wheel, plat_env)
             if not retagged:
                 retagged = _retag_linux_armv7_wheel_to_plat(wheel, plat_env)
             if retagged and _armv7_forced_plat_filename_ok(retagged.name, plat_env):
                 print_color(
-                    f"  -> Retagged linux_armv7l to {plat_env} (ARMv7 lineage split): {retagged.name}",
+                    f"  -> Retagged linux_armv7l to {plat_env}: {retagged.name}",
                     Fore.GREEN,
                 )
                 repaired_count += 1
             else:
                 if retagged and not _armv7_forced_plat_filename_ok(retagged.name, plat_env):
-                    msg = f"Retagged wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r}: {retagged.name}"
+                    msg = (
+                        "Retagged wheel filename does not match forced "
+                        f"{_forced_plat_phrase(plat_env, plat_env)}: {retagged.name}"
+                    )
                 else:
                     msg = f"Failed to retag linux_armv7l wheel to {plat_env!r}: {wheel.name}"
                 print_color(f"  -> ERROR: {msg}", Fore.RED)
@@ -510,7 +527,7 @@ def main() -> None:
         elif current_platform == "Darwin":
             result = repair_wheel_macos(wheel, temp_dir)
         elif current_platform == "Linux":
-            result = repair_wheel_linux(wheel, temp_dir)
+            result = repair_wheel_linux(wheel, temp_dir, plat=wheel_plat)
         else:
             print_color(f"  -> ERROR: Unsupported platform {current_platform}", Fore.RED)
             error_count += 1
@@ -580,7 +597,6 @@ def main() -> None:
                 skipped_count += 1
             continue
 
-        plat_env = os.environ.get("AUDITWHEEL_PLAT", "").strip()
         allow_linux_tag = _allow_linux_tag_env_enabled()
         is_linux_tag = _is_linux_tag_wheel(wheel.name)
         is_std_linux_arch = current_platform == "Linux" and current_arch in ("x86_64", "aarch64")
@@ -660,11 +676,12 @@ def main() -> None:
                 plat_env
                 and current_platform == "Linux"
                 and current_arch == "armv7l"
-                and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+                and not _armv7_forced_plat_filename_ok(wheel.name, wheel_plat)
                 and not (allow_linux_tag and is_linux_tag)
             ):
                 msg = (
-                    f"Wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r} "
+                    "Wheel filename does not match forced "
+                    f"{_forced_plat_phrase(wheel_plat, plat_env)} "
                     f"after non-fatal repair path: {wheel.name}"
                 )
                 print_color(f"  -> ERROR: {msg}", Fore.RED)
@@ -706,11 +723,12 @@ def main() -> None:
                     plat_env
                     and current_platform == "Linux"
                     and current_arch == "armv7l"
-                    and not _armv7_forced_plat_filename_ok(final_path.name, plat_env)
+                    and not _armv7_forced_plat_filename_ok(final_path.name, wheel_plat)
                     and not (allow_linux_tag and _is_linux_tag_wheel(final_path.name))
                 ):
                     msg = (
-                        f"Repaired wheel filename does not match forced AUDITWHEEL_PLAT={plat_env!r}: {final_path.name}"
+                        "Repaired wheel filename does not match forced "
+                        f"{_forced_plat_phrase(wheel_plat, plat_env)}: {final_path.name}"
                     )
                     print_color(f"  -> ERROR: {msg}", Fore.RED)
                     errors.append(f"{final_path.name}: {msg}")
@@ -724,12 +742,12 @@ def main() -> None:
                     plat_env
                     and current_platform == "Linux"
                     and current_arch == "armv7l"
-                    and not _armv7_forced_plat_filename_ok(wheel.name, plat_env)
+                    and not _armv7_forced_plat_filename_ok(wheel.name, wheel_plat)
                     and not (allow_linux_tag and is_linux_tag)
                 ):
                     msg = (
                         "auditwheel reported success but left the wheel unchanged with a filename "
-                        f"that does not match AUDITWHEEL_PLAT={plat_env!r}: {wheel.name}"
+                        f"that does not match {_forced_plat_phrase(wheel_plat, plat_env)}: {wheel.name}"
                     )
                     print_color(f"  -> ERROR: {msg}", Fore.RED)
                     errors.append(f"{wheel.name}: {msg}")
