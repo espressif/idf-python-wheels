@@ -97,12 +97,14 @@ jobs:
       - name: Test wheel installation - ARMv7 (in Docker)
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} current image)"
+          PLAT="$(python armv7_docker_image.py ${{ matrix.python-version }} current plat)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e AUDITWHEEL_PLAT=manylinux_2_36_armv7l \
+            -e AUDITWHEEL_PLAT="$PLAT" \
             -e AUDITWHEEL_ONLY_PLAT=1 \
-            python:${{ matrix.python-version }}-bookworm \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version
@@ -115,12 +117,14 @@ jobs:
       - name: Test wheel installation - ARMv7 Legacy (in Docker)
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7 Legacy'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy image)"
+          PLAT="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy plat)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e AUDITWHEEL_PLAT=manylinux_2_31_armv7l \
+            -e AUDITWHEEL_PLAT="$PLAT" \
             -e AUDITWHEEL_ONLY_PLAT=1 \
-            python:${{ matrix.python-version }}-bullseye \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version

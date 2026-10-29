@@ -15,7 +15,8 @@ on:
 jobs:
   triage:
     name: ${{ matrix.os }} - ${{ matrix.python-version }}
-    runs-on: ${{ matrix.runner }}
+    # setup-python has no CPython 3.8 or 3.9 builds for Ubuntu 26.04 (ubuntu-latest).
+    runs-on: ${{ (matrix.os == 'Linux x86_64' && (matrix.python-version == '3.8' || matrix.python-version == '3.9')) && 'ubuntu-24.04' || matrix.runner }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # PyO3 (cryptography, etc.): allow building against CPython newer than PyO3's declared max when using stable ABI
@@ -164,6 +165,7 @@ jobs:
       - name: Build Python dependent wheels - ARMv7 (in Docker)
         if: matrix.os == 'Linux ARMv7'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} current image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -172,7 +174,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bookworm \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version
@@ -187,9 +189,10 @@ jobs:
             "
 
       - name: Build Python dependent wheels - ARMv7 Legacy (in Docker)
-        # Build on Bullseye (glibc 2.31) for compatibility with older systems
+        # Bullseye (glibc 2.31) below 3.15. Python 3.15+ has no bullseye image, so those use bookworm.
         if: matrix.os == 'Linux ARMv7 Legacy'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -198,7 +201,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bullseye \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version

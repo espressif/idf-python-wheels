@@ -163,6 +163,30 @@ Tag: cp37-abi3-linux_armv7l
             self.assertTrue(manylinux_v2.exists())
 
 
+class TestFlattenPerPythonArtifacts(unittest.TestCase):
+    def test_same_abi3_basename_keeps_both_image_tags(self) -> None:
+        from armv7_docker_image import resolve_armv7_plat
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bookworm = root / "wheels-download-directory-linux-armv7-3.12"
+            trixie = root / "wheels-download-directory-linux-armv7-3.15"
+            bookworm.mkdir()
+            trixie.mkdir()
+            _write_minimal_linux_armv7_wheel(bookworm)
+            _write_minimal_linux_armv7_wheel(trixie)
+            bookworm_whl = bookworm / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
+            trixie_whl = trixie / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
+            # Identical interpreter tags; the directory is what distinguishes the images.
+            self.assertEqual(resolve_armv7_plat(bookworm_whl, "manylinux_2_36_armv7l"), "manylinux_2_36_armv7l")
+            self.assertEqual(resolve_armv7_plat(trixie_whl, "manylinux_2_36_armv7l"), "manylinux_2_41_armv7l")
+            rw._retag_linux_armv7_wheel_to_plat(bookworm_whl, "manylinux_2_36_armv7l")
+            rw._retag_linux_armv7_wheel_to_plat(trixie_whl, "manylinux_2_41_armv7l")
+            rw._flatten_wheels_to_root(root)
+            self.assertTrue((root / "pkg-1.0-cp38-cp38-manylinux_2_36_armv7l.whl").is_file())
+            self.assertTrue((root / "pkg-1.0-cp38-cp38-manylinux_2_41_armv7l.whl").is_file())
+
+
 class TestManylinuxGlibcTags(unittest.TestCase):
     def test_parse_wheel_and_plat_tags(self) -> None:
         from _helper_functions import armv7_wheel_matches_forced_plat
@@ -186,6 +210,13 @@ class TestManylinuxGlibcTags(unittest.TestCase):
                 "manylinux_2_36_armv7l",
                 only_plat=True,
             )
+        )
+        trixie_chain = "pkg-1.0-cp311-cp311-manylinux_2_31_armv7l.manylinux_2_36_armv7l.manylinux_2_41_armv7l.whl"
+        self.assertTrue(armv7_wheel_matches_forced_plat(trixie_chain, "manylinux_2_41_armv7l", only_plat=True))
+        self.assertFalse(armv7_wheel_matches_forced_plat(trixie_chain, "manylinux_2_36_armv7l", only_plat=True))
+        self.assertFalse(armv7_wheel_matches_forced_plat(trixie_chain, "manylinux_2_31_armv7l", only_plat=True))
+        self.assertFalse(
+            armv7_wheel_matches_forced_plat(trixie_chain, "manylinux_2_36_armv7l", only_plat=True, repair=True)
         )
 
 
