@@ -136,15 +136,20 @@ while IFS=$'\t' read -r WHEEL WHEEL_PYTHON; do
   echo "========== ${WHEEL} (python: ${WHEEL_PYTHON}) =========="
   rm -rf "${WORKDIR}/wheel"
   unzip -q -o "${WHEEL}" -d "${WORKDIR}/wheel"
+  # cryptography 50+ tags CPython 3.15 wheels abi3.abi3t and ships _rust.abi3t.so.
+  # Older wheels keep _rust.abi3.so. GIL-enabled 3.15 loads .abi3t.so when that is the only copy.
   SO="$(find "${WORKDIR}/wheel" -name '_rust.abi3.so' | head -1)"
   if [ -z "${SO}" ]; then
-    echo "ERROR: _rust.abi3.so not found in ${WHEEL}" >&2
+    SO="$(find "${WORKDIR}/wheel" -name '_rust.abi3t.so' | head -1)"
+  fi
+  if [ -z "${SO}" ]; then
+    echo "ERROR: cryptography rust extension (_rust.abi3.so or _rust.abi3t.so) not found in ${WHEEL}" >&2
     exit 1
   fi
-  echo "--- otool -L _rust.abi3.so ---"
+  echo "--- otool -L $(basename "${SO}") ---"
   otool -L "${SO}" || true
   if otool -L "${SO}" | grep -q '/usr/local/opt/openssl@3/'; then
-    echo "ERROR: _rust.abi3.so links to Homebrew openssl@3 in ${WHEEL}" >&2
+    echo "ERROR: $(basename "${SO}") links to Homebrew openssl@3 in ${WHEEL}" >&2
     exit 1
   fi
 

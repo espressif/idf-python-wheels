@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Minimal OS setup for ARMv7 Docker builds *before* pip installs (build_requirements / wheels).
-# Expects to run as root (official python:*-bookworm / *-bullseye images).
+# Expects to run as root (official python:*-bullseye / *-bookworm / *-trixie images).
 # Must be sourced (not subprocess bash) so PIP_NO_BINARY persists for later pip / PEP 517 builds.
 # Restore the caller's ``errexit`` afterwards so ``set -e`` does not leak into that shell.
 # Read ``$-`` directly: bash clears errexit inside the command substitution of an assignment,
@@ -11,7 +11,7 @@ set -e
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Explicit libffi runtime matches the dev headers (bullseye: libffi7, bookworm: libffi8).
+# Explicit libffi runtime matches the dev headers (bullseye: libffi7, bookworm/trixie: libffi8).
 # Piwheels manylinux cffi wheels can link against a newer libffi than the image ships;
 # pairing dev + runtime keeps installs predictable. Wheel builds use piwheels (see workflow
 # PIP_INDEX_URL); cffi/argon2 forced to sdists globally. Cryptography is only forced on
@@ -21,7 +21,7 @@ export PIP_NO_BINARY=cffi,argon2-cffi-bindings
 . /etc/os-release
 case "${VERSION_CODENAME:-}" in
   bullseye) LIBFFI_RUNTIME=libffi7 ;;
-  bookworm) LIBFFI_RUNTIME=libffi8 ;;
+  bookworm|trixie) LIBFFI_RUNTIME=libffi8 ;;
   *)        LIBFFI_RUNTIME= ;;
 esac
 

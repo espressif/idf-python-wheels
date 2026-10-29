@@ -302,6 +302,7 @@ jobs:
 
       - name: Build wheels - ARMv7 (in Docker)
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} current image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -309,7 +310,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bookworm \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version
@@ -392,8 +393,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Build wheels - ARMv7 Legacy (in Docker)
-        # Build on Bullseye (glibc 2.31) for compatibility with older systems
+        # Bullseye (glibc 2.31) below 3.15. Python 3.15+ has no bullseye image, so those use bookworm.
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy image)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
@@ -401,7 +403,7 @@ jobs:
             -e PIP_NO_CACHE_DIR=1 \
             -e PIP_INDEX_URL=https://www.piwheels.org/simple \
             -e PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-            python:${{ matrix.python-version }}-bullseye \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version

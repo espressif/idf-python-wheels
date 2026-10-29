@@ -86,11 +86,13 @@ jobs:
         if: contains(fromJson(inputs.enabled_arches), matrix.arch)
         uses: actions/download-artifact@v8
         with:
-          # Download only artifacts for this specific architecture to avoid mixing wheels
-          # (especially important for ARMv7 vs ARMv7 Legacy which produce same-named wheels)
+          # Keep each Python version in its own directory. ARMv7 repair reads the
+          # artifact name to stamp manylinux_2_31 / 2_36 / 2_41 from the build image.
+          # Merging first would collapse abi3 wheels that share a basename onto one glibc.
+          # repair_wheels.py flattens to the top level after that stamp.
           pattern: wheels-download-directory-${{ matrix.arch }}-*
           path: ./downloaded_wheels
-          merge-multiple: true
+          merge-multiple: false
 
       - name: Check for wheels
         id: check-wheels
@@ -118,6 +120,7 @@ jobs:
           python-version: |
             3.13
             3.14
+            3.15
           allow-prereleases: true
 
       - name: Set up QEMU

@@ -93,6 +93,8 @@ def _armv7_test_plat() -> tuple[str, bool] | None:
         return "manylinux_2_31_armv7l", True
     if codename == "bookworm":
         return "manylinux_2_36_armv7l", True
+    if codename == "trixie":
+        return "manylinux_2_41_armv7l", True
     return None
 
 
