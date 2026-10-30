@@ -39,6 +39,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Install dependencies
+        run: python -m pip install --break-system-packages --ignore-installed -r build_requirements.txt
+
       - name: Run script to generate supported_versions.json
         run: |
           python supported_versions.py ${{ secrets.IDF_VERSIONS_TXT }}

@@ -264,6 +264,26 @@ class TestWheelCompatibility(unittest.TestCase):
                 "311",
             )
         )
+        self.assertFalse(
+            self.is_wheel_compatible(
+                "cffi-2.0.0-cp311-cp311-manylinux_2_31_armv7l.manylinux_2_36_armv7l.manylinux_2_41_armv7l.whl",
+                "311",
+            )
+        )
+
+    @patch.dict(
+        os.environ,
+        {"AUDITWHEEL_PLAT": "manylinux_2_41_armv7l", "AUDITWHEEL_ONLY_PLAT": "1"},
+        clear=False,
+    )
+    @patch("test_wheels_install.sys.platform", "linux")
+    @patch("test_wheels_install.platform.machine", return_value="armv7l")
+    @patch("test_wheels_install.platform.system", return_value="Linux")
+    def test_armv7_trixie_accepts_only_the_241_chain(self, _sys, _machine):
+        chain = "cffi-2.0.0-cp311-cp311-manylinux_2_31_armv7l.manylinux_2_36_armv7l.manylinux_2_41_armv7l.whl"
+        self.assertTrue(self.is_wheel_compatible(chain, "311"))
+        self.assertTrue(self.is_wheel_compatible("cffi-2.0.0-cp311-cp311-manylinux_2_41_armv7l.whl", "311"))
+        self.assertFalse(self.is_wheel_compatible("cffi-2.0.0-cp311-cp311-manylinux_2_36_armv7l.whl", "311"))
 
     @patch.dict(
         os.environ,

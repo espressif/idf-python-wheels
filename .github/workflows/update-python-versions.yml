@@ -13,6 +13,9 @@ jobs:
   update-readme:
     name: Update README with current supported versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout repository

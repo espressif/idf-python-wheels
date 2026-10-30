@@ -456,20 +456,12 @@ def armv7_wheel_matches_forced_plat(
         return False
     if not only_plat:
         return True
-    has_31 = (2, 31) in wheel_tags
-    has_36 = (2, 36) in wheel_tags
-    if repair:
-        # ``repair_wheels.py``: auditwheel may emit compat 2_31 tags alongside 2_36.
-        if required == (2, 31) and has_36:
-            return False
-        return True
-    # ``test_wheels_install.py``: reject dual 2_31 + 2_36 tags on Legacy (2_31) tests — those
-    # are Bookworm auditwheel compat filenames. Bookworm (2_36) tests accept them when 2_36 is present.
-    if has_31 and has_36:
-        return required == (2, 36)
-    if required == (2, 31) and has_36:
-        return False
-    return True
+    # Lineage is the highest glibc tag. auditwheel compat chains list older
+    # baselines beside it (2.31+2.36 for Bookworm, and 2.31+2.36+2.41 for Trixie).
+    # A Trixie wheel must not satisfy a Bookworm or Bullseye test just because
+    # those older tags are also in the filename. Install and repair (``repair=True``)
+    # both use this rule.
+    return max(wheel_tags) == required
 
 
 def _force_no_binary_linux_normalized(repo_root: Path | None = None) -> frozenset[str]:
