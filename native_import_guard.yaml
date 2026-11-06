@@ -82,6 +82,11 @@ packages:
   - package_name: pyyaml
     imports:
       - from yaml import CSafeLoader
+  # top_level.txt lists ``ruamel`` (a namespace marker with no module) before
+  # the C extension. ``import ruamel`` raises ModuleNotFoundError.
+  - package_name: ruamel.yaml.clib
+    imports:
+      - import _ruamel_yaml
   - package_name: brotli
     imports:
       - import brotli

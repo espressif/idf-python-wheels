@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Minimal OS setup for ARMv7 Docker builds *before* pip installs (build_requirements / wheels).
-# Expects to run as root (official python:*-bookworm / *-bullseye images).
+# Expects to run as root (official python:*-bullseye / *-bookworm images).
 # Must be sourced (not subprocess bash) so PIP_NO_BINARY persists for later pip / PEP 517 builds.
 # Restore the caller's ``errexit`` afterwards so ``set -e`` does not leak into that shell.
 # Read ``$-`` directly: bash clears errexit inside the command substitution of an assignment,
