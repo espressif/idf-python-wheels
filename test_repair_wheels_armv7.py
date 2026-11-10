@@ -23,6 +23,13 @@ def _record_sha256(payload: bytes) -> str:
     return rw._wheel_record_sha256(payload)
 
 
+def _retag(src: Path, plat: str) -> Path:
+    out, reason = rw._retag_linux_armv7_wheel_to_plat(src, plat)
+    if out is None:
+        raise AssertionError(reason or "retag failed")
+    return out
+
+
 def _write_minimal_linux_armv7_wheel(path: Path, dist_name: str = "pkg", version: str = "1.0") -> None:
     wheel_info = f"{dist_name}-{version}.dist-info"
     wheel_path = path / f"{dist_name}-{version}-cp38-cp38-linux_armv7l.whl"
@@ -53,7 +60,7 @@ class TestRetagLinuxArmv7Wheel(unittest.TestCase):
             root = Path(tmp)
             _write_minimal_linux_armv7_wheel(root)
             src = root / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_36_armv7l")
+            out = _retag(src, "manylinux_2_36_armv7l")
             self.assertIsNotNone(out)
             assert out is not None
             self.assertEqual(out.name, "pkg-1.0-cp38-cp38-manylinux_2_36_armv7l.whl")
@@ -92,9 +99,7 @@ Tag: cp36-abi3-linux_armv7l
                 zf.writestr(f"{wheel_info}/WHEEL", wheel_meta)
                 zf.writestr(f"{wheel_info}/RECORD", record)
 
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_31_armv7l")
-            self.assertIsNotNone(out)
-            assert out is not None
+            out = _retag(src, "manylinux_2_31_armv7l")
             self.assertEqual(out.name, "psutil-7.2.2-cp36-abi3-manylinux_2_31_armv7l.whl")
 
     def test_retag_many_entry_wheel(self) -> None:
@@ -122,9 +127,7 @@ Tag: cp37-abi3-linux_armv7l
                 zf.writestr(f"{wheel_info}/WHEEL", wheel_meta)
                 zf.writestr(f"{wheel_info}/RECORD", record)
 
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_31_armv7l")
-            self.assertIsNotNone(out)
-            assert out is not None
+            out = _retag(src, "manylinux_2_31_armv7l")
             self.assertEqual(out.name, "pycryptodome-3.23.0-cp37-abi3-manylinux_2_31_armv7l.whl")
             with zipfile.ZipFile(out, "r") as zf:
                 self.assertEqual(len(zf.namelist()), 202)
@@ -192,7 +195,26 @@ class TestManylinuxGlibcTags(unittest.TestCase):
         )
 
 
-def _elf32_le(needed: list[str], glibc_versions: list[str]) -> bytes:
+def _run_armv7_repair(root: Path, plat: str) -> None:
+    with ExitStack() as stack:
+        stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
+        stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="armv7l"))
+        stack.enter_context(
+            unittest.mock.patch.dict(
+                os.environ,
+                {"AUDITWHEEL_PLAT": plat, "AUDITWHEEL_ONLY_PLAT": "1"},
+                clear=False,
+            )
+        )
+        orig = os.getcwd()
+        try:
+            os.chdir(root)
+            rw.main()
+        finally:
+            os.chdir(orig)
+
+
+def _elf32_le(needed: list[str], glibc_versions: list[str], vaddr_bias: int = 0) -> bytes:
     """Little-endian ARM ELF32 whose dynamic segment records ``needed`` and ``glibc_versions``."""
     dynstr = bytearray(b"\x00")
 
@@ -221,14 +243,24 @@ def _elf32_le(needed: list[str], glibc_versions: list[str]) -> bytes:
         return struct.pack("<II", tag, val)
 
     dyn_blob = b"".join(dyn(1, off) for off in needed_offs)
-    dyn_blob += dyn(5, str_off)
+    dyn_blob += dyn(5, str_off + vaddr_bias)
     if glibc_versions:
-        dyn_blob += dyn(0x6FFFFFFE, ver_off)
+        dyn_blob += dyn(0x6FFFFFFE, ver_off + vaddr_bias)
         dyn_blob += dyn(0x6FFFFFFF, 1)
     dyn_blob += dyn(0, 0)
 
     def phdr(p_type: int, p_offset: int, p_filesz: int, p_flags: int, p_align: int) -> bytes:
-        return struct.pack("<IIIIIIII", p_type, p_offset, p_offset, 0, p_filesz, p_filesz, p_flags, p_align)
+        return struct.pack(
+            "<IIIIIIII",
+            p_type,
+            p_offset,
+            p_offset + vaddr_bias,
+            0,
+            p_filesz,
+            p_filesz,
+            p_flags,
+            p_align,
+        )
 
     program_headers = phdr(1, 0, total, 5, 0x1000) + phdr(2, dyn_off, n_dyn * 8, 6, 4)
     e_ident = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\x00" * 8
@@ -283,46 +315,67 @@ class TestArmv7ElfPlat(unittest.TestCase):
         self.assertEqual(glibc, {(2, 34), (2, 28)})
 
     def test_bullseye_rejects_glibc_234_and_openssl3(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            wheel = _write_tagged_wheel(
-                Path(tmp),
-                "cryptography-50.0.2-cp313-abi3-manylinux_2_31_armv7l.whl",
-                _elf32_le(["libssl.so.3", "libcrypto.so.3", "libc.so.6"], ["GLIBC_2.34"]),
-            )
-            violation = rw._armv7_wheel_plat_violation(wheel, "manylinux_2_31_armv7l")
-            self.assertIsNotNone(violation)
-            assert violation is not None
-            self.assertIn("glibc 2.34", violation)
-            self.assertIn("libcrypto.so.3", violation)
-            self.assertIn("libssl.so.3", violation)
+        violation = rw._armv7_plat_violation(
+            {"libssl.so.3", "libcrypto.so.3", "libc.so.6"},
+            {(2, 34)},
+            set(),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertIsNotNone(violation)
+        assert violation is not None
+        self.assertIn("glibc 2.34", violation)
+        self.assertIn("libcrypto.so.3", violation)
+        self.assertIn("libssl.so.3", violation)
 
-    def test_bookworm_allows_glibc_234_and_openssl3(self) -> None:
+    def _kept_names(self, filename: str, elf: bytes, plat: str, extra: dict[str, bytes] | None = None) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:
-            wheel = _write_tagged_wheel(
-                Path(tmp),
-                "cryptography-50.0.2-cp313-abi3-manylinux_2_36_armv7l.whl",
-                _elf32_le(["libssl.so.3", "libcrypto.so.3", "libc.so.6"], ["GLIBC_2.34"]),
-            )
-            self.assertIsNone(rw._armv7_wheel_plat_violation(wheel, "manylinux_2_36_armv7l"))
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            _write_tagged_wheel(wheels_dir, filename, elf, extra)
+            _run_armv7_repair(root, plat)
+            return sorted(path.name for path in wheels_dir.glob("*.whl"))
+
+    def test_bookworm_keeps_glibc_234_and_openssl3(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp313-abi3-linux_armv7l.whl",
+            _elf32_le(["libssl.so.3", "libcrypto.so.3", "libc.so.6"], ["GLIBC_2.34"]),
+            "manylinux_2_36_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp313-abi3-manylinux_2_36_armv7l.whl"])
 
     def test_bullseye_keeps_static_openssl_glibc_230(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            wheel = _write_tagged_wheel(
-                Path(tmp),
-                "cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl",
-                _elf32_le(["libc.so.6", "libdl.so.2", "libpthread.so.0"], ["GLIBC_2.30", "GLIBC_2.28"]),
-            )
-            self.assertIsNone(rw._armv7_wheel_plat_violation(wheel, "manylinux_2_31_armv7l"))
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libc.so.6", "libdl.so.2", "libpthread.so.0"], ["GLIBC_2.30", "GLIBC_2.28"]),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
 
-    def test_bundled_libssl_is_not_an_external_dependency(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            wheel = _write_tagged_wheel(
-                Path(tmp),
-                "cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl",
-                _elf32_le(["libssl.so.3", "libc.so.6"], ["GLIBC_2.30"]),
-                extra_members={"cryptography.libs/libssl.so.3": b"bundled"},
-            )
-            self.assertIsNone(rw._armv7_wheel_plat_violation(wheel, "manylinux_2_31_armv7l"))
+    def test_bundled_libssl_is_kept(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libssl.so.3", "libc.so.6"], ["GLIBC_2.30"]),
+            "manylinux_2_31_armv7l",
+            extra={"cryptography.libs/libssl.so.3": b"bundled"},
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_bullseye_keeps_elf_whose_load_vaddr_differs_from_offset(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libc.so.6"], ["GLIBC_2.30"], vaddr_bias=0x10000),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_retag_drops_unreadable_elf(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            b"\x7fELF" + b"\x00" * 8,
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, [])
 
     def test_retag_drops_piwheels_wheel_that_exceeds_bullseye(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -339,22 +392,7 @@ class TestArmv7ElfPlat(unittest.TestCase):
                 "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
                 _elf32_le(["libc.so.6"], ["GLIBC_2.30"]),
             )
-            with ExitStack() as stack:
-                stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
-                stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="armv7l"))
-                stack.enter_context(
-                    unittest.mock.patch.dict(
-                        os.environ,
-                        {"AUDITWHEEL_PLAT": "manylinux_2_31_armv7l", "AUDITWHEEL_ONLY_PLAT": "1"},
-                        clear=False,
-                    )
-                )
-                orig = os.getcwd()
-                try:
-                    os.chdir(root)
-                    rw.main()
-                finally:
-                    os.chdir(orig)
+            _run_armv7_repair(root, "manylinux_2_31_armv7l")
             names = sorted(p.name for p in wheels_dir.glob("*.whl"))
             self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
 
