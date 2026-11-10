@@ -20,6 +20,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import zipfile
@@ -37,6 +38,7 @@ from _helper_functions import _REPO_ROOT
 from _helper_functions import _force_no_binary_linux_normalized
 from _helper_functions import _is_linux_tag_armv7_wheel_name as _is_linux_tag_wheel
 from _helper_functions import armv7_wheel_matches_forced_plat
+from _helper_functions import manylinux_glibc_tags_in_name
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import wheel_archive_is_readable
@@ -159,7 +161,9 @@ def _retag_linux_armv7_wheel_to_plat(wheel_path: Path, plat: str) -> Optional[Pa
 
     Current and legacy builds both produce ``*-linux_armv7l.whl``. The platform tag
     is the repair container: Bookworm ``manylinux_2_36`` for current, Bullseye
-    ``manylinux_2_31`` for legacy.
+    ``manylinux_2_31`` for legacy. The caller drops the retagged wheel when its ELF
+    needs a newer glibc than ``plat``, or still links unpackaged OpenSSL 3 on the
+    Bullseye tag.
 
     Writes to a container-local staging file first (many-entry wheels such as pycryptodome
     can fail when rebuilt directly on the QEMU bind-mounted ``downloaded_wheels`` tree).
@@ -237,6 +241,217 @@ def _retag_linux_armv7_wheel_to_plat(wheel_path: Path, plat: str) -> Optional[Pa
         return None
     finally:
         staged.unlink(missing_ok=True)
+
+
+# External OpenSSL 3 is not in the manylinux baseline before glibc 2.35.
+# Bullseye (``manylinux_2_31``) ships OpenSSL 1.1 only; Bookworm (``2_36``) ships OpenSSL 3.
+_OPENSSL3_SONAMES = frozenset({"libcrypto.so.3", "libssl.so.3"})
+_OPENSSL3_EXTERNAL_MAX_GLIBC = (2, 34)
+_GLIBC_VERSION_NAME = re.compile(r"GLIBC_(\d+)\.(\d+)$")
+
+
+def _elf_needed_and_glibc(blob: bytes) -> tuple[set[str], set[tuple[int, int]]] | None:
+    """Return ``DT_NEEDED`` sonames and required ``GLIBC_M.N`` versions.
+
+    ``None`` when ``blob`` is not a little-endian ELF this parser understands.
+    An ELF with no dynamic segment returns empty sets.
+    """
+    if len(blob) < 52 or blob[:4] != b"\x7fELF" or blob[5] != 1:
+        return None
+    ei_class = blob[4]
+    if ei_class == 1:
+        if len(blob) < 52:
+            return None
+        (
+            _e_type,
+            _e_machine,
+            _e_version,
+            _e_entry,
+            e_phoff,
+            _e_shoff,
+            _e_flags,
+            _e_ehsize,
+            e_phentsize,
+            e_phnum,
+            _e_shentsize,
+        ) = struct.unpack_from("<HHIIIIIHHHH", blob, 16)
+        dyn_fmt = "<II"
+        dyn_size = 8
+        is32 = True
+    elif ei_class == 2:
+        if len(blob) < 64:
+            return None
+        (
+            _e_type,
+            _e_machine,
+            _e_version,
+            _e_entry,
+            e_phoff,
+            _e_shoff,
+            _e_flags,
+            _e_ehsize,
+            e_phentsize,
+            e_phnum,
+            _e_shentsize,
+        ) = struct.unpack_from("<HHIQQQIHHHH", blob, 16)
+        dyn_fmt = "<QQ"
+        dyn_size = 16
+        is32 = False
+    else:
+        return None
+    if e_phnum <= 0 or e_phnum > 128 or e_phentsize < 32 or e_phoff < 0:
+        return None
+
+    loads: list[tuple[int, int, int]] = []
+    dynamic_off: int | None = None
+    dynamic_filesz = 0
+    for i in range(e_phnum):
+        off = e_phoff + i * e_phentsize
+        if off < 0 or off + (32 if is32 else 56) > len(blob):
+            return None
+        if is32:
+            p_type, p_offset, p_vaddr, _paddr, p_filesz, _memsz, _flags, _align = struct.unpack_from(
+                "<IIIIIIII", blob, off
+            )
+        else:
+            p_type, _flags, p_offset, p_vaddr, _paddr, p_filesz, _memsz, _align = struct.unpack_from(
+                "<IIQQQQQQ", blob, off
+            )
+        if p_type == 1:  # PT_LOAD
+            loads.append((p_offset, p_vaddr, p_filesz))
+        elif p_type == 2:  # PT_DYNAMIC
+            dynamic_off = p_offset
+            dynamic_filesz = p_filesz
+    if dynamic_off is None or dynamic_filesz <= 0:
+        return set(), set()
+
+    def vaddr_to_offset(vaddr: int) -> int | None:
+        for p_offset, p_vaddr, p_filesz in loads:
+            if p_vaddr <= vaddr < p_vaddr + p_filesz:
+                return p_offset + (vaddr - p_vaddr)
+        return None
+
+    strtab_vaddr: int | None = None
+    verneed_vaddr: int | None = None
+    verneed_num = 0
+    needed_offs: list[int] = []
+    pos = dynamic_off
+    end = min(len(blob), dynamic_off + dynamic_filesz)
+    while pos + dyn_size <= end:
+        tag, val = struct.unpack_from(dyn_fmt, blob, pos)
+        pos += dyn_size
+        if tag == 0:  # DT_NULL
+            break
+        if tag == 1:  # DT_NEEDED
+            needed_offs.append(val)
+        elif tag == 5:  # DT_STRTAB
+            strtab_vaddr = val
+        elif tag == 0x6FFFFFFE:  # DT_VERNEED
+            verneed_vaddr = val
+        elif tag == 0x6FFFFFFF:  # DT_VERNEEDNUM
+            verneed_num = val
+    if strtab_vaddr is None:
+        return None
+    strtab_off = vaddr_to_offset(strtab_vaddr)
+    if strtab_off is None:
+        return None
+
+    def read_cstr(rel: int) -> str:
+        start = strtab_off + rel
+        if start < 0 or start >= len(blob):
+            return ""
+        end_s = blob.find(b"\x00", start)
+        if end_s < 0:
+            return ""
+        return blob[start:end_s].decode("ascii", "replace")
+
+    needed = {name for name in (read_cstr(off) for off in needed_offs) if name}
+    glibc: set[tuple[int, int]] = set()
+    if verneed_vaddr is not None and verneed_num:
+        vn_off = vaddr_to_offset(verneed_vaddr)
+        if vn_off is not None:
+            for _entry in range(min(int(verneed_num), 64)):
+                if vn_off < 0 or vn_off + 16 > len(blob):
+                    break
+                _vn_version, vn_cnt, _vn_file, vn_aux, vn_next = struct.unpack_from("<HHIII", blob, vn_off)
+                aux = vn_off + vn_aux
+                for _aux_i in range(min(int(vn_cnt), 64)):
+                    if aux < 0 or aux + 16 > len(blob):
+                        break
+                    _vna_hash, _vna_flags, _vna_other, vna_name, vna_next = struct.unpack_from("<IHHII", blob, aux)
+                    match = _GLIBC_VERSION_NAME.match(read_cstr(vna_name))
+                    if match:
+                        version = (int(match.group(1)), int(match.group(2)))
+                        if version[0] == 2 and version[1] <= 80:
+                            glibc.add(version)
+                    if vna_next == 0:
+                        break
+                    aux += vna_next
+                if vn_next == 0:
+                    break
+                vn_off += vn_next
+    return needed, glibc
+
+
+def _armv7_wheel_plat_violation(wheel_path: Path, plat: str) -> str | None:
+    """Why ``wheel_path`` must not be published as ``plat``, or None.
+
+    Piwheels ``linux_armv7l`` wheels are retagged to the repair image's manylinux
+    tag without relinking. That tag is a glibc/OpenSSL promise: Bullseye is glibc
+    2.31 and OpenSSL 1.1. A binary that needs glibc 2.34 or unpackaged
+    ``libssl.so.3`` / ``libcrypto.so.3`` is the Bookworm build under a Bullseye name.
+    """
+    plat_tags = manylinux_glibc_tags_in_name(plat)
+    if not plat_tags:
+        return None
+    plat_glibc = max(plat_tags)
+    try:
+        with zipfile.ZipFile(wheel_path) as zf:
+            bundled = {info.filename.rsplit("/", 1)[-1] for info in zf.infolist()}
+            needed_glibc: set[tuple[int, int]] = set()
+            openssl3: set[str] = set()
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                base = info.filename.rsplit("/", 1)[-1]
+                if ".so" not in base:
+                    continue
+                parsed = _elf_needed_and_glibc(zf.read(info))
+                if parsed is None:
+                    continue
+                needed, glibc = parsed
+                needed_glibc.update(glibc)
+                for soname in needed:
+                    if soname in _OPENSSL3_SONAMES and soname not in bundled:
+                        openssl3.add(soname)
+    except (OSError, zipfile.BadZipFile):
+        return None
+
+    reasons: list[str] = []
+    too_new = {ver for ver in needed_glibc if ver > plat_glibc}
+    if too_new:
+        major, minor = max(too_new)
+        reasons.append(f"needs glibc {major}.{minor}, {plat} allows {plat_glibc[0]}.{plat_glibc[1]}")
+    if openssl3 and plat_glibc <= _OPENSSL3_EXTERNAL_MAX_GLIBC:
+        libs = ", ".join(sorted(openssl3))
+        reasons.append(f"links unpackaged {libs} (absent from the {plat} baseline)")
+    if not reasons:
+        return None
+    return "; ".join(reasons)
+
+
+def _unlink_armv7_plat_violation(wheel_path: Path, plat: str, platform_name: str, arch: str) -> bool:
+    """Delete an ARMv7 wheel whose ELF does not meet ``AUDITWHEEL_PLAT``. Returns True if deleted."""
+    if platform_name != "Linux" or arch != "armv7l" or not plat:
+        return False
+    if "manylinux" not in wheel_path.name.lower():
+        return False
+    violation = _armv7_wheel_plat_violation(wheel_path, plat)
+    if not violation:
+        return False
+    print_color(f"  -> Deleting {wheel_path.name} ({violation})", Fore.RED)
+    wheel_path.unlink(missing_ok=True)
+    return True
 
 
 def _prune_manylinux_armv7_when_linux_tag_present(wheels_dir: Path) -> int:
@@ -472,6 +687,9 @@ def main() -> None:
             if not retagged:
                 retagged = _retag_linux_armv7_wheel_to_plat(wheel, plat_env)
             if retagged and _armv7_forced_plat_filename_ok(retagged.name, plat_env):
+                if _unlink_armv7_plat_violation(retagged, plat_env, current_platform, current_arch):
+                    deleted_count += 1
+                    continue
                 print_color(
                     f"  -> Retagged linux_armv7l to {plat_env}: {retagged.name}",
                     Fore.GREEN,
@@ -601,6 +819,23 @@ def main() -> None:
         is_linux_tag = _is_linux_tag_wheel(wheel.name)
         is_std_linux_arch = current_platform == "Linux" and current_arch in ("x86_64", "aarch64")
 
+        # auditwheel refused the forced ARMv7 tag because the binary needs newer
+        # versioned symbols than that glibc. Keeping the wheel publishes the tag anyway.
+        if (
+            current_platform == "Linux"
+            and current_arch == "armv7l"
+            and plat_env
+            and "too-recent versioned symbols" in error_msg
+        ):
+            print_color(
+                "  -> Deleting wheel (auditwheel: too-recent versioned symbols for "
+                f"{plat_env}; not publishing that tag)",
+                Fore.RED,
+            )
+            wheel.unlink(missing_ok=True)
+            deleted_count += 1
+            continue
+
         # Check for non-critical errors (keep original wheel)
         is_noncritical = (
             "too-recent versioned symbols" in error_msg
@@ -672,6 +907,9 @@ def main() -> None:
                     "  -> Keeping original wheel (auditwheel libc detection failed on ARMv7 runner; often QEMU)",
                     Fore.YELLOW,
                 )
+            if _unlink_armv7_plat_violation(wheel, plat_env, current_platform, current_arch):
+                deleted_count += 1
+                continue
             if (
                 plat_env
                 and current_platform == "Linux"
@@ -734,6 +972,8 @@ def main() -> None:
                     errors.append(f"{final_path.name}: {msg}")
                     final_path.unlink(missing_ok=True)
                     error_count += 1
+                elif _unlink_armv7_plat_violation(final_path, plat_env, current_platform, current_arch):
+                    deleted_count += 1
                 else:
                     repaired_count += 1
             elif result.returncode == 0:
@@ -753,6 +993,9 @@ def main() -> None:
                     errors.append(f"{wheel.name}: {msg}")
                     wheel.unlink(missing_ok=True)
                     error_count += 1
+                    continue
+                if _unlink_armv7_plat_violation(wheel, plat_env, current_platform, current_arch):
+                    deleted_count += 1
                     continue
                 print_color("  -> Keeping original wheel (already compatible)", Fore.GREEN)
                 skipped_count += 1

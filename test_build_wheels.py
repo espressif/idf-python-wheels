@@ -352,6 +352,29 @@ class TestWheelCompatibility(unittest.TestCase):
             self.assertEqual(failures, [])
             self.assertFalse(wheel.exists())
 
+    @patch.dict(
+        os.environ,
+        {"AUDITWHEEL_PLAT": "manylinux_2_31_armv7l", "AUDITWHEEL_ONLY_PLAT": "1"},
+        clear=False,
+    )
+    @patch("test_wheels_install.sys.platform", "linux")
+    @patch("test_wheels_install.platform.machine", return_value="armv7l")
+    @patch("test_wheels_install.platform.system", return_value="Linux")
+    @patch(
+        "test_wheels_install.run_import_probes",
+        return_value=(False, "ImportError: /lib/libc.so.6: version `GLIBC_2.34' not found"),
+    )
+    def test_armv7_legacy_drops_cryptography_needing_glibc_234(self, _probe, _sys, _machine):
+        from test_wheels_install import _run_native_import_probes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "cryptography-50.0.2-cp313-abi3-manylinux_2_31_armv7l.whl"
+            wheel.write_bytes(b"x")
+            failed, failures = _run_native_import_probes([wheel])
+            self.assertEqual(failed, 0)
+            self.assertEqual(failures, [])
+            self.assertFalse(wheel.exists())
+
     @patch("test_wheels_install.platform.machine", return_value="x86_64")
     @patch("test_wheels_install.platform.system", return_value="Linux")
     def test_linux_x86_64_does_not_skip_cryptography_native_probe(self, _sys, _machine):

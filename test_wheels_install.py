@@ -135,9 +135,10 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
                     print(f"   {line}")
         else:
             err = msg or "native import probe failed"
-            if _drop_bullseye_cryptography_openssl3(parsed[0], err):
+            drop_reason = _bullseye_cryptography_drop_reason(parsed[0], err)
+            if drop_reason:
                 print_color(
-                    f"-- drop {wheel_path.name} (needs libssl.so.3; Bullseye has OpenSSL 1.1)",
+                    f"-- drop {wheel_path.name} ({drop_reason})",
                     Fore.YELLOW,
                 )
                 wheel_path.unlink(missing_ok=True)
@@ -155,19 +156,27 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
     return native_failed, failed_wheels
 
 
-def _drop_bullseye_cryptography_openssl3(dist_name: str, message: str) -> bool:
-    """True when a legacy ARMv7 cryptography wheel needs OpenSSL 3.
+_GLIBC_SYMBOL = re.compile(r"GLIBC_(\d+)\.(\d+)")
 
-    Piwheels wheels retagged to ``manylinux_2_31_armv7l`` still link ``libssl.so.3``.
-    Bullseye only ships OpenSSL 1.1, so the wheel is removed from the legacy artifact
-    instead of failing the install test.
+
+def _bullseye_cryptography_drop_reason(dist_name: str, message: str) -> str | None:
+    """Why a legacy ARMv7 cryptography wheel should be removed, or None.
+
+    Piwheels wheels retagged to ``manylinux_2_31_armv7l`` can still need glibc 2.34
+    and ``libssl.so.3``. Bullseye has glibc 2.31 and OpenSSL 1.1, so the wheel is
+    removed from the legacy artifact instead of failing the install test.
     """
     if canonicalize_name(dist_name) != canonicalize_name("cryptography"):
-        return False
-    if "libssl.so.3" not in message:
-        return False
+        return None
     armv7_plat = _armv7_test_plat()
-    return armv7_plat is not None and armv7_plat[0] == "manylinux_2_31_armv7l"
+    if armv7_plat is None or armv7_plat[0] != "manylinux_2_31_armv7l":
+        return None
+    if "libssl.so.3" in message or "libcrypto.so.3" in message:
+        return "needs OpenSSL 3; Bullseye has OpenSSL 1.1"
+    for major, minor in _GLIBC_SYMBOL.findall(message):
+        if (int(major), int(minor)) > (2, 31):
+            return f"needs glibc {major}.{minor}; Bullseye has glibc 2.31"
+    return None
 
 
 def _armv7_skip_cryptography_native_probe(dist_name: str) -> bool:
