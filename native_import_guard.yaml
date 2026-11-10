@@ -82,6 +82,18 @@ packages:
   - package_name: pyyaml
     imports:
       - from yaml import CSafeLoader
+  # _ruamel_yaml's init imports ruamel.yaml.*, a separate distribution.
+  # Wheel install uses --no-deps, so install that pure-Python package without
+  # replacing the clib wheel under test, then load the extension.
+  - package_name: ruamel.yaml.clib
+    imports:
+      - |
+        import subprocess, sys
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+            "-q", "--no-deps", "ruamel.yaml>=0.18",
+        ])
+        import _ruamel_yaml
   - package_name: brotli
     imports:
       - import brotli

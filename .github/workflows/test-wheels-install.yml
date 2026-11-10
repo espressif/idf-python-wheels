@@ -22,7 +22,8 @@ on:
 jobs:
   test-install:
     name: Test ${{ matrix.os }} - Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.runner }}
+    # setup-python has no CPython 3.8 or 3.9 builds for Ubuntu 26.04 (ubuntu-latest).
+    runs-on: ${{ (matrix.os == 'Linux x86_64' && (matrix.python-version == '3.8' || matrix.python-version == '3.9')) && 'ubuntu-24.04' || matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,8 +59,10 @@ jobs:
             arch: linux-armv7legacy
         python-version: ${{ fromJson(inputs.supported_python_versions) }}
         exclude:
-          # Python 3.14 doesn't have bullseye images for ARM
+          # Bullseye images stop at Python 3.13. Legacy is not built for 3.14+.
           - python-version: '3.14'
+            os: Linux ARMv7 Legacy
+          - python-version: '3.15'
             os: Linux ARMv7 Legacy
 
     steps:
@@ -97,12 +100,14 @@ jobs:
       - name: Test wheel installation - ARMv7 (in Docker)
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} current image)"
+          PLAT="$(python armv7_docker_image.py ${{ matrix.python-version }} current plat)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e AUDITWHEEL_PLAT=manylinux_2_36_armv7l \
+            -e AUDITWHEEL_PLAT="$PLAT" \
             -e AUDITWHEEL_ONLY_PLAT=1 \
-            python:${{ matrix.python-version }}-bookworm \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version
@@ -115,12 +120,14 @@ jobs:
       - name: Test wheel installation - ARMv7 Legacy (in Docker)
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.os == 'Linux ARMv7 Legacy'
         run: |
+          IMAGE="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy image)"
+          PLAT="$(python armv7_docker_image.py ${{ matrix.python-version }} legacy plat)"
           docker run --rm --platform linux/arm/v7 \
             -v $(pwd):/work \
             -w /work \
-            -e AUDITWHEEL_PLAT=manylinux_2_31_armv7l \
+            -e AUDITWHEEL_PLAT="$PLAT" \
             -e AUDITWHEEL_ONLY_PLAT=1 \
-            python:${{ matrix.python-version }}-bullseye \
+            "$IMAGE" \
             bash -c "
               set -e
               python --version

@@ -87,6 +87,20 @@ class TestNativeImportGuard(unittest.TestCase):
         self.assertEqual(guarded["brotli"].imports, ("import brotli",))
         self.assertEqual(guarded["pycryptodome"].imports, ("from Crypto.Cipher import AES",))
 
+    def test_ruamel_yaml_clib_imports_extension_after_ruamel_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = _write_wheel(
+                tmp,
+                "ruamel_yaml_clib-0.2.15-cp315-cp315-manylinux_2_36_armv7l.whl",
+                top_level="_ruamel_yaml\nruamel\n",
+            )
+            stmts = resolve_native_import_statements(wheel, current_platform="linux_armv7", python_version="3.15")
+            self.assertIsNotNone(stmts)
+            code = "\n".join(stmts or ())
+            self.assertIn("--no-deps", code)
+            self.assertIn("ruamel.yaml>=0.18", code)
+            self.assertIn("import _ruamel_yaml", code)
+
     def test_pyyaml_requires_csafeloader_except_on_macos_arm64_python38(self) -> None:
         self.assertEqual(
             package_import_statements("pyyaml", current_platform="linux_x86_64", python_version="3.8"),

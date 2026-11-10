@@ -14,6 +14,7 @@ import yaml
 
 from colorama import Fore
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from _helper_functions import exclude_entry_applies_to_platform
 from _helper_functions import merge_requirements
@@ -114,6 +115,36 @@ class YAMLListAdapter:
         # Combine requirements/packages with the same name (duplicates)
         # into one requirement and replaces original requirements
         _combine_package_duplicates(self, _requirement_duplicates)
+        # A versioned row rewrites only its own pin. Whole-package rows for the same name
+        # still keep the old pin, including where that version is excluded.
+        if self.exclude:
+            for package in self._yaml_list:
+                if "version" not in package or not (package.get("platform") or package.get("python")):
+                    continue
+                bare = {key: value for key, value in package.items() if key != "version"}
+                outside = next(iter(self._yaml_to_requirement([bare], exclude=True))).marker
+                if outside is None:
+                    continue
+                # Complements of this versioned row keep the incoming pin. Other whole-package
+                # rows have no pin, so pip would install the newest release outside the exclusion.
+                complements = {
+                    requirement.marker
+                    for requirement in self._yaml_to_requirement([package], exclude=True)
+                    if not requirement.specifier
+                }
+                version = package["version"] if isinstance(package["version"], str) else ""
+                package_name = canonicalize_name(package["package_name"])
+                updated: set[Requirement] = set()
+                for requirement in self.requirements:
+                    if canonicalize_name(requirement.name) != package_name or requirement.specifier:
+                        updated.add(requirement)
+                        continue
+                    marker = f"({requirement.marker}) and ({outside})" if requirement.marker else str(outside)
+                    pin = ""
+                    if version and package.get("platform") and requirement.marker not in complements:
+                        pin = version
+                    updated.add(Requirement(f"{requirement.name}{pin}; {marker}"))
+                self.requirements = updated
 
     def _change_specifier_logic(self, spec_with_text: str) -> tuple:
         """Change specifier logic to opposite
