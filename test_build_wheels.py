@@ -341,15 +341,15 @@ class TestWheelCompatibility(unittest.TestCase):
         "test_wheels_install.run_import_probes",
         return_value=(False, "ImportError: libssl.so.3: cannot open shared object file"),
     )
-    def test_armv7_legacy_drops_cryptography_linked_to_openssl3(self, _probe, _sys, _machine):
+    def test_armv7_legacy_fails_cryptography_linked_to_openssl3(self, _probe, _sys, _machine):
         from test_wheels_install import _run_native_import_probes
 
         with tempfile.TemporaryDirectory() as tmp:
             wheel = Path(tmp) / "cryptography-50.0.2-cp313-abi3-manylinux_2_31_armv7l.whl"
             wheel.write_bytes(b"x")
             failed, failures = _run_native_import_probes([wheel])
-            self.assertEqual(failed, 0)
-            self.assertEqual(failures, [])
+            self.assertEqual(failed, 1)
+            self.assertIn("libssl.so.3", failures[0][1])
             self.assertFalse(wheel.exists())
 
     @patch.dict(
@@ -364,15 +364,15 @@ class TestWheelCompatibility(unittest.TestCase):
         "test_wheels_install.run_import_probes",
         return_value=(False, "ImportError: /lib/libc.so.6: version `GLIBC_2.34' not found"),
     )
-    def test_armv7_legacy_drops_cryptography_needing_glibc_234(self, _probe, _sys, _machine):
+    def test_armv7_legacy_fails_cryptography_needing_glibc_234(self, _probe, _sys, _machine):
         from test_wheels_install import _run_native_import_probes
 
         with tempfile.TemporaryDirectory() as tmp:
             wheel = Path(tmp) / "cryptography-50.0.2-cp313-abi3-manylinux_2_31_armv7l.whl"
             wheel.write_bytes(b"x")
             failed, failures = _run_native_import_probes([wheel])
-            self.assertEqual(failed, 0)
-            self.assertEqual(failures, [])
+            self.assertEqual(failed, 1)
+            self.assertIn("GLIBC_2.34", failures[0][1])
             self.assertFalse(wheel.exists())
 
     @patch("test_wheels_install.platform.machine", return_value="x86_64")

@@ -135,14 +135,6 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
                     print(f"   {line}")
         else:
             err = msg or "native import probe failed"
-            drop_reason = _bullseye_cryptography_drop_reason(parsed[0], err)
-            if drop_reason:
-                print_color(
-                    f"-- drop {wheel_path.name} ({drop_reason})",
-                    Fore.YELLOW,
-                )
-                wheel_path.unlink(missing_ok=True)
-                continue
             native_failed += 1
             failed_wheels.append((wheel_path.name, err))
             print_color(f"-- {wheel_path.name}", Fore.RED)
@@ -154,29 +146,6 @@ def _run_native_import_probes(installed_wheels: list[Path]) -> tuple[int, list[t
     if native_failed:
         print_color(f"Native import failures: {native_failed}", Fore.RED)
     return native_failed, failed_wheels
-
-
-_GLIBC_SYMBOL = re.compile(r"GLIBC_(\d+)\.(\d+)")
-
-
-def _bullseye_cryptography_drop_reason(dist_name: str, message: str) -> str | None:
-    """Why a legacy ARMv7 cryptography wheel should be removed, or None.
-
-    Piwheels wheels retagged to ``manylinux_2_31_armv7l`` can still need glibc 2.34
-    and ``libssl.so.3``. Bullseye has glibc 2.31 and OpenSSL 1.1, so the wheel is
-    removed from the legacy artifact instead of failing the install test.
-    """
-    if canonicalize_name(dist_name) != canonicalize_name("cryptography"):
-        return None
-    armv7_plat = _armv7_test_plat()
-    if armv7_plat is None or armv7_plat[0] != "manylinux_2_31_armv7l":
-        return None
-    if "libssl.so.3" in message or "libcrypto.so.3" in message:
-        return "needs OpenSSL 3; Bullseye has OpenSSL 1.1"
-    for major, minor in _GLIBC_SYMBOL.findall(message):
-        if (int(major), int(minor)) > (2, 31):
-            return f"needs glibc {major}.{minor}; Bullseye has glibc 2.31"
-    return None
 
 
 def _armv7_skip_cryptography_native_probe(dist_name: str) -> bool:
