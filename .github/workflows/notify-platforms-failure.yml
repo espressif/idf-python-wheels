@@ -1,0 +1,53 @@
+name: Notify platforms build failure
+
+on:
+  workflow_run:
+    workflows: ["platforms-dispatches"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  issues: write
+
+jobs:
+  notify:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-26.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      FAILURE_LABEL: platforms-failure
+    steps:
+      - name: Report failure on an open issue
+        run: |
+          set -euo pipefail
+
+          gh label create "$FAILURE_LABEL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --description "Open platforms-dispatches failure" \
+            --color d73a4a \
+            --force
+
+          body="The [platforms-dispatches run #${RUN_NUMBER}](${RUN_URL}) failed (triggered by \`${RUN_EVENT}\`)."
+
+          open_issue="$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label "$FAILURE_LABEL" \
+            --state open \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "$open_issue" ]; then
+            gh issue comment "$open_issue" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "$body"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --label "$FAILURE_LABEL" \
+              --title "platforms-dispatches failed" \
+              --body "$body"
+          fi
