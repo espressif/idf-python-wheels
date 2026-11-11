@@ -135,6 +135,7 @@ Wheel builds still honor **`exclude_list.yaml`** on each CI platform. [`emit_sdi
 - Per-project **`index.html`** pages include **`data-requires-python`** on every wheel and sdist link ([Simple Repository API](https://packaging.python.org/en/latest/specifications/simple-repository-api/#html-form), PEP 503 HTML metadata). Values come from PyPI’s **`Requires-Python`** field. Pip 8.2+ reads this attribute and ignores incompatible artifacts before download.
 - **Sdist upload guard:** [`upload_wheels.py`](./upload_wheels.py) uploads sdists only when they appear in **`sdist_requirements.txt`** (present in full **platforms-dispatch** bundle uploads). Ad-hoc **defined-wheels** uploads without that file skip sdists so accidental `pip wheel` tarballs do not reach S3.
 - After merging index-metadata changes, regenerate all index pages without re-uploading artifacts by running the **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)** workflow against the production bucket.
+- To remove specific wheels or sdists already on the index (for example a bad macOS wheel filename), see **[Deleting index artifacts](#deleting-index-artifacts)** below.
 - [`verify_s3_sdists.py`](./verify_s3_sdists.py) checks that each line in **`sdist_requirements.txt`** has a matching sdist on S3 (`--strict` in CI fails when the bundle file is missing).
 
 To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set the environment variable:
@@ -143,6 +144,23 @@ To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set
 |----------|--------------------------------------------------------------|
 | `SKIP_PYPI_REQUIRES_PYTHON_CHECK` | Skip all PyPI preflight checks; every requirement is passed through to `pip wheel`. |
 
+### Deleting index artifacts
+
+Manual maintainer workflow **[delete-pypi-index-artifact](.github/workflows/delete-pypi-index-artifact.yml)** runs on **`ubuntu-latest`**, the same way as **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)**: checkout, `pip install -r build_requirements.txt`, then the AWS CLI. Run it from **`main`** only (the workflow skips jobs on other branches). Match the environment’s deployment branches to **main**. Approval uses GitHub Environment **`pypi-index-delete`**. [`delete_index_artifact.py`](./delete_index_artifact.py) only checks the manifest and prints keys. The workflow then `aws s3 ls` every key (dry run or preflight), then `aws s3 rm` only on a real run after all objects are present—the same CLI family as the existing `aws s3 cp` uploads. It never accepts a bucket prefix or a recursive delete.
+
+The package field is the **exact** S3 directory under `pypi/` (use the segment from the index URL), lowercased and not otherwise rewritten. Upload uses extra normalization in [`upload_wheels.py`](./upload_wheels.py); `flask_compress` and `flask-compress` stay different delete targets. Path segments and `..` are rejected. `index.html` is rejected. The GitHub web form is a single-line field, so separate records with `;`.
+
+**Manifest example** (workflow `artifacts` input):
+
+```text
+psutil,psutil-7.2.2-cp36-abi3-macosx_15_0_x86_64.whl; flake8,flake8-2020-1.8.0.tar.gz
+```
+
+Set `expected_artifact_count` to the number of records (`2` above). `dry_run` defaults to **true** and only runs `aws s3 ls` for each key (no deletes). Set it to **false** for a real delete; you do not need a separate dry-run workflow first—a real run still `aws s3 ls` every key before any `aws s3 rm`, and skips deletes if any object is missing (no partial delete mid-batch). `aws s3 rm` succeeds again if an object is already gone. When regeneration is enabled, the job then runs `create_index_pages.py` and the CloudFront invalidation for `/pypi/*`, the same two commands as **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)**.
+
+The workflow runs three jobs on **`main`**. **Plan delete** runs first (no AWS secrets): it validates the manifest, prints the exact `pypi/...` S3 keys in the job log and **Job summary**, and saves `keys.txt` as a run artifact. **Approve** uses **`pypi-index-delete`**—reviewers should read the plan job summary before approving; it does not write to S3 and does not take the `pypi-s3-index` lock. **Delete** runs after approval, downloads the planned keys, `aws s3 ls` every key, then `aws s3 rm` on a real run when all are present; it joins `pypi-s3-index` (same as upload and index refresh) and may regenerate index pages and invalidate CloudFront.
+
+`SKIP_PYPI_REQUIRES_PYTHON_CHECK` does not affect this workflow. That variable only skips the wheel-build PyPI `Requires-Python` check.
 
 ### include_list.yaml
 File for additional Python packages to the **main requirements** list. Built separately to not restrict the **main requirements** list.

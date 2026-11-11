@@ -35,6 +35,10 @@ jobs:
     needs: [test-wheels]
     # Publish only from main. Branch and PR runs still execute the install tests above.
     if: ${{ github.ref == 'refs/heads/main' && needs.test-wheels.result == 'success' }}
+    concurrency:
+      group: pypi-s3-index
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
