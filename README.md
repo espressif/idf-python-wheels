@@ -135,6 +135,7 @@ Wheel builds still honor **`exclude_list.yaml`** on each CI platform. [`emit_sdi
 - Per-project **`index.html`** pages include **`data-requires-python`** on every wheel and sdist link ([Simple Repository API](https://packaging.python.org/en/latest/specifications/simple-repository-api/#html-form), PEP 503 HTML metadata). Values come from PyPI’s **`Requires-Python`** field. Pip 8.2+ reads this attribute and ignores incompatible artifacts before download.
 - **Sdist upload guard:** [`upload_wheels.py`](./upload_wheels.py) uploads sdists only when they appear in **`sdist_requirements.txt`** (present in full **platforms-dispatch** bundle uploads). Ad-hoc **defined-wheels** uploads without that file skip sdists so accidental `pip wheel` tarballs do not reach S3.
 - After merging index-metadata changes, regenerate all index pages without re-uploading artifacts by running the **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)** workflow against the production bucket.
+- To remove specific wheels or sdists already on the index (for example a bad macOS wheel filename), see **[Deleting index artifacts](#deleting-index-artifacts)** below.
 - [`verify_s3_sdists.py`](./verify_s3_sdists.py) checks that each line in **`sdist_requirements.txt`** has a matching sdist on S3 (`--strict` in CI fails when the bundle file is missing).
 
 To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set the environment variable:
@@ -143,6 +144,23 @@ To **disable** the preflight entirely (e.g. debugging or air‑gapped runs), set
 |----------|--------------------------------------------------------------|
 | `SKIP_PYPI_REQUIRES_PYTHON_CHECK` | Skip all PyPI preflight checks; every requirement is passed through to `pip wheel`. |
 
+### Deleting index artifacts
+
+Manual maintainer workflow **[delete-pypi-index-artifact](.github/workflows/delete-pypi-index-artifact.yml)** runs on **`ubuntu-latest`**, the same way as **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)**: checkout, `pip install -r build_requirements.txt`, then the AWS CLI. Approval uses GitHub Environment **`pypi-index-delete`**. [`delete_index_artifact.py`](./delete_index_artifact.py) only checks the manifest and prints keys. The workflow then calls `aws s3 ls` or `aws s3 rm` for each key, the same CLI family as the existing `aws s3 cp` uploads. It never accepts a bucket prefix or a recursive delete.
+
+The package field is the S3 directory, lowercased and not otherwise rewritten, so `flask_compress` and `flask-compress` stay different objects. Path segments and `..` are rejected. `index.html` is rejected. The GitHub web form is a single-line field, so separate records with `;`.
+
+**Manifest example** (workflow `artifacts` input):
+
+```text
+psutil,psutil-7.2.2-cp36-abi3-macosx_15_0_x86_64.whl; flake8,flake8-2020-1.8.0.tar.gz
+```
+
+Set `expected_artifact_count` to the number of records (`2` above). `dry_run` defaults to **true** and runs `aws s3 ls` for each key. Set it to **false** only after those keys look right. A real run uses `aws s3 rm`, which succeeds again if the object is already gone. When regeneration is enabled, the job then runs `create_index_pages.py` and the CloudFront invalidation for `/pypi/*`, the same two commands as **[only-create-and-upload-index](.github/workflows/only-create-and-upload-index.yml)**.
+
+Approval and deletion are separate jobs. The approval job uses **`pypi-index-delete`** and does not write to S3, so a run waiting on a reviewer does not take the `pypi-s3-index` concurrency group. After approval, the delete job joins that group (same settings as upload and index refresh) and only then checks the manifest, runs `aws s3 ls` or `aws s3 rm`, and, when regeneration is enabled, rewrites the index and invalidates CloudFront.
+
+`SKIP_PYPI_REQUIRES_PYTHON_CHECK` does not affect this workflow. That variable only skips the wheel-build PyPI `Requires-Python` check.
 
 ### include_list.yaml
 File for additional Python packages to the **main requirements** list. Built separately to not restrict the **main requirements** list.
