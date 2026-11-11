@@ -35,6 +35,8 @@ This repository has been completely automated. All the supported versions of [ES
 
 Also `README.md` file and `pyproject.toml` is automatically updated with the script `update_python_versions.py` and `update-python-versions.yml` workflow.
 
+When `platforms-dispatches` fails, [notify-platforms-failure.yml](./.github/workflows/notify-platforms-failure.yml) opens a public issue labeled `platforms-failure` that links to the failed run. Later failures comment on that issue while it stays open. Watch the repository or that label to be notified. This only reports completed failures; it cannot detect a scheduled run that never starts.
+
 ### Supported Versions Action
 This workflow is reusable action and it is possible to be called in other projects - it will generate `supported_versions.json` file with the following structure, which can be parsed and used in caller workflow to avoid developer interaction of changing the supported versions.
 
