@@ -282,6 +282,7 @@ def install_wheel(wheel_path: Path) -> tuple[bool, str]:
         "-m",
         "pip",
         "install",
+        "--force-reinstall",
         "--no-deps",
         "--no-index",
         "--find-links",
