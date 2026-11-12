@@ -1,6 +1,6 @@
 name: DangerJS Pull Request linter
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, reopened, synchronize]
 
 permissions:
@@ -9,6 +9,8 @@ permissions:
 
 jobs:
   pull-request-style-linter:
+    # Fork PRs get a read-only token, so DangerJS could not post its comment
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
     - name: DangerJS pull request linter
