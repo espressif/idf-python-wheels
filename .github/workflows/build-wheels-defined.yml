@@ -101,7 +101,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -141,7 +141,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -199,7 +199,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -241,7 +241,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         # Temporary solution until Python version for build will be >= 3.10 (GitHub action support)
@@ -298,7 +298,7 @@ jobs:
           platforms: linux/arm/v7
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Build wheels - ARMv7 (in Docker)
         run: |
@@ -342,7 +342,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -391,7 +391,7 @@ jobs:
           platforms: linux/arm/v7
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Build wheels - ARMv7 Legacy (in Docker)
         # Bullseye (glibc 2.31). Python 3.14+ is excluded; there is no bullseye image.
@@ -456,7 +456,7 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Get latest Python version
         id: python-version
