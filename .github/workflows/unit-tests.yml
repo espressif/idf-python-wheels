@@ -23,7 +23,7 @@ jobs:
         python-version: ${{ fromJson(needs.get-supported-versions.outputs.supported_python) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
@@ -48,7 +48,7 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Get latest Python version
         id: python-version
