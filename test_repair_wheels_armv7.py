@@ -4,7 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+from __future__ import annotations
+
 import os
+import struct
 import tempfile
 import unittest
 import unittest.mock
@@ -18,6 +21,13 @@ import repair_wheels as rw
 
 def _record_sha256(payload: bytes) -> str:
     return rw._wheel_record_sha256(payload)
+
+
+def _retag(src: Path, plat: str) -> Path:
+    out, reason = rw._retag_linux_armv7_wheel_to_plat(src, plat)
+    if out is None:
+        raise AssertionError(reason or "retag failed")
+    return out
 
 
 def _write_minimal_linux_armv7_wheel(path: Path, dist_name: str = "pkg", version: str = "1.0") -> None:
@@ -50,7 +60,7 @@ class TestRetagLinuxArmv7Wheel(unittest.TestCase):
             root = Path(tmp)
             _write_minimal_linux_armv7_wheel(root)
             src = root / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_36_armv7l")
+            out = _retag(src, "manylinux_2_36_armv7l")
             self.assertIsNotNone(out)
             assert out is not None
             self.assertEqual(out.name, "pkg-1.0-cp38-cp38-manylinux_2_36_armv7l.whl")
@@ -89,9 +99,7 @@ Tag: cp36-abi3-linux_armv7l
                 zf.writestr(f"{wheel_info}/WHEEL", wheel_meta)
                 zf.writestr(f"{wheel_info}/RECORD", record)
 
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_31_armv7l")
-            self.assertIsNotNone(out)
-            assert out is not None
+            out = _retag(src, "manylinux_2_31_armv7l")
             self.assertEqual(out.name, "psutil-7.2.2-cp36-abi3-manylinux_2_31_armv7l.whl")
 
     def test_retag_many_entry_wheel(self) -> None:
@@ -119,9 +127,7 @@ Tag: cp37-abi3-linux_armv7l
                 zf.writestr(f"{wheel_info}/WHEEL", wheel_meta)
                 zf.writestr(f"{wheel_info}/RECORD", record)
 
-            out = rw._retag_linux_armv7_wheel_to_plat(src, "manylinux_2_31_armv7l")
-            self.assertIsNotNone(out)
-            assert out is not None
+            out = _retag(src, "manylinux_2_31_armv7l")
             self.assertEqual(out.name, "pycryptodome-3.23.0-cp37-abi3-manylinux_2_31_armv7l.whl")
             with zipfile.ZipFile(out, "r") as zf:
                 self.assertEqual(len(zf.namelist()), 202)
@@ -187,6 +193,290 @@ class TestManylinuxGlibcTags(unittest.TestCase):
                 only_plat=True,
             )
         )
+
+
+def _run_armv7_repair(root: Path, plat: str) -> None:
+    with ExitStack() as stack:
+        stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
+        stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="armv7l"))
+        stack.enter_context(
+            unittest.mock.patch.dict(
+                os.environ,
+                {"AUDITWHEEL_PLAT": plat, "AUDITWHEEL_ONLY_PLAT": "1"},
+                clear=False,
+            )
+        )
+        orig = os.getcwd()
+        try:
+            os.chdir(root)
+            rw.main()
+        finally:
+            os.chdir(orig)
+
+
+def _elf32_le(needed: list[str], glibc_versions: list[str], vaddr_bias: int = 0) -> bytes:
+    """Little-endian ARM ELF32 whose dynamic segment records ``needed`` and ``glibc_versions``."""
+    dynstr = bytearray(b"\x00")
+
+    def add_str(text: str) -> int:
+        off = len(dynstr)
+        dynstr.extend(text.encode("ascii") + b"\x00")
+        return off
+
+    needed_offs = [add_str(name) for name in needed]
+    ver_offs = [add_str(ver) for ver in glibc_versions]
+    libc_off = add_str("libc.so.6") if glibc_versions else 0
+    verneed = b""
+    if glibc_versions:
+        aux = b"".join(
+            struct.pack("<IHHII", 0, 0, 0, voff, 16 if i < len(ver_offs) - 1 else 0) for i, voff in enumerate(ver_offs)
+        )
+        verneed = struct.pack("<HHIII", 1, len(glibc_versions), libc_off, 16, 0) + aux
+
+    n_dyn = len(needed) + 1 + (2 if glibc_versions else 0) + 1
+    dyn_off = 52 + 64
+    str_off = dyn_off + n_dyn * 8
+    ver_off = str_off + len(dynstr)
+    total = ver_off + len(verneed)
+
+    def dyn(tag: int, val: int) -> bytes:
+        return struct.pack("<II", tag, val)
+
+    dyn_blob = b"".join(dyn(1, off) for off in needed_offs)
+    dyn_blob += dyn(5, str_off + vaddr_bias)
+    if glibc_versions:
+        dyn_blob += dyn(0x6FFFFFFE, ver_off + vaddr_bias)
+        dyn_blob += dyn(0x6FFFFFFF, 1)
+    dyn_blob += dyn(0, 0)
+
+    def phdr(p_type: int, p_offset: int, p_filesz: int, p_flags: int, p_align: int) -> bytes:
+        return struct.pack(
+            "<IIIIIIII",
+            p_type,
+            p_offset,
+            p_offset + vaddr_bias,
+            0,
+            p_filesz,
+            p_filesz,
+            p_flags,
+            p_align,
+        )
+
+    program_headers = phdr(1, 0, total, 5, 0x1000) + phdr(2, dyn_off, n_dyn * 8, 6, 4)
+    e_ident = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\x00" * 8
+    header = struct.pack(
+        "<16sHHIIIIIHHHHHH",
+        e_ident,
+        3,
+        40,
+        1,
+        0,
+        52,
+        0,
+        0,
+        52,
+        32,
+        2,
+        0,
+        0,
+        0,
+    )
+    return header + program_headers + dyn_blob + bytes(dynstr) + verneed
+
+
+def _write_tagged_wheel(
+    directory: Path,
+    filename: str,
+    elf: bytes,
+    extra_members: dict[str, bytes] | None = None,
+) -> Path:
+    path = directory / filename
+    parts = filename[: -len(".whl")].split("-")
+    dist = parts[0]
+    info = "-".join(parts[:2])
+    tag = "-".join(parts[2:])
+    wheel_meta = f"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: false\nTag: {tag}\n"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{dist}/_native.abi3.so", elf)
+        zf.writestr(f"{info}.dist-info/WHEEL", wheel_meta)
+        for name, payload in (extra_members or {}).items():
+            zf.writestr(name, payload)
+    return path
+
+
+class TestArmv7ElfPlat(unittest.TestCase):
+    def test_parser_reads_glibc_and_needed(self) -> None:
+        elf = _elf32_le(["libssl.so.3", "libc.so.6"], ["GLIBC_2.34", "GLIBC_2.28"])
+        parsed = rw._elf_needed_and_glibc(elf)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        needed, glibc = parsed
+        self.assertEqual(needed, {"libssl.so.3", "libc.so.6"})
+        self.assertEqual(glibc, {(2, 34), (2, 28)})
+
+    def test_bullseye_rejects_glibc_234_and_openssl3(self) -> None:
+        violation = rw._armv7_plat_violation(
+            {"libssl.so.3", "libcrypto.so.3", "libc.so.6"},
+            {(2, 34)},
+            set(),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertIsNotNone(violation)
+        assert violation is not None
+        self.assertIn("glibc 2.34", violation)
+        self.assertIn("libcrypto.so.3", violation)
+        self.assertIn("libssl.so.3", violation)
+
+    def _kept_names(self, filename: str, elf: bytes, plat: str, extra: dict[str, bytes] | None = None) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            _write_tagged_wheel(wheels_dir, filename, elf, extra)
+            _run_armv7_repair(root, plat)
+            return sorted(path.name for path in wheels_dir.glob("*.whl"))
+
+    def test_bookworm_keeps_glibc_234_and_openssl3(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp313-abi3-linux_armv7l.whl",
+            _elf32_le(["libssl.so.3", "libcrypto.so.3", "libc.so.6"], ["GLIBC_2.34"]),
+            "manylinux_2_36_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp313-abi3-manylinux_2_36_armv7l.whl"])
+
+    def test_bullseye_keeps_static_openssl_glibc_230(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libc.so.6", "libdl.so.2", "libpthread.so.0"], ["GLIBC_2.30", "GLIBC_2.28"]),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_bundled_libssl_is_kept(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libssl.so.3", "libc.so.6"], ["GLIBC_2.30"]),
+            "manylinux_2_31_armv7l",
+            extra={"cryptography.libs/libssl.so.3": b"bundled"},
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_bullseye_keeps_elf_whose_load_vaddr_differs_from_offset(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            _elf32_le(["libc.so.6"], ["GLIBC_2.30"], vaddr_bias=0x10000),
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_retag_drops_unreadable_elf(self) -> None:
+        names = self._kept_names(
+            "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+            b"\x7fELF" + b"\x00" * 8,
+            "manylinux_2_31_armv7l",
+        )
+        self.assertEqual(names, [])
+
+    def test_retag_drops_piwheels_wheel_that_exceeds_bullseye(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            _write_tagged_wheel(
+                wheels_dir,
+                "cryptography-50.0.2-cp313-abi3-linux_armv7l.whl",
+                _elf32_le(["libssl.so.3", "libcrypto.so.3", "libc.so.6"], ["GLIBC_2.34"]),
+            )
+            _write_tagged_wheel(
+                wheels_dir,
+                "cryptography-50.0.2-cp39-abi3-linux_armv7l.whl",
+                _elf32_le(["libc.so.6"], ["GLIBC_2.30"]),
+            )
+            _run_armv7_repair(root, "manylinux_2_31_armv7l")
+            names = sorted(p.name for p in wheels_dir.glob("*.whl"))
+            self.assertEqual(names, ["cryptography-50.0.2-cp39-abi3-manylinux_2_31_armv7l.whl"])
+
+    def test_too_recent_symbols_deleted_when_armv7_plat_is_forced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            wheel = wheels_dir / "pkg-1.0-cp38-cp38-manylinux_2_31_armv7l.whl"
+            with zipfile.ZipFile(wheel, "w") as zf:
+                zf.writestr("pkg/__init__.py", "x\n")
+            fake = type(
+                "R",
+                (),
+                {
+                    "returncode": 1,
+                    "stdout": "ERROR: too-recent versioned symbols found",
+                    "stderr": "",
+                },
+            )()
+            with ExitStack() as stack:
+                stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
+                stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="armv7l"))
+                stack.enter_context(unittest.mock.patch.object(rw, "repair_wheel_linux", return_value=fake))
+                stack.enter_context(
+                    unittest.mock.patch.dict(
+                        os.environ,
+                        {"AUDITWHEEL_PLAT": "manylinux_2_31_armv7l", "AUDITWHEEL_ONLY_PLAT": "1"},
+                        clear=False,
+                    )
+                )
+                orig = os.getcwd()
+                try:
+                    os.chdir(root)
+                    rw.main()
+                finally:
+                    os.chdir(orig)
+            self.assertFalse(wheel.exists())
+
+    def test_too_recent_symbols_kept_on_x86_64(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheels_dir = root / "downloaded_wheels"
+            wheels_dir.mkdir()
+            wheel = wheels_dir / "pkg-1.0-cp38-cp38-manylinux_2_28_x86_64.whl"
+            with zipfile.ZipFile(wheel, "w") as zf:
+                zf.writestr("pkg/__init__.py", "x\n")
+            fake = type(
+                "R",
+                (),
+                {
+                    "returncode": 1,
+                    "stdout": "ERROR: too-recent versioned symbols found",
+                    "stderr": "",
+                },
+            )()
+            with ExitStack() as stack:
+                stack.enter_context(unittest.mock.patch.object(rw, "get_platform", return_value="Linux"))
+                stack.enter_context(unittest.mock.patch.object(rw.platform, "machine", return_value="x86_64"))
+                stack.enter_context(unittest.mock.patch.object(rw, "repair_wheel_linux", return_value=fake))
+                stack.enter_context(
+                    unittest.mock.patch.object(rw, "should_skip_linux_auditwheel_for_pypi_mirror", return_value=False)
+                )
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        rw,
+                        "prune_ci_manylinux_newer_than_228_when_228_mirror_present",
+                        return_value=0,
+                    )
+                )
+                stack.enter_context(
+                    unittest.mock.patch.dict(
+                        os.environ,
+                        {"AUDITWHEEL_PLAT": "", "AUDITWHEEL_ONLY_PLAT": ""},
+                        clear=False,
+                    )
+                )
+                orig = os.getcwd()
+                try:
+                    os.chdir(root)
+                    rw.main()
+                finally:
+                    os.chdir(orig)
+            self.assertTrue(wheel.exists())
 
 
 class TestAuditwheelNotPlatformWheel(unittest.TestCase):
