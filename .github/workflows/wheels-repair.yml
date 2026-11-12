@@ -80,7 +80,7 @@ jobs:
     steps:
       - name: Checkout repository
         if: contains(fromJson(inputs.enabled_arches), matrix.arch)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download wheel artifacts
         if: contains(fromJson(inputs.enabled_arches), matrix.arch)
@@ -237,7 +237,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Download each wheels-repaired-* artifact into its own subdirectory so
       # same-named wheels from ARMv7 vs ARMv7 Legacy are not silently overwritten
