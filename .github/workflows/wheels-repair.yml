@@ -107,13 +107,13 @@ jobs:
 
       - name: Setup Python
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && steps.check-wheels.outputs.has_wheels == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Setup extra Python versions for cryptography validation (macOS Intel)
         if: contains(fromJson(inputs.enabled_arches), matrix.arch) && matrix.platform == 'macOS Intel' && steps.check-wheels.outputs.has_wheels == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: |
             3.13

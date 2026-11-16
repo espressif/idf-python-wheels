@@ -92,7 +92,7 @@ jobs:
       - name: Setup Python
         # Skip setting python on ARM because of missing compatibility: https://github.com/actions/setup-python/issues/108
         if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -294,7 +294,7 @@ jobs:
           echo "version=$LATEST" >> $GITHUB_OUTPUT
 
       - name: Setup Python ${{ steps.python-version.outputs.version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.python-version.outputs.version }}
 

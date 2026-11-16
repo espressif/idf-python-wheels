@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -58,7 +58,7 @@ jobs:
           echo "version=$LATEST" >> $GITHUB_OUTPUT
 
       - name: Setup Python ${{ steps.python-version.outputs.version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.python-version.outputs.version }}
 
