@@ -233,6 +233,13 @@ jobs:
         if: matrix.os == 'macOS Intel'
         run: bash scripts/validate_cryptography_macos_intel_wheel.sh ./downloaded_wheels
 
+      - name: Build static libyaml for PyYAML
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:WHEEL_PACKAGES = Get-Content -Raw "dependent_requirements_${{ matrix.arch }}\dependent_requirements.txt"
+          powershell -ExecutionPolicy Bypass -File os_dependencies/windows_libyaml.ps1
+
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
         if: matrix.os == 'Windows'
         run: python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}

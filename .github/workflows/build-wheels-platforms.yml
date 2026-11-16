@@ -146,6 +146,11 @@ jobs:
           # bleak-winrt (scikit-build) rejects MSVC 19.50 when probing VS 2022 generators
           vs-path: ${{ steps.vs2022.outputs.path }}
 
+      - name: Build static libyaml for PyYAML
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows_libyaml.ps1
+
       - name: Build wheels for IDF - ARMv7 (in Docker)
         if: matrix.os == 'Linux ARMv7'
         run: |

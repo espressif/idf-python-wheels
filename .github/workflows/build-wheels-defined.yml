@@ -177,6 +177,12 @@ jobs:
           arch: x64
           vs-path: ${{ steps.vs2022.outputs.path }}
 
+      - name: Build static libyaml for PyYAML
+        shell: pwsh
+        env:
+          WHEEL_PACKAGES: ${{ inputs.packages }}
+        run: powershell -ExecutionPolicy Bypass -File os_dependencies/windows_libyaml.ps1
+
       - name: Build wheels
         run: |
           python build_wheels_from_file.py --requirements ${{ inputs.packages }}
