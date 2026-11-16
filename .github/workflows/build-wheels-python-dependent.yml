@@ -86,12 +86,12 @@ jobs:
           platforms: linux/arm/v7
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Python
         # Skip setting python on ARMv7 (runs in Docker)
         if: matrix.os != 'Linux ARMv7' && matrix.os != 'Linux ARMv7 Legacy'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
             python-version: ${{ matrix.python-version }}
 

@@ -46,7 +46,7 @@ jobs:
       PREFIX: 'pypi'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install dependencies
         run: python -m pip install -r build_requirements.txt
