@@ -1,0 +1,184 @@
+name: delete-pypi-index-artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_artifact_count:
+        description: >-
+          Number of artifacts to delete. Must match manifest records.
+          A dry run lists each object and fails if one is missing.
+          A real run lists every key first, then removes each key only after
+          all are present. aws s3 rm succeeds again if the object is already gone.
+        type: number
+        required: true
+      artifacts:
+        description: >-
+          Artifact records separated by ';' or by newlines (newlines only survive
+          `gh workflow run`, not the web form). Each record is
+          package_name, exact_filename. The package name is the S3 directory
+          under pypi/ (copy from the index URL path segment), lowercased but
+          not otherwise rewritten — unlike upload normalize, hyphens vs underscores
+          are not interchangeable.
+          Records starting with # are ignored. Example:
+          psutil,psutil-7.2.2-cp36-abi3-macosx_15_0_x86_64.whl; flake8,flake8-2020-1.8.0.tar.gz
+        type: string
+        required: true
+      dry_run:
+        description: >-
+          When true, list each key only (no aws s3 rm). When false, ls every
+          key then rm—no prior dry-run workflow required.
+        type: boolean
+        required: false
+        default: true
+      regenerate_index:
+        description: After a real delete, regenerate index pages.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan-delete-keys:
+    name: Plan delete (keys for reviewers)
+    # No secrets and no environment. Runs first so reviewers see exact S3 keys
+    # in the job log and Job summary before the approval job starts.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Write delete manifest
+        env:
+          ARTIFACTS: ${{ inputs.artifacts }}
+        run: printf '%s\n' "$ARTIFACTS" > delete-manifest.txt
+
+      - name: Resolve S3 keys from manifest
+        env:
+          EXPECTED_COUNT: ${{ inputs.expected_artifact_count }}
+        run: |
+          set -euo pipefail
+          python delete_index_artifact.py \
+            --expected-count "$EXPECTED_COUNT" \
+            --manifest delete-manifest.txt | tee keys.txt
+          echo "---"
+          echo "Planned ${EXPECTED_COUNT} object(s) for delete (see Job summary below)."
+
+      - name: Publish keys for reviewers
+        env:
+          EXPECTED_COUNT: ${{ inputs.expected_artifact_count }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REGENERATE_INDEX: ${{ inputs.regenerate_index }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## PyPI index delete plan"
+            echo ""
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| expected_artifact_count | ${EXPECTED_COUNT} |"
+            echo "| dry_run | ${DRY_RUN} |"
+            echo "| regenerate_index | ${REGENERATE_INDEX} |"
+            echo ""
+            echo "### S3 keys (exact objects)"
+            echo '```'
+            cat keys.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save planned keys
+        uses: actions/upload-artifact@v4
+        with:
+          name: delete-s3-keys
+          path: keys.txt
+          retention-days: 7
+
+  approve-delete:
+    name: Approve PyPI index delete
+    needs: plan-delete-keys
+    # Same main-only guard as the upload job. The workflow file comes from the
+    # selected ref, so also restrict the pypi-index-delete environment's
+    # deployment branches to main.
+    # This job does not join pypi-s3-index and does not write to S3. A run waiting
+    # on a reviewer must not block wheel uploads. The delete job takes that
+    # lock only after this job succeeds.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      needs.plan-delete-keys.result == 'success'
+    runs-on: ubuntu-latest
+    environment: pypi-index-delete
+    steps:
+      - name: Record approved delete
+        env:
+          EXPECTED_COUNT: ${{ inputs.expected_artifact_count }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          echo "Approved delete of ${EXPECTED_COUNT} artifact(s)."
+          echo "dry_run=${DRY_RUN}"
+          echo "Review the resolved S3 keys in the **Plan delete (keys for reviewers)** job summary before approving."
+
+  delete-artifact:
+    name: Delete PyPI index artifacts
+    needs: [plan-delete-keys, approve-delete]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      needs.plan-delete-keys.result == 'success' &&
+      needs.approve-delete.result == 'success'
+    concurrency:
+      group: pypi-s3-index
+      cancel-in-progress: false
+      queue: max
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      AWS_BUCKET: ${{ secrets.DL_BUCKET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: python -m pip install -r build_requirements.txt
+
+      - name: Download planned keys
+        uses: actions/download-artifact@v4
+        with:
+          name: delete-s3-keys
+
+      - name: Delete artifacts from S3 index
+        env:
+          EXPECTED_COUNT: ${{ inputs.expected_artifact_count }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          key_count=0
+          while IFS= read -r key; do
+            [ -z "$key" ] && continue
+            key_count=$((key_count + 1))
+            aws s3 ls "s3://$AWS_BUCKET/$key"
+          done < keys.txt
+          if [ "$key_count" -ne "$EXPECTED_COUNT" ]; then
+            echo "keys.txt lists ${key_count} key(s); expected ${EXPECTED_COUNT}."
+            exit 1
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run complete: all ${EXPECTED_COUNT} object(s) present."
+          else
+            while IFS= read -r key; do
+              [ -z "$key" ] && continue
+              aws s3 rm "s3://$AWS_BUCKET/$key"
+            done < keys.txt
+          fi
+
+      - name: Create and upload Index to S3 bucket
+        if: ${{ inputs.dry_run != true && inputs.regenerate_index == true }}
+        run: |
+          python create_index_pages.py $AWS_BUCKET
+
+      - name: Drop AWS cache
+        if: ${{ inputs.dry_run != true && inputs.regenerate_index == true }}
+        id: invalidate-index-cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_CACHE_INVALIDATION }} --paths "/pypi/*"
