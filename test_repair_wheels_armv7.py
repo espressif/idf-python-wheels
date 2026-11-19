@@ -54,6 +54,34 @@ Tag: cp38-cp38-linux_armv7l
         zf.writestr(f"{wheel_info}/RECORD", record)
 
 
+class TestTakeRetaggedArmv7Wheel(unittest.TestCase):
+    def test_transient_retag_failure_keeps_linux_armv7l(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_minimal_linux_armv7_wheel(root)
+            wheel = root / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
+            errors: list[str] = []
+            with unittest.mock.patch.object(rw, "_retag_with_one_retry", return_value=(None, None)):
+                outcome = rw._take_retagged_armv7_wheel(wheel, "manylinux_2_36_armv7l", errors)
+            self.assertEqual(outcome, "error")
+            self.assertTrue(wheel.exists())
+            self.assertEqual(len(errors), 1)
+
+    def test_bad_retag_output_removed_but_source_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_minimal_linux_armv7_wheel(root)
+            wheel = root / "pkg-1.0-cp38-cp38-linux_armv7l.whl"
+            bad_out = root / "pkg-1.0-cp38-cp38-manylinux_2_28_armv7l.whl"
+            errors: list[str] = []
+            with unittest.mock.patch.object(rw, "_retag_with_one_retry", return_value=(bad_out, None)):
+                outcome = rw._take_retagged_armv7_wheel(wheel, "manylinux_2_36_armv7l", errors)
+            self.assertEqual(outcome, "error")
+            self.assertTrue(wheel.exists())
+            self.assertFalse(bad_out.exists())
+            self.assertEqual(len(errors), 1)
+
+
 class TestRetagLinuxArmv7Wheel(unittest.TestCase):
     def test_retag_to_manylinux_2_36(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

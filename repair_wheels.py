@@ -357,7 +357,7 @@ def _discard_failed_retag(wheel: Path, retagged: Path | None, plat: str, errors:
     errors.append(message)
     if retagged is not None:
         retagged.unlink(missing_ok=True)
-    wheel.unlink(missing_ok=True)
+    # Keep the original ``linux_armv7l`` wheel so a repair rerun can retry after staging/I/O errors.
 
 
 def _take_retagged_armv7_wheel(wheel: Path, plat: str, errors: list[str]) -> str:
