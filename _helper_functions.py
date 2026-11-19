@@ -650,20 +650,10 @@ def find_links_wheel_build_skip(
     if matching:
         best = max(matching)
         return True, f"find-links already has {req.name} {best} matching {req.specifier}"
-    newest = max(versions)
-    for spec in req.specifier:
-        if spec.operator != "==":
-            continue
-        try:
-            pinned = Version(spec.version)
-        except InvalidVersion:
-            continue
-        if newest > pinned and not any(s.operator in ("<", "<=") for s in req.specifier):
-            return (
-                True,
-                f"find-links has {req.name} {newest} newer than obsolete pin =={spec.version}",
-            )
+    # A second exact pin (another ESP-IDF release) is still built when a newer
+    # wheel of the same package is already present. The same version skipped above.
     if _find_links_versions_too_new_for_pin(versions, req):
+        newest = max(versions)
         return (
             True,
             f"find-links has {req.name} up to {newest} but none match {req.specifier}",
