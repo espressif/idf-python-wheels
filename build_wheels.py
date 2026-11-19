@@ -10,7 +10,8 @@ import re
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Union
+from typing import Set
+from typing import Tuple
 
 import requests
 
@@ -22,6 +23,9 @@ except ImportError:  # Python < 3.11 does not have tomllib built-in module
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
+from packaging.utils import InvalidWheelFilename
+from packaging.utils import canonicalize_name
+from packaging.utils import parse_wheel_filename
 
 from _helper_functions import armv7_force_no_binary_package
 from _helper_functions import armv7_pip_wheel_subprocess_env
@@ -41,6 +45,7 @@ from _helper_functions import remove_find_links_wheels_for_package
 from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
+from idf_branch_resolve import resolve_branches
 from wheel_compat_policy import pip_wheel_or_mirror_success
 from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
 from wheel_compat_policy import run_pip_wheel
@@ -183,6 +188,12 @@ def get_constraints_versions(idf_branches: List[str]) -> List[str]:
     return idf_constraints
 
 
+# Constraint lines, including the generated UPPER BOUNDS block, are inputs to the
+# per-release pip solve. They are not packages to build. The wheel list is the
+# exact pins from that solve. ``--only-binary`` and other pip options are kept
+# separately and applied when the wheels are built.
+
+
 # --- Download all requirements from all the branches requirements and constraints files --- #
 def _download_branch_requirements(branch: str, idf_requirements_json: dict) -> List[str]:
     """Download requirements files for all groups specified in IDF requirements.JSON"""
@@ -214,26 +225,37 @@ def _download_esptool_requirements() -> List[str]:
 
 
 def _download_branch_constraints(constraint_file_url: str, branch, idf_constraint: str) -> List[str]:
-    """Download constraints file for specific branch"""
+    """Download constraints file for specific branch.
+
+    A release branch with a known constraint version fails the job when the file
+    is missing. Master (and any other non-release branch) resolves without
+    constraints instead, including when the version is ``None``.
+    """
     res = _requests_get(
         constraint_file_url,
         context=f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}",
     )
-    if check_response(res, f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}"):
-        requirements_txt = res.text.splitlines()
+    warning = f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}"
+    if check_response(res, warning):
         print(f"Added ESP-IDF constraints file {idf_constraint} for branch {branch}")
-        return requirements_txt
+        return res.text.splitlines()
+    if "release/" in branch:
+        raise SystemExit(warning)
+    print_color(
+        f"Skipping constraints for {branch} ({idf_constraint}); resolving that branch without them",
+        Fore.YELLOW,
+    )
     return []
 
 
 non_classic_requirement: List[str] = []
 
 
-def _add_into_requirements(requirements_txt: List[str]) -> set:
+def _add_into_requirements(requirements_txt: List[str]) -> Set[Requirement]:
     """Create set of requirements from downloaded lines of requirements
     - set is used to prevent duplicates
     """
-    requirements_set: set[Union[Requirement, str]] = set()
+    requirements_set: Set[Requirement] = set()
     for line in map(str.strip, requirements_txt):
         # check if in the line or the line itself is not a comment
         line = line.split("#", 1)[0]
@@ -246,9 +268,41 @@ def _add_into_requirements(requirements_txt: List[str]) -> set:
     return requirements_set
 
 
-def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], make_txt_file: bool = False) -> set:
-    """Assemble IDF requirements into set to prevent duplicates"""
+def _record_pip_options(lines: List[str]) -> None:
+    """Keep pip options such as ``--only-binary``. They are not packages."""
+    for line in lines:
+        stripped = line.split("#", 1)[0].strip()
+        if stripped.startswith("--"):
+            non_classic_requirement.append(stripped)
+
+
+def _with_esptool_group(branches: List[dict], esptool_lines: List[str]) -> List[dict]:
+    """Solve esptool once, against no ESP-IDF constraint file."""
+    records = [
+        {
+            "branch": item["branch"],
+            "requirements": list(item["requirements"]),
+            "constraints": list(item["constraints"]),
+        }
+        for item in branches
+    ]
+    if esptool_lines:
+        records.append({"branch": "esptool", "requirements": list(esptool_lines), "constraints": []})
+    return records
+
+
+def collect_idf_inputs(
+    idf_branches: List[str], idf_constraints: List[str], make_txt_file: bool = False
+) -> Tuple[Set[Requirement], List[dict]]:
+    """Download each release and return ``(requirement set, branch records)``.
+
+    The set is requirement lines only, for the sdist listing. Constraint lines,
+    including the generated UPPER BOUNDS block, stay on the branch record and are
+    passed to pip with ``-c``. Esptool is one extra record, not copied onto every release.
+    """
+    branches: List[dict] = []
     requirements_txt: List[str] = []
+    esptool_lines = _download_esptool_requirements()
 
     for i, branch in enumerate(idf_branches):
         idf_requirements_json_url = f"{IDF_RESOURCES_URL}{branch}/tools/requirements.json"
@@ -263,18 +317,35 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
 
         idf_requirements_json = json.loads(res.content)
 
-        requirements_txt += _download_branch_requirements(branch, idf_requirements_json)
-        requirements_txt += _download_branch_constraints(constraint_file_url, branch, idf_constraints[i])
+        requirement_lines = _download_branch_requirements(branch, idf_requirements_json)
+        constraint_lines = _download_branch_constraints(constraint_file_url, branch, idf_constraints[i])
+        branches.append(
+            {
+                "branch": branch,
+                "requirements": requirement_lines,
+                "constraints": constraint_lines,
+            }
+        )
+        requirements_txt += requirement_lines
+        _record_pip_options(constraint_lines)
 
-    requirements_txt += _download_esptool_requirements()
+    requirements_txt += esptool_lines
+    branches = _with_esptool_group(branches, esptool_lines)
 
     if make_txt_file:
-        # TXT file from all downloaded requirements and constraints files
-        # useful for debugging or to see the comments for requirements
+        # Requirement lines only. Constraint caps are applied during the solve.
         with open("requirements.txt", "w") as f:
             f.write("\n".join(requirements_txt))
 
-    return _add_into_requirements(requirements_txt)
+    return _add_into_requirements(requirements_txt), branches
+
+
+def assemble_requirements(
+    idf_branches: List[str], idf_constraints: List[str], make_txt_file: bool = False
+) -> Set[Requirement]:
+    """Requirement set for the sdist listing. Does not include constraint caps."""
+    requirements, _branches = collect_idf_inputs(idf_branches, idf_constraints, make_txt_file)
+    return requirements
 
 
 def exclude_from_requirements(assembled_requirements: set, exclude_list: set, print_requirements: bool = True) -> set:
@@ -325,8 +396,68 @@ def exclude_from_requirements(assembled_requirements: set, exclude_list: set, pr
     return new_assembled_requirements
 
 
+def _exact_version(requirement: Requirement) -> Optional[str]:
+    """Return the version of a ``name==version`` requirement."""
+    specs = list(requirement.specifier)
+    if len(specs) == 1 and specs[0].operator == "==":
+        return str(specs[0].version)
+    return None
+
+
+def _marker_applies(marker, env) -> bool:
+    if marker is None:
+        return True
+    if env is None:
+        return bool(marker.evaluate())
+    return bool(marker.evaluate(env))
+
+
+def _merged_allows_exact_version(merged: set, version: str, env) -> bool:
+    """True when the exclude merge still accepts ``version`` on this interpreter."""
+    for requirement in merged:
+        if not _marker_applies(requirement.marker, env):
+            continue
+        if not requirement.specifier or requirement.specifier.contains(version):
+            return True
+    return False
+
+
+def retain_exact_pins(pins: set, exclude_list: set, print_requirements: bool = True, env=None) -> set:
+    """Drop pins the exclude list rejects. Survivors stay ``name==version``.
+
+    ``exclude_from_requirements`` rewrites an exact pin into the exclude specifier.
+    ``pip wheel --no-deps`` would then build whatever that range currently matches.
+    """
+    kept: Set[Requirement] = set()
+    if print_requirements:
+        print_color("---------- REQUIREMENTS ----------")
+    for pin in pins:
+        version = _exact_version(pin)
+        if version is None:
+            kept.update(exclude_from_requirements({pin}, exclude_list, print_requirements=False))
+            continue
+        merged = exclude_from_requirements({pin}, exclude_list, print_requirements=False)
+        if _merged_allows_exact_version(merged, version, env):
+            kept_pin = Requirement(f"{pin.name}=={version}")
+            kept.add(kept_pin)
+            if print_requirements:
+                print(str(kept_pin))
+        elif print_requirements:
+            print_color(f"-- {pin}", Fore.RED)
+    if print_requirements:
+        print_color("---------- END OF REQUIREMENTS ----------")
+    return kept
+
+
 # --- Build wheels ---
-def build_wheels(requirements: set, local_links: bool = True) -> dict:
+def _pip_wheel_extra(extra: List[str], no_deps: bool) -> List[str]:
+    """Append ``--no-deps`` once so a pin is not resolved again."""
+    if not no_deps or "--no-deps" in extra:
+        return extra
+    return extra + ["--no-deps"]
+
+
+def build_wheels(requirements: set, local_links: bool = True, no_deps: bool = False) -> dict:
     """Build Python wheels
     - 'failed' - failed wheels counter
     - 'succeeded' - succeeded wheels counter
@@ -369,7 +500,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
             argument = match.group(1).strip() if match else ""
             arg_param = match.group(2).strip() if match else ""
             if arg_param and arg_param in requirement.name:
-                extra = [argument, arg_param] if argument else []
+                extra = _pip_wheel_extra([argument, arg_param] if argument else [], no_deps)
                 out = run_pip_wheel(
                     str(requirement),
                     extra,
@@ -394,7 +525,7 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
 
         out = run_pip_wheel(
             str(requirement),
-            no_binary_args + crypto_intel_args + extra_pip_args,
+            _pip_wheel_extra(no_binary_args + crypto_intel_args + extra_pip_args, no_deps),
             find_links_dir=dir,
             env=armv7_pip_wheel_subprocess_env(str(requirement)),
         )
@@ -412,37 +543,37 @@ def build_wheels(requirements: set, local_links: bool = True) -> dict:
 
 
 def get_python_dependent_wheels(wheel_dir: str, requirements: set) -> set:
-    """Get Python dependent requirements from downloaded wheel directory"""
-    dependent_wheels_set = set()
-    dependent_requirements_set = set()
+    """Record CPython wheels whose name and version ``requirements`` allows.
 
-    file_names = os.listdir(wheel_dir)
+    The result is ``name==version`` from the filename. A ``python_version`` marker
+    is not copied. A wheel left from another run is ignored unless one of
+    ``requirements`` allows that version.
+    """
+    by_name: Dict[str, List[Requirement]] = {}
+    for requirement in requirements:
+        by_name.setdefault(canonicalize_name(requirement.name), []).append(requirement)
 
-    # find dependent wheels in wheel directory
-    for wheel in file_names:
-        pattern = re.compile(r"([^ -]*)-(\d+(\.\d+)*).*?(cp\d+)")
-        match = pattern.search(wheel)
-        if match is not None:
-            wheel_name = match.group(1)
-            wheel_version = match.group(2)
-            build = match.group(3)
+    dependent_requirements_set: Set[Requirement] = set()
+    if not os.path.isdir(wheel_dir):
+        return dependent_requirements_set
 
-            dependent_wheels_set.add((wheel_name, wheel_version, build))
-
-    # find dependent wheel in requirements
-    for name, version, _ in dependent_wheels_set:
-        for requirement in requirements:
-            if requirement.marker:
-                if "python_version" in str(requirement.marker):
-                    # add python version specific requirements from all branches
-                    dependent_requirements_set.add(requirement)
-
-            if name.lower() == requirement.name.lower():
-                # add requirements with markers
-                dependent_requirements_set.add(requirement)
-            else:
-                # add downloaded and already built requirements (all dependencies)
-                dependent_requirements_set.add(Requirement(f"{name}=={version}"))
+    for wheel in os.listdir(wheel_dir):
+        if not wheel.endswith(".whl"):
+            continue
+        try:
+            raw_name, version, _build, tags = parse_wheel_filename(wheel)
+        except InvalidWheelFilename:
+            continue
+        if not any(tag.interpreter.startswith("cp") for tag in tags):
+            continue
+        name = canonicalize_name(str(raw_name))
+        allowed = by_name.get(name, [])
+        version_ok = any(
+            not requirement.specifier or requirement.specifier.contains(str(version)) for requirement in allowed
+        )
+        if not version_ok:
+            continue
+        dependent_requirements_set.add(Requirement(f"{name}=={version}"))
 
     return dependent_requirements_set
 
@@ -458,13 +589,15 @@ def main() -> int:
     idf_constraints = get_constraints_versions(idf_branches)
     print(f"ESP-IDF constrains files versions to be downloaded requirements for:\n{idf_constraints}\n")
 
-    requirements = assemble_requirements(idf_branches, idf_constraints, True)
+    requirements, branches = collect_idf_inputs(idf_branches, idf_constraints, True)
 
     # Sdist list is the same on every runner (union over SDIST_EVAL_PLATFORMS in
     # emit_sdist_requirements.py).
     # CI uploads requirements.txt + sdist_requirements.txt
     # as idf-requirements-bundle only from Linux x86_64
     # This skips redundant work elsewhere.
+    # Requirement lines only. Constraint caps limit the per-release solve, and
+    # the wheel build below uses those exact pins.
     if get_current_platform() == "linux_x86_64":
         sdist_reqs = compute_sdist_requirements(requirements)
         sdist_count = write_sdist_requirements_file(SDIST_REQUIREMENTS_FILE, sdist_reqs)
@@ -472,11 +605,13 @@ def main() -> int:
         print_color(f"Packages needing sdist on index: {sdist_count}", Fore.CYAN)
         print_color("---------- END SDIST REQUIREMENTS ----------")
 
+    pins = resolve_branches(branches)
+
     exclude_list = YAMLListAdapter(
         "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
     ).requirements
 
-    after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
+    after_exclude_requirements = retain_exact_pins(pins, exclude_list)
     after_exclude_requirements = filter_requirements_by_pypi_requires_python(after_exclude_requirements)
 
     include_list = YAMLListAdapter("include_list.yaml").requirements
@@ -486,17 +621,19 @@ def main() -> int:
         print(req)
     print_color("---------- END OF ADDITIONAL REQUIREMENTS ----------")
 
+    # Pinned wheels first, so a later include-list build can reuse them from find-links
+    # instead of resolving a second version of the same dependency.
+    print_color("---------- BUILD WHEELS ----------")
+    standard_whl = build_wheels(after_exclude_requirements, no_deps=True)
+    failed_wheels = standard_whl["failed"]
+    succeeded_wheels = standard_whl["succeeded"]
+    skipped_wheels = standard_whl.get("skipped", 0)
+
     print_color("---------- BUILD ADDITIONAL WHEELS ----------")
     additional_whl = build_wheels(include_list)
-    failed_wheels = additional_whl["failed"]
-    succeeded_wheels = additional_whl["succeeded"]
-    skipped_wheels = additional_whl.get("skipped", 0)
-
-    print_color("---------- BUILD WHEELS ----------")
-    standard_whl = build_wheels(after_exclude_requirements)
-    failed_wheels += standard_whl["failed"]
-    succeeded_wheels += standard_whl["succeeded"]
-    skipped_wheels += standard_whl.get("skipped", 0)
+    failed_wheels += additional_whl["failed"]
+    succeeded_wheels += additional_whl["succeeded"]
+    skipped_wheels += additional_whl.get("skipped", 0)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
@@ -511,7 +648,7 @@ def main() -> int:
     dependent_wheels = get_python_dependent_wheels(
         f"{os.path.curdir}{(os.sep)}downloaded_wheels", after_exclude_requirements
     )
-    after_exclude_dependent_wheels = exclude_from_requirements(dependent_wheels, exclude_list)
+    after_exclude_dependent_wheels = retain_exact_pins(dependent_wheels, exclude_list)
     after_exclude_dependent_wheels = filter_requirements_by_pypi_requires_python(after_exclude_dependent_wheels)
 
     with open("dependent_requirements.txt", "w") as f:
