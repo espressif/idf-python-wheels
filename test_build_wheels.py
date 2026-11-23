@@ -38,6 +38,7 @@ from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
 from build_wheels import _add_into_requirements
 from build_wheels import _download_branch_constraints
+from build_wheels import apply_excludes_to_branch_requirements
 from build_wheels import collect_idf_inputs
 from build_wheels import exclude_from_requirements
 from build_wheels import get_python_dependent_wheels
@@ -1040,6 +1041,41 @@ class TestRetainExactPins(unittest.TestCase):
             print_requirements=False,
         )
         self.assertEqual(kept, set())
+
+
+class TestApplyExcludesBeforeResolve(unittest.TestCase):
+    def test_platform_python_exclude_becomes_resolver_marker(self):
+        branches = [
+            {
+                "branch": "release/v5.3",
+                "requirements": ["cryptography>=2.1.4,<43", "--only-binary cryptography"],
+                "constraints": ["cryptography<=42.0.8"],
+            }
+        ]
+        excludes = {Requirement('cryptography; sys_platform != "linux" or python_version != "3.8"')}
+
+        filtered = apply_excludes_to_branch_requirements(branches, excludes)
+
+        self.assertEqual(filtered[0]["constraints"], branches[0]["constraints"])
+        self.assertIn("--only-binary cryptography", filtered[0]["requirements"])
+        requirements = [Requirement(line) for line in filtered[0]["requirements"][:1]]
+        self.assertEqual(len(requirements), 1)
+        self.assertFalse(requirements[0].marker.evaluate({"sys_platform": "linux", "python_version": "3.8"}))
+        self.assertTrue(requirements[0].marker.evaluate({"sys_platform": "linux", "python_version": "3.9"}))
+        self.assertEqual(branches[0]["requirements"][0], "cryptography>=2.1.4,<43")
+
+    def test_unversioned_exclude_removes_requirement_before_resolve(self):
+        branches = [
+            {
+                "branch": "release/v5.3",
+                "requirements": ["gdbgui==0.13.2.0", "requests>=2"],
+                "constraints": [],
+            }
+        ]
+
+        filtered = apply_excludes_to_branch_requirements(branches, {Requirement("gdbgui")})
+
+        self.assertEqual(filtered[0]["requirements"], ["requests>=2"])
 
 
 class TestConstraintDownloadAndCollect(unittest.TestCase):

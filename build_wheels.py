@@ -396,6 +396,38 @@ def exclude_from_requirements(assembled_requirements: set, exclude_list: set, pr
     return new_assembled_requirements
 
 
+def apply_excludes_to_branch_requirements(branches: List[dict], exclude_list: set) -> List[dict]:
+    """Return branch inputs with build exclusions applied before pip resolution.
+
+    The downloaded requirement records are kept unchanged for sdist calculation.
+    Resolver records are copied and only classic requirement lines are rewritten;
+    pip options and other lines are preserved.
+    """
+    filtered_branches: List[dict] = []
+    for branch in branches:
+        filtered_requirements: List[str] = []
+        for line in branch["requirements"]:
+            stripped = line.split("#", 1)[0].strip()
+            if not stripped:
+                filtered_requirements.append(line)
+                continue
+            try:
+                requirement = Requirement(stripped)
+            except InvalidRequirement:
+                filtered_requirements.append(line)
+                continue
+            filtered_requirements.extend(
+                str(item) for item in exclude_from_requirements({requirement}, exclude_list, print_requirements=False)
+            )
+        filtered_branches.append(
+            {
+                **branch,
+                "requirements": filtered_requirements,
+            }
+        )
+    return filtered_branches
+
+
 def _exact_version(requirement: Requirement) -> Optional[str]:
     """Return the version of a ``name==version`` requirement."""
     specs = list(requirement.specifier)
@@ -605,11 +637,14 @@ def main() -> int:
         print_color(f"Packages needing sdist on index: {sdist_count}", Fore.CYAN)
         print_color("---------- END SDIST REQUIREMENTS ----------")
 
-    pins = resolve_branches(branches)
-
     exclude_list = YAMLListAdapter(
         "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
     ).requirements
+    # Exclusions describe packages that cannot be built on this runner. Apply
+    # them before resolution so an impossible package cannot make pip fail
+    # before the existing post-resolution safety filter gets a chance to drop it.
+    resolver_branches = apply_excludes_to_branch_requirements(branches, exclude_list)
+    pins = resolve_branches(resolver_branches)
 
     after_exclude_requirements = retain_exact_pins(pins, exclude_list)
     after_exclude_requirements = filter_requirements_by_pypi_requires_python(after_exclude_requirements)
