@@ -5,12 +5,17 @@
 #
 import json
 import os
+import platform
 import re
+import sys
 
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Set
+from typing import Tuple
 from typing import Union
+from urllib.parse import urlsplit
 
 import requests
 
@@ -22,13 +27,18 @@ except ImportError:  # Python < 3.11 does not have tomllib built-in module
 from colorama import Fore
 from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
+from packaging.utils import InvalidWheelFilename
+from packaging.utils import canonicalize_name
+from packaging.utils import parse_wheel_filename
 
 from _helper_functions import armv7_force_no_binary_package
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
 from _helper_functions import filter_requirements_by_pypi_requires_python
+from _helper_functions import find_links_has_reusable_wheel
 from _helper_functions import find_links_wheel_build_skip
+from _helper_functions import force_interpreter_skip_package
 from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
 from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
@@ -36,15 +46,21 @@ from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
+from _helper_functions import parse_requirement_lines
 from _helper_functions import print_color
+from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
 from emit_sdist_requirements import SDIST_REQUIREMENTS_FILE
 from emit_sdist_requirements import compute_sdist_requirements
 from emit_sdist_requirements import write_sdist_requirements_file
+from idf_branch_resolve import branch_targets_current_interpreter
+from idf_branch_resolve import resolve_branches
 from wheel_compat_policy import pip_wheel_or_mirror_success
 from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
 from wheel_compat_policy import run_pip_wheel
 from yaml_list_adapter import YAMLListAdapter
+from yaml_list_adapter import is_excluded
+from yaml_list_adapter import load_exclude_rules
 
 # GLOBAL VARIABLES
 # URL to fetch IDF branches from
@@ -68,7 +84,7 @@ MIN_IDF_MINOR_VERSION: int = int(os.environ.get("MIN_IDF_MINOR_VERSION", "0"))
 GH_TOKEN: str = os.environ.get("GH_TOKEN", "")
 
 # Authentication header
-AUTH_HEADER: Dict[str, str] = {"authorization": f"Bearer {GH_TOKEN}", "content-type": "application/json"}
+AUTH_HEADER: Dict[str, str] = {"content-type": "application/json"}
 
 # Network timeouts for GitHub raw/API and CDN fetches (seconds); override in CI if needed
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "60"))
@@ -80,7 +96,10 @@ def _requests_get(url: str, *, context: str = "") -> requests.Response:
     last_exc: Optional[requests.RequestException] = None
     for attempt in range(1, REQUEST_RETRIES + 1):
         try:
-            return requests.get(url, headers=AUTH_HEADER, timeout=REQUEST_TIMEOUT)
+            headers = dict(AUTH_HEADER)
+            if urlsplit(url).hostname == "api.github.com" and GH_TOKEN:
+                headers["authorization"] = f"Bearer {GH_TOKEN}"
+            return requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         except requests.RequestException as exc:
             last_exc = exc
             if attempt < REQUEST_RETRIES:
@@ -155,7 +174,7 @@ def _idf_version_from_cmake() -> Optional[dict]:
     return None
 
 
-def get_constraints_versions(idf_branches: List[str]) -> List[str]:
+def get_constraints_versions(idf_branches: List[str]) -> List[Optional[str]]:
     """From desired branches passed in get constraints files versions list
     - when branch is not 'release' (without version) it is supposed to be 'master'
     and auto version mechanism is applied if not specified in Github variables or manual workflow not to
@@ -172,8 +191,8 @@ def get_constraints_versions(idf_branches: List[str]) -> List[str]:
         idf_master_ver = _idf_version_from_cmake()
 
         # when IDF version not set correctly and CMAKE version for master is not downloaded
-        if idf_branches[0] == "master" and idf_master_ver is None:
-            idf_constraints.append("None")
+        if idf_master_ver is None:
+            idf_constraints.append(None)
             continue
 
         if idf_master_ver is not None:
@@ -181,6 +200,12 @@ def get_constraints_versions(idf_branches: List[str]) -> List[str]:
             idf_constraints.append(next_master_version)
 
     return idf_constraints
+
+
+# Constraint lines, including the generated UPPER BOUNDS block, are inputs to the
+# per-release pip solve. They are not packages to build. The wheel list is the
+# exact pins from that solve. Pip CLI options in downloaded files are ignored
+# for both dry-run resolution and wheel building.
 
 
 # --- Download all requirements from all the branches requirements and constraints files --- #
@@ -213,46 +238,76 @@ def _download_esptool_requirements() -> List[str]:
     return requirements_txt
 
 
-def _download_branch_constraints(constraint_file_url: str, branch, idf_constraint: str) -> List[str]:
-    """Download constraints file for specific branch"""
+def _download_branch_constraints(constraint_file_url: str, branch, idf_constraint: Optional[str]) -> List[str]:
+    """Download constraints file for specific branch.
+
+    A release branch with a known constraint version fails the job when the file
+    is missing. Master (and any other non-release branch) resolves without
+    constraints instead, including when the version is ``None``.
+    """
+    if not idf_constraint:
+        return []
     res = _requests_get(
         constraint_file_url,
         context=f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}",
     )
-    if check_response(res, f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}"):
-        requirements_txt = res.text.splitlines()
+    warning = f"Failed to download ESP-IDF constraints file {idf_constraint} for branch {branch}"
+    if check_response(res, warning):
         print(f"Added ESP-IDF constraints file {idf_constraint} for branch {branch}")
-        return requirements_txt
+        return res.text.splitlines()
+    if "release/" in branch:
+        raise SystemExit(warning)
+    print_color(
+        f"Skipping constraints for {branch} ({idf_constraint}); resolving that branch without them",
+        Fore.YELLOW,
+    )
     return []
 
 
-non_classic_requirement: List[str] = []
-
-
-def _add_into_requirements(requirements_txt: List[str]) -> set:
+def _add_into_requirements(requirements_txt: List[str]) -> Set[Requirement]:
     """Create set of requirements from downloaded lines of requirements
     - set is used to prevent duplicates
     """
-    requirements_set: set[Union[Requirement, str]] = set()
-    for line in map(str.strip, requirements_txt):
-        # check if in the line or the line itself is not a comment
-        line = line.split("#", 1)[0]
-        if line:
-            try:
-                requirements_set.add(Requirement(line))
-            except InvalidRequirement:
-                # Non classic requirement (e.g. '--only-binary cryptography')
-                non_classic_requirement.append(line)
-    return requirements_set
+    return set(parse_requirement_lines(requirements_txt, source="ESP-IDF requirements"))
 
 
-def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], make_txt_file: bool = False) -> set:
-    """Assemble IDF requirements into set to prevent duplicates"""
+def _with_esptool_group(branches: List[dict], esptool_lines: List[str]) -> List[dict]:
+    """Solve esptool once, against no ESP-IDF constraint file."""
+    records = [
+        {
+            "branch": item["branch"],
+            "idf_major": item.get("idf_major"),
+            "requirements": list(item["requirements"]),
+            "constraints": list(item["constraints"]),
+        }
+        for item in branches
+    ]
+    if esptool_lines and records:
+        records.append({"branch": "esptool", "idf_major": None, "requirements": list(esptool_lines), "constraints": []})
+    return records
+
+
+def collect_idf_inputs(
+    idf_branches: List[str], idf_constraints: List[Optional[str]], make_txt_file: bool = False
+) -> Tuple[Set[Requirement], List[dict]]:
+    """Download each release and return ``(requirement set, branch records)``.
+
+    The set is requirement lines only, for the sdist listing. Constraint lines,
+    including the generated UPPER BOUNDS block, stay on the branch record and are
+    passed to pip with ``-c``. Esptool is one extra record, not copied onto every release.
+    """
+    branches: List[dict] = []
     requirements_txt: List[str] = []
+    esptool_lines = _download_esptool_requirements()
 
     for i, branch in enumerate(idf_branches):
         idf_requirements_json_url = f"{IDF_RESOURCES_URL}{branch}/tools/requirements.json"
-        constraint_file_url = f"https://dl.espressif.com/dl/esp-idf/espidf.constraints.{idf_constraints[i]}.txt"
+        constraint_version = idf_constraints[i]
+        constraint_file_url = (
+            f"https://dl.espressif.com/dl/esp-idf/espidf.constraints.{constraint_version}.txt"
+            if constraint_version
+            else ""
+        )
 
         res = _requests_get(
             idf_requirements_json_url,
@@ -263,26 +318,42 @@ def assemble_requirements(idf_branches: List[str], idf_constraints: List[str], m
 
         idf_requirements_json = json.loads(res.content)
 
-        requirements_txt += _download_branch_requirements(branch, idf_requirements_json)
-        requirements_txt += _download_branch_constraints(constraint_file_url, branch, idf_constraints[i])
-
-    requirements_txt += _download_esptool_requirements()
+        requirement_lines = _download_branch_requirements(branch, idf_requirements_json)
+        constraint_lines = _download_branch_constraints(constraint_file_url, branch, constraint_version)
+        branches.append(
+            {
+                "branch": branch,
+                "idf_major": int(constraint_version.lstrip("v").split(".", 1)[0])
+                if constraint_version and constraint_version.lstrip("v").split(".", 1)[0].isdigit()
+                else None,
+                "requirements": requirement_lines,
+                "constraints": constraint_lines,
+            }
+        )
+        requirements_txt += requirement_lines
+    requirements_txt += esptool_lines
+    branches = _with_esptool_group(branches, esptool_lines)
 
     if make_txt_file:
-        # TXT file from all downloaded requirements and constraints files
-        # useful for debugging or to see the comments for requirements
+        # Requirement lines only. Constraint caps are applied during the solve.
         with open("requirements.txt", "w") as f:
             f.write("\n".join(requirements_txt))
 
-    return _add_into_requirements(requirements_txt)
+    return _add_into_requirements(requirements_txt), branches
+
+
+def assemble_requirements(
+    idf_branches: List[str], idf_constraints: List[Optional[str]], make_txt_file: bool = False
+) -> Set[Requirement]:
+    """Requirement set for the sdist listing. Does not include constraint caps."""
+    requirements, _branches = collect_idf_inputs(idf_branches, idf_constraints, make_txt_file)
+    return requirements
 
 
 def exclude_from_requirements(assembled_requirements: set, exclude_list: set, print_requirements: bool = True) -> set:
     """Exclude packages defined in exclude_list from assembled requirements
     - print_requirements = true will print the changes
     """
-    from packaging.utils import canonicalize_name
-
     new_assembled_requirements = set()
     not_in_exclude = []
     if print_requirements:
@@ -325,124 +396,190 @@ def exclude_from_requirements(assembled_requirements: set, exclude_list: set, pr
     return new_assembled_requirements
 
 
-# --- Build wheels ---
-def build_wheels(requirements: set, local_links: bool = True) -> dict:
-    """Build Python wheels
-    - 'failed' - failed wheels counter
-    - 'succeeded' - succeeded wheels counter
-    """
-    failed_wheels = 0
-    succeeded_wheels = 0
-    skipped_wheels = 0
+def _exact_version(requirement: Requirement) -> Optional[str]:
+    """Return the version of a ``name==version`` requirement."""
+    specs = list(requirement.specifier)
+    if len(specs) == 1 and specs[0].operator == "==":
+        return str(specs[0].version)
+    return None
 
-    dir = f"{os.path.curdir}{(os.sep)}downloaded_wheels"
-    for requirement in requirements:
-        skip, reason = find_links_wheel_build_skip(requirement, dir)
+
+def _marker_applies(marker, env) -> bool:
+    if marker is None:
+        return True
+    if env is None:
+        return bool(marker.evaluate())
+    return bool(marker.evaluate(env))
+
+
+def _merged_allows_exact_version(merged: set, version: str, env) -> bool:
+    """True when the exclude merge still accepts ``version`` on this interpreter."""
+    for requirement in merged:
+        if not _marker_applies(requirement.marker, env):
+            continue
+        if not requirement.specifier or requirement.specifier.contains(version):
+            return True
+    return False
+
+
+def retain_exact_pins(pins: set, exclude_list: Union[set, tuple], print_requirements: bool = True, env=None) -> set:
+    """Drop pins the exclude list rejects. Survivors stay ``name==version``.
+
+    Exact pins are checked directly against the source YAML rules. The legacy
+    Requirement-set path remains for callers outside the wheel pipeline.
+    """
+    kept: Set[Requirement] = set()
+    if print_requirements:
+        print_color("---------- REQUIREMENTS ----------")
+    direct_rules = exclude_list if getattr(exclude_list, "by_platform", None) is not None else ()
+    platform = (
+        str(env.get("sys_platform")) if isinstance(env, dict) and env.get("sys_platform") else get_current_platform()
+    )
+    python_version = (
+        str(env.get("python_version"))
+        if isinstance(env, dict) and env.get("python_version")
+        else f"{sys.version_info.major}.{sys.version_info.minor}"
+    )
+    for pin in pins:
+        version = _exact_version(pin)
+        if direct_rules and version is not None:
+            if is_excluded(pin.name, version, platform, python_version, direct_rules):
+                if print_requirements:
+                    print_color(f"-- {pin}", Fore.RED)
+                continue
+            kept_pin = Requirement(f"{pin.name}=={version}")
+            kept.add(kept_pin)
+            if print_requirements:
+                print(str(kept_pin))
+            continue
+        if version is None:
+            kept.update(exclude_from_requirements({pin}, exclude_list, print_requirements=False))
+            continue
+        merged = exclude_from_requirements({pin}, exclude_list, print_requirements=False)
+        if _merged_allows_exact_version(merged, version, env):
+            kept_pin = Requirement(f"{pin.name}=={version}")
+            kept.add(kept_pin)
+            if print_requirements:
+                print(str(kept_pin))
+        elif print_requirements:
+            print_color(f"-- {pin}", Fore.RED)
+    if print_requirements:
+        print_color("---------- END OF REQUIREMENTS ----------")
+    return kept
+
+
+def _force_interpreter_no_binary_args(requirement: Requirement, force_interpreter: bool) -> List[str]:
+    if not force_interpreter or platform.system() != "Linux":
+        return []
+    if force_interpreter_skip_package(canonicalize_name(requirement.name)):
+        return []
+    return ["--no-binary", requirement.name]
+
+
+def build_one(requirement_line: str, *, force_interpreter: bool = False, no_deps: bool = False) -> str:
+    """Build one requirement and return ``succeeded``, ``failed``, or ``skipped``."""
+    try:
+        parsed = parse_requirement_lines([requirement_line], source="build_one")
+        if len(parsed) != 1:
+            return "failed"
+        requirement = parsed[0]
+    except (InvalidRequirement, ValueError):
+        return "failed"
+
+    skip, reason = pypi_requires_python_preflight_skip(requirement)
+    if skip:
+        print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+        return "skipped"
+
+    skip, reason = bounded_pin_without_find_links_skip(requirement)
+    if skip:
+        print_color(f"-- skip {requirement_line} ({reason})", Fore.YELLOW)
+        return "skipped"
+
+    if (
+        not force_interpreter
+        or force_interpreter_skip_package(canonicalize_name(requirement.name))
+        or find_links_has_reusable_wheel(requirement)
+    ):
+        skip, reason = find_links_wheel_build_skip(requirement)
         if skip and not armv7_rebuild_instead_of_find_links_skip(requirement.name, reason):
-            if macos_intel_cryptography_rebuild_instead_of_find_links_skip(requirement, reason, dir):
+            if macos_intel_cryptography_rebuild_instead_of_find_links_skip(requirement, reason):
                 print_color(
                     f"-- rebuild {requirement} on macOS Intel ({reason}; newer PyPI sdist needed)",
                     Fore.CYAN,
                 )
             else:
                 print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
-                skipped_wheels += 1
-                # Find-links skip never runs pip_wheel_or_mirror_success.
-                prune_ci_macos_newer_than_pypi_mirror(wheel_dir=dir)
-                continue
-        skip, reason = bounded_pin_without_find_links_skip(requirement, dir)
-        if skip:
-            print_color(f"-- skip {requirement} ({reason})", Fore.YELLOW)
-            skipped_wheels += 1
+                prune_ci_macos_newer_than_pypi_mirror()
+                return "skipped"
+
+    if is_linux_armv7_runner() and armv7_force_no_binary_package(requirement.name):
+        removed = remove_find_links_wheels_for_package(requirement.name, requirement=requirement)
+        if removed:
+            print_color(
+                f"-- removed {removed} find-links wheel(s) for {requirement.name} (ARMv7 sdist rebuild)",
+                Fore.YELLOW,
+            )
+
+    extra = (
+        get_no_binary_args(requirement)
+        + get_cryptography_macos_intel_pip_wheel_args(str(requirement))
+        + get_pip_wheel_extra_args(str(requirement))
+        + _force_interpreter_no_binary_args(requirement, force_interpreter)
+    )
+    if no_deps:
+        extra.append("--no-deps")
+    out = run_pip_wheel(str(requirement), extra, env=armv7_pip_wheel_subprocess_env(str(requirement)))
+    print(out.stdout.decode("utf-8", errors="replace"))
+    if out.stderr:
+        print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
+    return "succeeded" if pip_wheel_or_mirror_success(str(requirement), out.returncode) else "failed"
+
+
+def build_wheels(requirements: set, no_deps: bool = False) -> dict:
+    """Build Python wheels
+    - 'failed' - failed wheels counter
+    - 'succeeded' - succeeded wheels counter
+    """
+    stats = {"failed": 0, "succeeded": 0, "skipped": 0}
+    for requirement in requirements:
+        stats[build_one(str(requirement), no_deps=no_deps)] += 1
+    return stats
+
+
+def get_python_dependent_wheels(wheel_dir: str, requirements: set | None) -> set:
+    """Record CPython wheels whose name and version ``requirements`` allows.
+
+    The result is ``name==version`` from the filename. A ``python_version`` marker
+    is not copied. A wheel left from another run is ignored unless one of
+    ``requirements`` allows that version.
+    """
+    by_name: Dict[str, List[Requirement]] = {}
+    for requirement in requirements:
+        by_name.setdefault(canonicalize_name(requirement.name), []).append(requirement)
+
+    dependent_requirements_set: Set[Requirement] = set()
+    if not os.path.isdir(wheel_dir):
+        return dependent_requirements_set
+
+    for wheel in os.listdir(wheel_dir):
+        if not wheel.endswith(".whl"):
             continue
-        if is_linux_armv7_runner() and armv7_force_no_binary_package(requirement.name):
-            removed = remove_find_links_wheels_for_package(requirement.name, dir)
-            if removed:
-                print_color(
-                    f"-- removed {removed} find-links wheel(s) for {requirement.name} (ARMv7 sdist rebuild)",
-                    Fore.YELLOW,
-                )
-        # non classic requirement wheel build (e.g. '--only-binary cryptography' from IDF constraints)
-        if non_classic_requirement:
-            pattern = re.compile(r"(--[^ ]*)(.*)")
-            match = pattern.search(non_classic_requirement[0])
-            argument = match.group(1).strip() if match else ""
-            arg_param = match.group(2).strip() if match else ""
-            if arg_param and arg_param in requirement.name:
-                extra = [argument, arg_param] if argument else []
-                out = run_pip_wheel(
-                    str(requirement),
-                    extra,
-                    find_links_dir=dir,
-                    env=armv7_pip_wheel_subprocess_env(str(requirement)),
-                )
-                print(out.stdout.decode("utf-8", errors="replace"))
-                if out.stderr:
-                    print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
-                non_classic_requirement.remove(non_classic_requirement[0])
-                if pip_wheel_or_mirror_success(str(requirement), out.returncode, wheel_dir=dir):
-                    succeeded_wheels += 1
-                else:
-                    failed_wheels += 1
-                continue
-
-        # requirement wheel build
-        # Get no-binary args for packages that should be built from source
-        no_binary_args = get_no_binary_args(requirement.name)
-        crypto_intel_args = get_cryptography_macos_intel_pip_wheel_args(str(requirement))
-        extra_pip_args = get_pip_wheel_extra_args(str(requirement))
-
-        out = run_pip_wheel(
-            str(requirement),
-            no_binary_args + crypto_intel_args + extra_pip_args,
-            find_links_dir=dir,
-            env=armv7_pip_wheel_subprocess_env(str(requirement)),
+        try:
+            raw_name, version, _build, tags = parse_wheel_filename(wheel)
+        except InvalidWheelFilename:
+            continue
+        if not any(tag.interpreter.startswith("cp") for tag in tags):
+            continue
+        name = canonicalize_name(str(raw_name))
+        allowed = by_name.get(name, [])
+        version_ok = requirements is None or any(
+            not requirement.specifier or requirement.specifier.contains(str(version), prereleases=True)
+            for requirement in allowed
         )
-
-        print(out.stdout.decode("utf-8", errors="replace"))
-        if out.stderr:
-            print_color(out.stderr.decode("utf-8", errors="replace"), Fore.RED)
-
-        if pip_wheel_or_mirror_success(str(requirement), out.returncode, wheel_dir=dir):
-            succeeded_wheels += 1
-        else:
-            failed_wheels += 1
-
-    return {"failed": failed_wheels, "succeeded": succeeded_wheels, "skipped": skipped_wheels}
-
-
-def get_python_dependent_wheels(wheel_dir: str, requirements: set) -> set:
-    """Get Python dependent requirements from downloaded wheel directory"""
-    dependent_wheels_set = set()
-    dependent_requirements_set = set()
-
-    file_names = os.listdir(wheel_dir)
-
-    # find dependent wheels in wheel directory
-    for wheel in file_names:
-        pattern = re.compile(r"([^ -]*)-(\d+(\.\d+)*).*?(cp\d+)")
-        match = pattern.search(wheel)
-        if match is not None:
-            wheel_name = match.group(1)
-            wheel_version = match.group(2)
-            build = match.group(3)
-
-            dependent_wheels_set.add((wheel_name, wheel_version, build))
-
-    # find dependent wheel in requirements
-    for name, version, _ in dependent_wheels_set:
-        for requirement in requirements:
-            if requirement.marker:
-                if "python_version" in str(requirement.marker):
-                    # add python version specific requirements from all branches
-                    dependent_requirements_set.add(requirement)
-
-            if name.lower() == requirement.name.lower():
-                # add requirements with markers
-                dependent_requirements_set.add(requirement)
-            else:
-                # add downloaded and already built requirements (all dependencies)
-                dependent_requirements_set.add(Requirement(f"{name}=={version}"))
+        if not version_ok:
+            continue
+        dependent_requirements_set.add(Requirement(f"{name}=={version}"))
 
     return dependent_requirements_set
 
@@ -458,25 +595,33 @@ def main() -> int:
     idf_constraints = get_constraints_versions(idf_branches)
     print(f"ESP-IDF constrains files versions to be downloaded requirements for:\n{idf_constraints}\n")
 
-    requirements = assemble_requirements(idf_branches, idf_constraints, True)
-
-    # Sdist list is the same on every runner (union over SDIST_EVAL_PLATFORMS in
-    # emit_sdist_requirements.py).
-    # CI uploads requirements.txt + sdist_requirements.txt
-    # as idf-requirements-bundle only from Linux x86_64
-    # This skips redundant work elsewhere.
+    requirements, branches = collect_idf_inputs(idf_branches, idf_constraints, True)
     if get_current_platform() == "linux_x86_64":
-        sdist_reqs = compute_sdist_requirements(requirements)
+        with open("idf_inputs.json", "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "branches": branches,
+                    "supported_python": os.environ.get("SUPPORTED_PYTHON", ""),
+                },
+                handle,
+                indent=2,
+            )
+
+    exclude_list = load_exclude_rules("exclude_list.yaml", current_platform=get_current_platform())
+    pins = resolve_branches(branches, exclude_rules=exclude_list)
+    with open("resolved_pins.txt", "w", encoding="utf-8") as handle:
+        handle.write("\n".join(sorted(str(pin) for pin in pins)) + "\n")
+
+    # Include the solved dependency closure so constrained transitive packages
+    # and exact versions excluded on one platform still get index sdists.
+    if get_current_platform() == "linux_x86_64":
+        sdist_reqs = compute_sdist_requirements(requirements | pins)
         sdist_count = write_sdist_requirements_file(SDIST_REQUIREMENTS_FILE, sdist_reqs)
         print_color("---------- SDIST REQUIREMENTS (index fallback) ----------")
         print_color(f"Packages needing sdist on index: {sdist_count}", Fore.CYAN)
         print_color("---------- END SDIST REQUIREMENTS ----------")
 
-    exclude_list = YAMLListAdapter(
-        "exclude_list.yaml", exclude=True, current_platform=get_current_platform()
-    ).requirements
-
-    after_exclude_requirements = exclude_from_requirements(requirements, exclude_list)
+    after_exclude_requirements = retain_exact_pins(pins, exclude_list)
     after_exclude_requirements = filter_requirements_by_pypi_requires_python(after_exclude_requirements)
 
     include_list = YAMLListAdapter("include_list.yaml").requirements
@@ -486,17 +631,19 @@ def main() -> int:
         print(req)
     print_color("---------- END OF ADDITIONAL REQUIREMENTS ----------")
 
+    # Pinned wheels first, so a later include-list build can reuse them from find-links
+    # instead of resolving a second version of the same dependency.
+    print_color("---------- BUILD WHEELS ----------")
+    standard_whl = build_wheels(after_exclude_requirements, no_deps=True)
+    failed_wheels = standard_whl["failed"]
+    succeeded_wheels = standard_whl["succeeded"]
+    skipped_wheels = standard_whl.get("skipped", 0)
+
     print_color("---------- BUILD ADDITIONAL WHEELS ----------")
     additional_whl = build_wheels(include_list)
-    failed_wheels = additional_whl["failed"]
-    succeeded_wheels = additional_whl["succeeded"]
-    skipped_wheels = additional_whl.get("skipped", 0)
-
-    print_color("---------- BUILD WHEELS ----------")
-    standard_whl = build_wheels(after_exclude_requirements)
-    failed_wheels += standard_whl["failed"]
-    succeeded_wheels += standard_whl["succeeded"]
-    skipped_wheels += standard_whl.get("skipped", 0)
+    failed_wheels += additional_whl["failed"]
+    succeeded_wheels += additional_whl["succeeded"]
+    skipped_wheels += additional_whl.get("skipped", 0)
 
     print_color("---------- STATISTICS ----------")
     print_color(f"Succeeded {succeeded_wheels} wheels", Fore.GREEN)
@@ -509,14 +656,28 @@ def main() -> int:
 
     print_color("---------- PYTHON VERSION DEPENDENT ----------")
     dependent_wheels = get_python_dependent_wheels(
-        f"{os.path.curdir}{(os.sep)}downloaded_wheels", after_exclude_requirements
+        f"{os.path.curdir}{(os.sep)}downloaded_wheels",
+        after_exclude_requirements | include_list,
     )
-    after_exclude_dependent_wheels = exclude_from_requirements(dependent_wheels, exclude_list)
-    after_exclude_dependent_wheels = filter_requirements_by_pypi_requires_python(after_exclude_dependent_wheels)
-
-    with open("dependent_requirements.txt", "w") as f:
-        for wheel in after_exclude_dependent_wheels:
-            f.write(f"{str(wheel)}\n")
+    dependent_wheels.update(
+        get_python_dependent_wheels(
+            f"{os.path.curdir}{(os.sep)}downloaded_wheels",
+            None,
+        )
+    )
+    dependent_wheels = retain_exact_pins(dependent_wheels, exclude_list)
+    dependent_lines = {str(wheel) for wheel in dependent_wheels}
+    for branch in branches:
+        if not branch_targets_current_interpreter(branch["branch"], branch.get("idf_major")):
+            dependent_lines.update(
+                str(requirement)
+                for requirement in parse_requirement_lines(
+                    branch["requirements"], source=f"{branch['branch']} dependent requirements"
+                )
+            )
+    with open("dependent_requirements.txt", "w", encoding="utf-8") as f:
+        for line in sorted(dependent_lines, key=str.lower):
+            f.write(f"{line}\n")
 
     return 0
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 
+from pathlib import Path
 from typing import Optional
 from typing import Set
 
@@ -35,6 +36,32 @@ SYS_PLATFORM_MAP = {
 def _platform_for_marker(platform):
     """Normalize platform to sys_platform value for pip markers."""
     return SYS_PLATFORM_MAP.get(platform, platform)
+
+
+def invert_version_specifier(spec_with_text: str) -> tuple[str, str, str]:
+    """Return the opposite version specifier, its version text, and the original operator.
+
+    ``===`` stays unchanged. A compatible release (``~=``) becomes ``!=``.
+    """
+    match = re.match(r"(===|==|!=|~=|<=?|>=?)\s*(.*)", spec_with_text)
+    if not match:
+        print_color(f"Unexpected version specifier: {spec_with_text}", Fore.YELLOW)
+        raise SystemExit()
+    operator, version = match.groups()
+    for original, inverted in (
+        ("===", "==="),
+        ("<=", ">"),
+        (">=", "<"),
+        ("==", "!="),
+        ("!=", "=="),
+        ("~=", "!="),
+        ("<", ">="),
+        (">", "<="),
+    ):
+        if original in operator:
+            return inverted, version, operator
+    print_color(f"Unexpected version specifier: {spec_with_text}", Fore.YELLOW)
+    raise SystemExit()
 
 
 class YAMLListAdapter:
@@ -89,8 +116,8 @@ class YAMLListAdapter:
     def __init__(self, yaml_file: str, exclude: bool = False, current_platform: Optional[str] = None) -> None:
         self._yaml_list: list = []
         try:
-            with open(yaml_file, "r") as f:
-                raw = yaml.load(f, yaml.Loader)
+            with open(yaml_file, "r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f)
         except FileNotFoundError:
             print_color(f"File not found, please check the file: {yaml_file}", Fore.RED)
             raw = None
@@ -108,13 +135,12 @@ class YAMLListAdapter:
         if current_platform and self._yaml_list:
             self._yaml_list = [e for e in self._yaml_list if exclude_entry_applies_to_platform(e, current_platform)]
 
-        # Assemble duplicates of requirements/packages with the same name and remove them from the YAML list
-        _requirement_duplicates = self._assemble_requirements_duplicates()
-        # Convert YAML list to set of requirements without duplicates
+        # Positive exclusion rows are independent alternatives. The duplicate
+        # merger is only valid for the inverted requirements passed to pip.
+        _requirement_duplicates = self._assemble_requirements_duplicates() if self.exclude else {}
         self.requirements = self._yaml_to_requirement(self._yaml_list, exclude=self.exclude)
-        # Combine requirements/packages with the same name (duplicates)
-        # into one requirement and replaces original requirements
-        _combine_package_duplicates(self, _requirement_duplicates)
+        if self.exclude:
+            _combine_package_duplicates(self, _requirement_duplicates)
         # A versioned row rewrites only its own pin. Whole-package rows for the same name
         # still keep the old pin, including where that version is excluded.
         if self.exclude:
@@ -147,40 +173,13 @@ class YAMLListAdapter:
                 self.requirements = updated
 
     def _change_specifier_logic(self, spec_with_text: str) -> tuple:
-        """Change specifier logic to opposite
-        e.g. "<1.20" will be ">=1.20"
-        - this function is used for exclude_list.yaml to change the logic of (version) specifier
-        to create opposite logic for Requirement installed by pip
-
-        - return (new_version_specifier, text_after(version number), original_version_specifier)
-        """
-        pattern = re.compile(r"(===|==|!=|~=|<=?|>=?)\s*(.*)")
-        match = pattern.match(spec_with_text)
-        if not match:
-            print_color(f"Unexpected version specifier: {spec_with_text}", Fore.YELLOW)
-            raise SystemExit()
-        ver_specifier, text = match.groups()  # e.g. ('<', '1.20')
-
-        for old, new in (
-            ("===", "==="),  # not changed specifier for arbitrary equality defined by PEP440
-            # (https://packaging.python.org/en/latest/specifications/version-specifiers/#arbitrary-equality)
-            ("<=", ">"),
-            (">=", "<"),
-            ("==", "!="),
-            ("!=", "=="),
-            ("~=", "!="),  # Handle compatible release
-            ("<", ">="),
-            (">", "<="),
-        ):
-            if old in ver_specifier:
-                new_ver_spec = ver_specifier.replace(old, new)
-                break
-        return (new_ver_spec, text, ver_specifier)
+        """Change specifier logic to opposite, e.g. ``<1.20`` becomes ``>=1.20``."""
+        return invert_version_specifier(spec_with_text)
 
     def _python_version_marker_fragment_no_package_version(self, package_python, exclude: bool) -> str:
         """Build ``python_version ...`` marker fragment from YAML ``python`` when there is no package ``version``.
 
-        If ``python`` is a list, each element becomes a fragment and fragments are joined with **and**.
+        If ``python`` is a list, each element becomes a fragment and fragments are joined with **or**.
         """
         if not isinstance(package_python, list):
             new_spec, text_after, old_spec = self._change_specifier_logic(package_python)
@@ -191,7 +190,8 @@ class YAMLListAdapter:
             new_spec, text_after, old_spec = self._change_specifier_logic(elem)
             spec = new_spec if exclude else old_spec
             parts.append(f"python_version {spec} '{text_after}'")
-        return " and ".join(parts)
+        joined = (" and " if exclude else " or ").join(parts)
+        return f"({joined})" if len(parts) > 1 else joined
 
     def _yaml_to_requirement(self, yaml: list, exclude: bool = False) -> set:
         """Converts YAML defined requirement into packaging.requirements Requirement
@@ -199,7 +199,7 @@ class YAMLListAdapter:
 
         Within one YAML row, ``platform`` and ``python`` are combined with **and**. Multiple entries in a
         **platform** list are **or**ed (match any listed platform). Multiple entries in a **python** list
-        are **and**ed (all listed python constraints must hold).
+        are **or**ed (match any listed python constraint).
         For exclude=True **without** a package ``version``, platform + python mean “exclude on this OS **and**
         this Python” (intersection): the keep-marker is ``(sys_platform != p or <inverted python>)`` per
         platform, ANDed across listed platforms (De Morgan). Rows **with** a package version keep the
@@ -296,7 +296,7 @@ class YAMLListAdapter:
                         for plf in package_platform
                     ]
 
-                    requirement_str_list.append(" or ".join(platform_list))
+                    requirement_str_list.append(f"({' or '.join(platform_list)})")
 
             if exclude and (package_platform or package_python) and package_version:
                 requirement_old_str_list = [f"{package['package_name']}; "]
@@ -310,7 +310,7 @@ class YAMLListAdapter:
 
                 else:
                     platform_list = [f"sys_platform == '{plf}'" for plf in package_platform]
-                    requirement_str_list.append(" or ".join(platform_list))
+                    requirement_str_list.append(f"({' or '.join(platform_list)})")
 
                     if exclude:
                         platform_list_old = [f"sys_platform != '{plf}'" for plf in package_platform]
@@ -345,7 +345,7 @@ class YAMLListAdapter:
                         python_list.append(f"python_version {old_spec} '{text_after}'")
                         if exclude:
                             python_list_old.append(f"python_version {new_spec} '{text_after}'")
-                    requirement_str_list.append("" + " and ".join(python_list))
+                    requirement_str_list.append(f"({' or '.join(python_list)})")
 
                     if exclude:
                         requirement_old_str_list.append(" and ".join(python_list_old))
@@ -445,3 +445,98 @@ def _combine_package_duplicates(self, requirement_duplicates: dict):
         new_requirements.add(requirement)
     # replace original requirements with new requirements
     self.requirements = new_requirements
+
+
+class ExcludeRequirements(set):
+    """Positive exclude requirements, with one filtered view per runner platform."""
+
+    def __init__(
+        self,
+        requirements: set[Requirement],
+        by_platform: dict[str, set[Requirement]] | None = None,
+    ) -> None:
+        super().__init__(requirements)
+        self.by_platform = by_platform or {}
+
+
+def load_exclude_rules(
+    path: str | Path = "exclude_list.yaml",
+    current_platform: str | None = None,
+) -> ExcludeRequirements:
+    """Load exclude_list.yaml as positive requirements (``exclude=False``)."""
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"Exclude rule file not found: {path}")
+    if current_platform:
+        requirements = YAMLListAdapter(str(path), exclude=False, current_platform=current_platform).requirements
+        return ExcludeRequirements(requirements, {current_platform: requirements})
+
+    platforms = (
+        "windows",
+        "macos_x86_64",
+        "macos_arm64",
+        "linux_x86_64",
+        "linux_arm64",
+        "linux_armv7",
+    )
+    by_platform = {
+        platform: YAMLListAdapter(str(path), exclude=False, current_platform=platform).requirements
+        for platform in platforms
+    }
+    return ExcludeRequirements(set().union(*by_platform.values()), by_platform)
+
+
+def is_excluded(
+    name: str,
+    version: str,
+    platform: str,
+    python_version: str,
+    rules: set[Requirement] | list[Requirement] | tuple[Requirement, ...],
+) -> bool:
+    """Return whether ``name==version`` matches a positive exclude requirement."""
+    for requirement in applicable_exclusion_rules(name, platform, python_version, rules):
+        if not requirement.specifier or requirement.specifier.contains(version, prereleases=True):
+            return True
+    return False
+
+
+def marker_environment(platform: str, python_version: str) -> dict[str, str]:
+    """Build the PEP 508 marker environment shared by exclusion consumers."""
+    return {
+        "sys_platform": _platform_for_marker(platform),
+        "python_version": python_version,
+    }
+
+
+def applicable_exclusion_rules(
+    name: str,
+    platform: str,
+    python_version: str,
+    rules: set[Requirement] | list[Requirement] | tuple[Requirement, ...],
+) -> list[Requirement]:
+    """Return rules for ``name`` whose platform/Python marker matches."""
+    package_name = canonicalize_name(name)
+    requirements = rules.by_platform.get(platform, rules) if isinstance(rules, ExcludeRequirements) else rules
+    environment = marker_environment(platform, python_version)
+    return [
+        requirement
+        for requirement in requirements
+        if canonicalize_name(requirement.name) == package_name
+        and (requirement.marker is None or requirement.marker.evaluate(environment))
+    ]
+
+
+def exclusion_constraints(
+    platform: str,
+    python_version: str,
+    rules: ExcludeRequirements,
+) -> list[str]:
+    """Return pip constraints that avoid all versioned exclusions for an environment."""
+    constraints: list[str] = []
+    for rule in rules.by_platform.get(platform, rules):
+        if rule.marker is not None and not rule.marker.evaluate(marker_environment(platform, python_version)):
+            continue
+        for specifier in rule.specifier:
+            inverse, version, original = invert_version_specifier(f"{specifier.operator}{specifier.version}")
+            if inverse != original:
+                constraints.append(f"{rule.name}{inverse}{version}")
+    return constraints

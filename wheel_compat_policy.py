@@ -29,6 +29,7 @@ from _helper_functions import _requirement_for_pip_download
 from _helper_functions import get_current_platform
 from _helper_functions import is_linux_armv7_runner
 from _helper_functions import manylinux_glibc_tags_in_name
+from _helper_functions import parse_cpython_interpreter_tag
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 
@@ -37,8 +38,6 @@ from _helper_functions import print_color
 # Retry without that flag when a requirement or dependency has no binary wheel.
 # ``--no-binary cryptography`` on Intel still wins (OpenSSL 4 rebuild) and is not pruned.
 _MACOSX_PLAT_TAG = re.compile(r"macosx_(\d+)_(\d+)_([a-z0-9_]+)", re.IGNORECASE)
-# PEP 425: ``cp`` + one-digit major + remaining digits as minor (``cp38``, ``cp310``).
-_CPYTHON_INTERP = re.compile(r"^cp(?P<major>\d)(?P<minor>\d{1,})$")
 
 
 def _wheel_python_abi_key(wheel_name: str) -> tuple[str, str] | None:
@@ -63,10 +62,9 @@ def _wheel_cpython_ranges(wheel_name: str) -> list[tuple[tuple[int, int], tuple[
     ranges: list[tuple[tuple[int, int], tuple[int, int] | None]] = []
     seen: set[tuple[tuple[int, int], tuple[int, int] | None]] = set()
     for tag in tags:
-        match = _CPYTHON_INTERP.fullmatch(tag.interpreter)
-        if not match:
+        ver = parse_cpython_interpreter_tag(tag.interpreter)
+        if ver is None:
             continue
-        ver = (int(match.group("major")), int(match.group("minor")))
         if tag.abi == "abi3":
             item: tuple[tuple[int, int], tuple[int, int] | None] = (ver, None)
         elif tag.abi == tag.interpreter or tag.abi.startswith("cp"):
@@ -444,9 +442,9 @@ def _prune_mirrored_manylinux228_ci_builds(
     wheel_dir: Path,
 ) -> int:
     """Remove CI manylinux > ``2_28`` after mirroring PyPI ``2_28`` for ``req``."""
-    mirrored_version = _mirrored_manylinux228_version(req.name, wheel_dir)
+    mirrored_version = _requirement_exact_version(req)
     if not mirrored_version:
-        mirrored_version = _requirement_exact_version(req)
+        mirrored_version = _mirrored_manylinux228_version(req.name, wheel_dir)
     if not mirrored_version:
         return 0
     pruned = prune_ci_manylinux_newer_than_228(req.name, mirrored_version, wheel_dir=wheel_dir)
