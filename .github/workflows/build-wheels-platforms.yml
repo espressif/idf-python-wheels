@@ -253,6 +253,7 @@ jobs:
           path: |
             requirements.txt
             sdist_requirements.txt
+            idf_inputs.json
           retention-days: 1
 
 

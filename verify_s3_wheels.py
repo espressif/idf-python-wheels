@@ -26,7 +26,7 @@ from _helper_functions import get_wheel_python_version
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel_s3
-from yaml_list_adapter import YAMLListAdapter
+from yaml_list_adapter import load_exclude_rules
 
 # Temporary: regex patterns for violations to ignore (wheel name is matched)
 VIOLATION_EXCLUSION_REGEXES = [
@@ -133,7 +133,7 @@ def main():
     bucket = s3.Bucket(bucket_name)
 
     # Load exclude requirements (direct logic, no inversion)
-    exclude_requirements = YAMLListAdapter(EXCLUDE_LIST_PATH, exclude=False).requirements
+    exclude_requirements = load_exclude_rules(EXCLUDE_LIST_PATH)
     print(f"Loaded {len(exclude_requirements)} exclude rules\n")
 
     # Get all wheels from S3
