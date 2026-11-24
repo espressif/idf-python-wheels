@@ -16,9 +16,9 @@ from pathlib import Path
 import boto3
 
 from colorama import Fore
-from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 
+from _helper_functions import parse_requirement_lines
 from _helper_functions import print_color
 from _helper_functions import requirement_satisfied_by_filenames
 
@@ -28,22 +28,14 @@ def _normalize_pkg_dir(name: str) -> str:
 
 
 def _load_requirement_lines(path: Path) -> list[Requirement]:
-    requirements: list[Requirement] = []
-    invalid: list[str] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        try:
-            requirements.append(Requirement(line))
-        except InvalidRequirement:
-            invalid.append(f"line {line_no}: {line}")
-    if invalid:
-        print_color("Invalid requirement line(s) in sdist requirements file:", Fore.RED)
-        for entry in invalid:
-            print_color(f"  {entry}", Fore.RED)
-        raise SystemExit(1)
-    return requirements
+    try:
+        return parse_requirement_lines(
+            path.read_text(encoding="utf-8").splitlines(),
+            source=str(path),
+        )
+    except ValueError as exc:
+        print_color(f"Invalid requirement line(s) in sdist requirements file: {exc}", Fore.RED)
+        raise SystemExit(1) from exc
 
 
 def _sdist_basenames_for_package(bucket, pkg_dir: str) -> list[str]:

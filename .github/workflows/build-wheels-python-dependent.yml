@@ -255,3 +255,11 @@ jobs:
           if-no-files-found: ignore
           path: ./downloaded_wheels
           retention-days: 1
+
+      - name: Upload resolved pins for sdist aggregation
+        uses: actions/upload-artifact@v7
+        with:
+          name: resolved-pins-dependent-${{ matrix.arch }}-${{ matrix.python-version }}
+          if-no-files-found: ignore
+          path: ./resolved_pins.txt
+          retention-days: 1

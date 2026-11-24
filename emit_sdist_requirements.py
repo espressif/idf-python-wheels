@@ -14,6 +14,7 @@ distribution on the index so pip can fall back when no compatible wheel exists f
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 from pathlib import Path
@@ -28,9 +29,12 @@ from packaging.version import Version
 
 from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import SDIST_REQUIREMENTS_FILE
+from _helper_functions import parse_requirement_lines
 from _helper_functions import print_color
 from yaml_list_adapter import YAMLListAdapter
-from yaml_list_adapter import _platform_for_marker
+from yaml_list_adapter import is_excluded
+from yaml_list_adapter import load_exclude_rules
+from yaml_list_adapter import marker_environment
 
 # Platforms used in exclude_list.yaml (same names as get_current_platform()).
 SDIST_EVAL_PLATFORMS = (
@@ -126,6 +130,14 @@ def _version_buildable(assembled_req: Requirement, after_req: Requirement) -> bo
 
 
 def _load_supported_python_versions() -> list[str]:
+    configured = os.environ.get("SUPPORTED_PYTHON", "").strip()
+    if configured:
+        try:
+            values = json.loads(configured)
+        except json.JSONDecodeError:
+            values = [value.strip() for value in configured.split(",")]
+        if isinstance(values, list):
+            return [str(value) for value in values if str(value).strip()]
     if _SUPPORTED_VERSIONS_JSON.is_file():
         data = json.loads(_SUPPORTED_VERSIONS_JSON.read_text(encoding="utf-8"))
         versions = data.get("supported_python")
@@ -135,8 +147,8 @@ def _load_supported_python_versions() -> list[str]:
 
 
 def _marker_env(platform: str, python_version: str) -> dict[str, str]:
-    sys_plat = _platform_for_marker(platform)
-    env: dict[str, str] = {"python_version": python_version}
+    env = marker_environment(platform, python_version)
+    sys_plat = env["sys_platform"]
 
     machine_by_platform = {
         "linux_x86_64": "x86_64",
@@ -216,6 +228,7 @@ def compute_sdist_requirements(assembled: Iterable[Requirement]) -> set[Requirem
     from build_wheels import exclude_from_requirements
 
     assembled_set = set(assembled)
+    direct_rules = load_exclude_rules(EXCLUDE_LIST_PATH)
     by_name: dict[str, list[Requirement]] = {}
     for req in assembled_set:
         by_name.setdefault(canonicalize_name(req.name), []).append(req)
@@ -232,6 +245,22 @@ def compute_sdist_requirements(assembled: Iterable[Requirement]) -> set[Requirem
                 applicable = [ar for ar in assembled_reqs if _requirement_applies_to_env(ar, platform, py_ver)]
                 if not applicable:
                     continue
+                exact_excluded = False
+                for requirement in applicable:
+                    specs = list(requirement.specifier)
+                    if len(specs) == 1 and specs[0].operator == "==":
+                        if is_excluded(
+                            requirement.name,
+                            specs[0].version,
+                            platform,
+                            py_ver,
+                            direct_rules,
+                        ):
+                            exact_excluded = True
+                            break
+                if exact_excluded:
+                    needing_names.add(name)
+                    break
                 if not all(_can_build_wheel_on_platform(ar, after, platform, py_ver) for ar in applicable):
                     needing_names.add(name)
                     break
@@ -267,8 +296,8 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                assembled.add(Requirement(line))
-            except Exception:
+                assembled.update(parse_requirement_lines([line], source=str(path)))
+            except ValueError:
                 continue
     else:
         from build_wheels import assemble_requirements
@@ -279,6 +308,22 @@ def main() -> int:
         branches = get_used_idf_branches(fetch_idf_branches())
         constraints = get_constraints_versions(branches)
         assembled = assemble_requirements(branches, constraints, make_txt_file=False)
+
+    resolved_pin_files = []
+    root_pin_file = Path("resolved_pins.txt")
+    if root_pin_file.is_file():
+        resolved_pin_files.append(root_pin_file)
+    resolved_pin_files.extend(Path("resolved-pins").rglob("*.txt"))
+    for resolved_pins in resolved_pin_files:
+        try:
+            assembled.update(
+                parse_requirement_lines(
+                    resolved_pins.read_text(encoding="utf-8").splitlines(),
+                    source=str(resolved_pins),
+                )
+            )
+        except ValueError:
+            continue
 
     reqs = compute_sdist_requirements(assembled)
     count = write_sdist_requirements_file(SDIST_REQUIREMENTS_FILE, reqs)

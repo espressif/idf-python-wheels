@@ -15,10 +15,9 @@ import tempfile
 from pathlib import Path
 
 from colorama import Fore
-from packaging.requirements import InvalidRequirement
-from packaging.requirements import Requirement
 
 from _helper_functions import _requirement_for_pip_download
+from _helper_functions import parse_requirement_lines
 from _helper_functions import print_color
 
 DEFAULT_OUT = Path("downloaded_wheels")
@@ -27,9 +26,11 @@ DEFAULT_INDEX = "https://pypi.org/simple"
 
 def _read_requirement_lines(requirements_file: Path) -> list[str]:
     return [
-        ln.strip()
-        for ln in requirements_file.read_text(encoding="utf-8").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
+        str(requirement)
+        for requirement in parse_requirement_lines(
+            requirements_file.read_text(encoding="utf-8").splitlines(),
+            source=str(requirements_file),
+        )
     ]
 
 
@@ -39,9 +40,12 @@ def _sdist_download_line(requirement_line: str) -> str:
     if not line:
         return line
     try:
-        return _requirement_for_pip_download(Requirement(line))
-    except InvalidRequirement:
-        return line
+        requirements = parse_requirement_lines([line], source="sdist requirement")
+        if len(requirements) != 1:
+            raise ValueError("expected one requirement")
+        return _requirement_for_pip_download(requirements[0])
+    except ValueError as exc:
+        raise ValueError(f"Invalid sdist requirement: {line}") from exc
 
 
 def download_sdists(

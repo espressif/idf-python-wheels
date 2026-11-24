@@ -69,6 +69,17 @@ jobs:
           name: idf-requirements-bundle
           path: .
 
+      - name: Download resolved pins from all platform builds
+        if: inputs.idf_requirements_bundle
+        uses: actions/download-artifact@v8
+        with:
+          pattern: resolved-pins-*
+          path: ./resolved-pins
+
+      - name: Recompute sdist requirements from all platform pins
+        if: inputs.idf_requirements_bundle
+        run: python emit_sdist_requirements.py requirements.txt
+
       - name: Install OS dependencies for sdist download
         if: inputs.idf_requirements_bundle
         run: os_dependencies/ubuntu.sh
