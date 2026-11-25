@@ -23,6 +23,7 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from _helper_functions import _python_versions_wheel_serves
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
@@ -35,6 +36,7 @@ from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
+from _helper_functions import parse_cpython_interpreter_tag
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
 from build_wheels import _add_into_requirements
@@ -813,6 +815,62 @@ class TestShouldExcludeWheel(unittest.TestCase):
         self.assertFalse(excluded)
 
 
+class TestShouldExcludeWheelS3(unittest.TestCase):
+    """Index violations are wheels that cannot be installed on any interpreter they serve."""
+
+    SUPPORTED = ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+
+    def setUp(self):
+        from _helper_functions import should_exclude_wheel_s3
+        from yaml_list_adapter import is_excluded
+        from yaml_list_adapter import load_exclude_rules
+
+        self.should_exclude_wheel_s3 = should_exclude_wheel_s3
+        self.is_excluded = is_excluded
+        self.rules = load_exclude_rules("exclude_list.yaml")
+
+    def _flagged(self, wheel_name: str) -> bool:
+        excluded, _reason = self.should_exclude_wheel_s3(
+            wheel_name,
+            self.rules,
+            supported_python_versions=self.SUPPORTED,
+        )
+        return bool(excluded)
+
+    def test_universal_wheel_kept_when_a_newer_python_is_allowed(self):
+        self.assertFalse(self._flagged("mcp-1.27.0-py3-none-any.whl"))
+        self.assertFalse(self._flagged("pytest_embedded_idf-2.6.0-py3-none-any.whl"))
+        self.assertFalse(self._flagged("pytest_embedded_serial_esp-1.18.2-py3-none-any.whl"))
+
+    def test_abi3_wheel_kept_when_a_newer_python_is_allowed(self):
+        self.assertFalse(self._flagged("tree_sitter_c-0.21.4-cp38-abi3-linux_armv7l.whl"))
+
+    def test_exact_cp38_armv7_tree_sitter_still_flagged(self):
+        self.assertTrue(self._flagged("tree_sitter_c-0.21.4-cp38-cp38-linux_armv7l.whl"))
+
+    def test_pydantic_core_binary_past_the_version_floor_kept(self):
+        self.assertFalse(self._flagged("pydantic_core-2.41.5-cp314-cp314-win_amd64.whl"))
+        self.assertFalse(self._flagged("pydantic_core-2.42.0-cp314-cp314-macosx_11_0_arm64.whl"))
+        self.assertFalse(self._flagged("pydantic_core-2.41.4-cp314-cp314-macosx_10_13_x86_64.whl"))
+
+    def test_pydantic_core_below_the_version_floor_still_flagged(self):
+        self.assertTrue(self._flagged("pydantic_core-2.27.2-cp314-cp314-win_amd64.whl"))
+
+    def test_build_rule_still_skips_pydantic_core_sdist_on_windows_314(self):
+        self.assertTrue(self.is_excluded("pydantic-core", "2.41.5", "windows", "3.14", self.rules))
+
+    def test_pygobject_linux_still_flagged(self):
+        self.assertTrue(self._flagged("pygobject-3.48.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"))
+        self.assertTrue(self._flagged("pygobject-3.48.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"))
+
+    def test_dbus_python_cp38_linux_still_flagged(self):
+        self.assertTrue(self._flagged("dbus_python-1.3.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"))
+        self.assertTrue(self._flagged("dbus_python-1.2.18-cp38-cp38-linux_armv7l.whl"))
+
+    def test_package_excluded_on_every_python_still_flagged(self):
+        self.assertTrue(self._flagged("esptool-4.8.0-py3-none-any.whl"))
+
+
 class TestGetUsedIdfBranches(unittest.TestCase):
     """Test the get_used_idf_branches function."""
 
@@ -1195,6 +1253,18 @@ class TestDeferredPinPolicies(unittest.TestCase):
         ]
         result = constraint_requirements_for_sdist(branches, ExcludeRequirements({Requirement("esptool")}))
         self.assertEqual({str(requirement) for requirement in result}, {"constraint-only-package<=1.0"})
+
+
+class TestFreeThreadedWheelTags(unittest.TestCase):
+    def test_free_threaded_tag_is_exactly_python_314(self):
+        self.assertEqual(parse_cpython_interpreter_tag("cp314t"), (3, 14))
+        self.assertEqual(
+            _python_versions_wheel_serves(
+                "pkg-1.0-cp314t-cp314t-win_amd64.whl",
+                ["3.8", "3.14", "3.15"],
+            ),
+            ["3.14"],
+        )
 
 
 class TestRetainExactPins(unittest.TestCase):

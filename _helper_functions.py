@@ -57,7 +57,7 @@ PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
 ALL_PLATFORMS = ["linux", "windows", "macos"]
 LINUX_ARCHS = ["linux_x86_64", "linux_arm64", "linux_armv7"]
 MACOS_ARCHS = ["macos_x86_64", "macos_arm64"]
-_CPYTHON_INTERPRETER = re.compile(r"^cp(?P<major>\d)(?P<minor>\d+)$")
+_CPYTHON_INTERPRETER = re.compile(r"^cp(?P<major>\d)(?P<minor>\d+)(?:t)?$")
 
 
 def parse_cpython_interpreter_tag(interpreter: str) -> tuple[int, int] | None:
@@ -1026,9 +1026,10 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
     Examples:
         - "pkg-1.0-cp311-cp311-linux.whl" -> "3.11"
         - "pkg-1.0-cp39-abi3-manylinux_2_31_armv7l.whl" -> "3.9"
+        - "pkg-1.0-cp314t-cp314t-linux_x86_64.whl" -> "3.14"
         - "pkg-1.0-py3-none-any.whl" -> None (universal)
     """
-    match = re.search(r"-cp(\d)(\d+)-", wheel_name)
+    match = re.search(r"-cp(\d)(\d+)(?:t)?-", wheel_name)
     if match:
         return f"{match.group(1)}.{match.group(2)}"
     return None
@@ -1061,34 +1062,111 @@ def get_wheel_runner_platforms(wheel_name: str) -> list[str] | None:
     return list(platforms) if platforms else None
 
 
+def _python_version_key(version: str) -> tuple[int, int] | None:
+    """Return ``(major, minor)`` for a ``3.10``-style version string."""
+    parts = version.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _python_versions_wheel_serves(wheel_name: str, supported_python_versions: list[str] | None) -> list[str]:
+    """Python versions this wheel can be installed on, within the supported set.
+
+    ``py3-none-any`` serves every supported version. ``cpXY-abi3`` serves supported
+    versions at or above the tag. ``cpXY-cpXY`` serves only that version.
+    """
+    candidates = supported_python_versions or [f"{sys.version_info.major}.{sys.version_info.minor}"]
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        tagged = get_wheel_python_version(wheel_name)
+        return [tagged] if tagged else list(candidates)
+
+    universal = False
+    floors: list[tuple[int, int]] = []
+    exact: list[tuple[int, int]] = []
+    for tag in tags:
+        if tag.abi == "none" and tag.interpreter.startswith("py"):
+            universal = True
+            continue
+        parsed = parse_cpython_interpreter_tag(tag.interpreter)
+        if parsed is None:
+            continue
+        if tag.abi == "abi3":
+            floors.append(parsed)
+        elif tag.abi == tag.interpreter or tag.abi == f"{tag.interpreter}t":
+            exact.append(parsed)
+    if universal or (not floors and not exact):
+        return list(candidates)
+
+    served = [
+        version
+        for version in candidates
+        if (key := _python_version_key(version)) is not None and (key in exact or any(key >= floor for floor in floors))
+    ]
+    if served:
+        return served
+    tagged = get_wheel_python_version(wheel_name)
+    return [tagged] if tagged else list(candidates)
+
+
+def _clears_versioned_upper_bound(specifier: SpecifierSet, version: str) -> bool:
+    """True when ``specifier`` is an upper bound that this version is past.
+
+    ``<2.35`` does not contain 2.41: the versioned rule already allows that release.
+    A sibling rule with no version is then a build skip, not an index deletion.
+    """
+    if not specifier or specifier.contains(version, prereleases=True):
+        return False
+    return any(item.operator in ("<", "<=") for item in specifier)
+
+
+def _excluded_for_index(
+    name: str,
+    version: str,
+    platform_name: str,
+    python_version: str,
+    rules: set,
+) -> bool:
+    """Index check: a version past a versioned upper bound ignores empty-specifier rules."""
+    from yaml_list_adapter import applicable_exclusion_rules
+
+    applicable = applicable_exclusion_rules(name, platform_name, python_version, rules)
+    if any(_clears_versioned_upper_bound(requirement.specifier, version) for requirement in applicable):
+        applicable = [requirement for requirement in applicable if requirement.specifier]
+    return any(
+        not requirement.specifier or requirement.specifier.contains(version, prereleases=True)
+        for requirement in applicable
+    )
+
+
 def should_exclude_wheel_s3(
     wheel_name: str,
     exclude_requirements: set,
     supported_python_versions: list[str] | None = None,
 ) -> tuple[bool, str]:
     """
-    Check if a wheel should be excluded for S3 verification.
+    Check if a wheel on the index matches an exclude rule for every interpreter it serves.
 
-    Uses DIRECT exclusion logic (not inverted):
-    - If marker is True → exclusion applies → EXCLUDE
-    - If marker is False → exclusion doesn't apply → KEEP
-    - If version matches specifier → EXCLUDE
+    A universal wheel or ``abi3`` wheel is a violation only when every supported
+    Python it can be installed on, on each platform tag it carries, is excluded.
+    An exact ``cpXY`` wheel is checked for that Python only.
 
-    Derives the wheel's target platform from its filename (e.g. win_amd64
-    -> win32, manylinux_* -> linux) and evaluates sys_platform markers
-    against that instead of skipping them, so platform-only exclusions
-    in exclude_list.yaml are reported as S3 violations when applicable.
-
-    For universal wheels (no cpXY tag, e.g. py3-none-any), python_version
-    markers are evaluated against supported_python_versions when provided,
-    so exclusions that apply only to older supported versions are not missed.
+    An empty-specifier rule is ignored for this check when a versioned upper bound
+    for the same package and Python already allows the wheel version. That keeps a
+    binary wheel such as ``pydantic_core>=2.35`` on macOS/Windows 3.14, while the
+    build-time rule that skips the sdist stays in ``exclude_list.yaml``.
 
     Args:
         wheel_name: The wheel filename
-        exclude_requirements: Set of Requirement objects from YAMLListAdapter (exclude=False)
-        supported_python_versions: When the wheel has no cpXY tag, evaluate
-            python_version markers against these versions (e.g. ["3.8", "3.9", "3.10", ...]).
-            If None, falls back to the runner's Python (may miss version-specific exclusions).
+        exclude_requirements: Positive exclude requirements from ``load_exclude_rules``
+        supported_python_versions: Supported CPython versions. Universal and ``abi3``
+            wheels are judged against this list. If None, only the running interpreter
+            is considered.
 
     Returns:
         tuple: (should_exclude: bool, reason: str)
@@ -1098,22 +1176,20 @@ def should_exclude_wheel_s3(
         return False, ""
 
     canonical_name, wheel_version = parsed
-    from yaml_list_adapter import is_excluded
-
     wheel_platforms = get_wheel_runner_platforms(wheel_name) or [get_current_platform()]
-    python_versions = (
-        [get_wheel_python_version(wheel_name)]
-        if get_wheel_python_version(wheel_name)
-        else (supported_python_versions or [f"{sys.version_info.major}.{sys.version_info.minor}"])
-    )
+    python_versions = [
+        version for version in _python_versions_wheel_serves(wheel_name, supported_python_versions) if version
+    ]
+    if not python_versions:
+        return False, ""
     for platform_name in wheel_platforms:
         for python_version in python_versions:
-            if python_version and is_excluded(
+            if not _excluded_for_index(
                 canonical_name,
                 wheel_version,
                 platform_name,
                 python_version,
                 exclude_requirements,
             ):
-                return True, f"matches exclude rule for {canonical_name}=={wheel_version}"
-    return False, ""
+                return False, ""
+    return True, f"matches exclude rule for {canonical_name}=={wheel_version}"
