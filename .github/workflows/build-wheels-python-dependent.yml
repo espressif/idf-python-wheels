@@ -148,6 +148,12 @@ jobs:
           name: dependent_requirements_${{ matrix.arch }}
           path: dependent_requirements_${{ matrix.arch }}
 
+      - name: Download IDF branch inputs
+        uses: actions/download-artifact@v8
+        with:
+          name: idf-requirements-bundle
+          path: dependent_requirements_${{ matrix.arch }}
+
       # Stage-1 wheels seed find-links so obsolete merged pins (e.g. cryptography<43) are
       # skipped before pip falls back to sdists (ARMv7 has no manylinux wheels for old pins).
       - name: Download stage-1 wheel seed
@@ -187,7 +193,7 @@ jobs:
               bash os_dependencies/linux_arm.sh
               # Source Rust environment after installation
               . \$HOME/.cargo/env
-              python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
+              python build_wheels_from_file.py --require-idf-inputs --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
             "
 
       - name: Build Python dependent wheels - ARMv7 Legacy (in Docker)
@@ -214,7 +220,7 @@ jobs:
               bash os_dependencies/linux_arm.sh
               # Source Rust environment after installation
               . \$HOME/.cargo/env
-              python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
+              python build_wheels_from_file.py --require-idf-inputs --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
             "
 
       - name: Build Python dependent wheels - Linux/macOS
@@ -227,7 +233,7 @@ jobs:
               export ARCHFLAGS="-arch x86_64"
             fi
 
-            python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
+            python build_wheels_from_file.py --require-idf-inputs --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
 
       - name: Validate cryptography OpenSSL 4 wheels (macOS Intel)
         if: matrix.os == 'macOS Intel'
@@ -242,7 +248,7 @@ jobs:
 
       - name: Build Python dependent wheels for ${{ matrix.python-version }} - Windows
         if: matrix.os == 'Windows'
-        run: python build_wheels_from_file.py --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
+        run: python build_wheels_from_file.py --require-idf-inputs --force-interpreter-binary dependent_requirements_${{ matrix.arch }}
 
       - name: Fix permissions on downloaded_wheels (ARMv7 Docker builds)
         if: matrix.os == 'Linux ARMv7' || matrix.os == 'Linux ARMv7 Legacy'

@@ -57,6 +57,15 @@ PLATFORM_MAP = {"win32": "windows", "linux": "linux", "darwin": "macos"}
 ALL_PLATFORMS = ["linux", "windows", "macos"]
 LINUX_ARCHS = ["linux_x86_64", "linux_arm64", "linux_armv7"]
 MACOS_ARCHS = ["macos_x86_64", "macos_arm64"]
+_CPYTHON_INTERPRETER = re.compile(r"^cp(?P<major>\d)(?P<minor>\d+)(?:t)?$")
+
+
+def parse_cpython_interpreter_tag(interpreter: str) -> tuple[int, int] | None:
+    """Return the CPython major/minor represented by a wheel interpreter tag."""
+    match = _CPYTHON_INTERPRETER.fullmatch(interpreter)
+    if not match:
+        return None
+    return int(match.group("major")), int(match.group("minor"))
 
 
 def get_current_platform() -> str:
@@ -182,7 +191,7 @@ def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
         return False
     if not cryptography_pin_needs_macos_intel_openssl4_sdist(req):
         return False
-    if "none match" in find_links_reason or "newer than obsolete pin" in find_links_reason:
+    if "none match" in find_links_reason:
         return False
     if "already has" not in find_links_reason:
         return False
@@ -206,6 +215,8 @@ def macos_intel_cryptography_rebuild_instead_of_find_links_skip(
 def armv7_pip_wheel_subprocess_env(requirement_name: str) -> dict[str, str]:
     """Return env for ``pip wheel`` on ARMv7 (extends global ``PIP_NO_BINARY`` when rebuilding natives)."""
     env = os.environ.copy()
+    for secret in ("GH_TOKEN", "GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        env.pop(secret, None)
     if not is_linux_armv7_runner():
         return env
     match = re.match(r"^([a-zA-Z0-9_-]+)", str(requirement_name).strip())
@@ -217,8 +228,9 @@ def armv7_pip_wheel_subprocess_env(requirement_name: str) -> dict[str, str]:
 def remove_find_links_wheels_for_package(
     name: str,
     find_links_dir: Path | str = "downloaded_wheels",
+    requirement: Requirement | None = None,
 ) -> int:
-    """Remove existing wheels for ``name`` under find-links (before ARMv7 sdist rebuild)."""
+    """Remove matching-version wheels before an ARMv7 sdist rebuild."""
     links = Path(find_links_dir)
     if not links.is_dir():
         return 0
@@ -226,7 +238,15 @@ def remove_find_links_wheels_for_package(
     removed = 0
     for path in links.glob("*.whl"):
         parsed = parse_wheel_name(path.name)
-        if parsed and parsed[0] == canonical:
+        if (
+            parsed
+            and parsed[0] == canonical
+            and (
+                requirement is None
+                or not requirement.specifier
+                or requirement.specifier.contains(parsed[1], prereleases=True)
+            )
+        ):
             path.unlink(missing_ok=True)
             removed += 1
     return removed
@@ -636,9 +656,28 @@ def find_links_wheel_build_skip(
         return False, ""
     canonical = canonicalize_name(req.name)
     versions: list[Version] = []
+    current_cp = (sys.version_info.major, sys.version_info.minor)
     for path in links.glob("*.whl"):
         parsed = parse_wheel_name(path.name)
         if not parsed or parsed[0] != canonical:
+            continue
+        try:
+            _name, _version, _build, wheel_tags = parse_wheel_filename(path.name)
+        except InvalidWheelFilename:
+            continue
+        compatible = False
+        for tag in wheel_tags:
+            if tag.interpreter == "py3" and tag.abi == "none":
+                compatible = True
+                break
+            tag_cp = parse_cpython_interpreter_tag(tag.interpreter)
+            if tag_cp and tag.abi == "abi3" and tag_cp <= current_cp:
+                compatible = True
+                break
+            if tag_cp and tag.abi == tag.interpreter and tag_cp == current_cp:
+                compatible = True
+                break
+        if not compatible:
             continue
         try:
             versions.append(Version(parsed[1]))
@@ -650,25 +689,36 @@ def find_links_wheel_build_skip(
     if matching:
         best = max(matching)
         return True, f"find-links already has {req.name} {best} matching {req.specifier}"
-    newest = max(versions)
-    for spec in req.specifier:
-        if spec.operator != "==":
-            continue
-        try:
-            pinned = Version(spec.version)
-        except InvalidVersion:
-            continue
-        if newest > pinned and not any(s.operator in ("<", "<=") for s in req.specifier):
-            return (
-                True,
-                f"find-links has {req.name} {newest} newer than obsolete pin =={spec.version}",
-            )
+    # A second exact pin (another ESP-IDF release) is still built when a newer
+    # wheel of the same package is already present. The same version skipped above.
     if _find_links_versions_too_new_for_pin(versions, req):
+        newest = max(versions)
         return (
             True,
             f"find-links has {req.name} up to {newest} but none match {req.specifier}",
         )
     return False, ""
+
+
+def find_links_has_reusable_wheel(
+    req: Requirement,
+    find_links_dir: Path | str = DEFAULT_WHEEL_DIR,
+) -> bool:
+    """Return whether find-links already has a universal or stable-ABI wheel for ``req``."""
+    links = Path(find_links_dir)
+    if not links.is_dir():
+        return False
+    canonical = canonicalize_name(req.name)
+    for path in links.glob("*.whl"):
+        try:
+            name, version, _build, tags = parse_wheel_filename(path.name)
+        except InvalidWheelFilename:
+            continue
+        if canonicalize_name(str(name)) != canonical or not req.specifier.contains(version, prereleases=True):
+            continue
+        if any((tag.interpreter == "py3" and tag.abi == "none") or tag.abi == "abi3" for tag in tags):
+            return True
+    return False
 
 
 def get_pip_wheel_extra_args(requirement_name: str) -> list[str]:
@@ -838,6 +888,42 @@ def build_requires_python_map(
     return {key: lookup(key[0], key[1]) for key in unique}
 
 
+def parse_requirement_lines(lines: list[str], *, source: str = "requirements") -> list[Requirement]:
+    """Return safe PEP 508 requirements from downloaded text.
+
+    Pip option lines are policy for the end-user index, not wheel-build input.
+    Rejecting continuations, environment expansion, and direct URLs prevents
+    downloaded text from changing pip's command-line behavior implicitly.
+    """
+    parsed: list[Requirement] = []
+    for number, raw in enumerate(lines, 1):
+        content = raw.split("#", 1)[0]
+        if "\\" in content:
+            raise ValueError(f"{source}:{number}: line continuations are not supported")
+        line = content.strip()
+        if not line or line.startswith("-"):
+            continue
+        if "${" in line:
+            raise ValueError(f"{source}:{number}: environment expansion is not supported")
+        try:
+            # A few legacy ESP-IDF files use pip's ``and`` spelling between
+            # version clauses; PEP 508 represents the same intersection with a comma.
+            requirement_text, marker_separator, marker_text = line.partition(";")
+            normalized_requirement = re.sub(r"\s+and\s+(?=[<>=!~])", ",", requirement_text)
+            candidate = normalized_requirement + (f";{marker_text}" if marker_separator else "")
+            requirement = Requirement(candidate)
+        except InvalidRequirement as exc:
+            raise ValueError(f"{source}:{number}: invalid requirement {line!r}") from exc
+        if requirement.url is not None:
+            raise ValueError(f"{source}:{number}: direct URLs are not supported")
+        parsed.append(requirement)
+    return parsed
+
+
+def canonical_requirement_lines(lines: list[str], *, source: str) -> list[str]:
+    return [str(requirement) for requirement in parse_requirement_lines(lines, source=source)]
+
+
 def load_sdist_requirement_lines(path: Path | str = SDIST_REQUIREMENTS_FILE) -> list[Requirement]:
     """Load PEP 508 requirements from ``sdist_requirements.txt`` (empty if missing)."""
     req_path = Path(path)
@@ -845,12 +931,9 @@ def load_sdist_requirement_lines(path: Path | str = SDIST_REQUIREMENTS_FILE) -> 
         return []
     requirements: list[Requirement] = []
     for line in req_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
         try:
-            requirements.append(Requirement(line))
-        except InvalidRequirement:
+            requirements.extend(parse_requirement_lines([line], source=str(req_path)))
+        except ValueError:
             continue
     return requirements
 
@@ -913,14 +996,8 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
     """
     Check if a wheel should be excluded based on exclude_list.yaml rules.
 
-    Evaluates markers against the CURRENT running Python environment.
-
-    Uses YAMLListAdapter with exclude=True, so each requirement is a keep rule:
-    - A marker that does not match this environment skips a versioned rule.
-      An unversioned rule with a false marker excludes the wheel here.
-    - A matching rule keeps the wheel when it has no specifier, or the wheel
-      version is inside its specifier.
-    - The wheel is excluded only when at least one rule applies and none keep it.
+    Uses the interpreter that is running this check. An ``abi3`` tag names the
+    oldest compatible Python, not the only one that can install the wheel.
 
     Args:
         wheel_name: The wheel filename (e.g., "requests-2.31.0-py3-none-any.whl")
@@ -934,40 +1011,12 @@ def should_exclude_wheel(wheel_name: str, exclude_requirements: set) -> tuple[bo
         return False, ""
 
     canonical_name, wheel_version = parsed
-    applicable = False
-    reject_req: Requirement | None = None
+    from yaml_list_adapter import is_excluded
 
-    for req in exclude_requirements:
-        if canonicalize_name(req.name) != canonical_name:
-            continue
-
-        marker_matches = req.marker is None or bool(req.marker.evaluate())
-        if req.marker is not None and not marker_matches:
-            # Versioned keep-rule for another Python or platform. Unversioned means
-            # "not kept in this environment" (for example Windows dbus-python).
-            if not req.specifier:
-                applicable = True
-                reject_req = req
-            continue
-
-        applicable = True
-        if not req.specifier:
-            if req.marker is None:
-                reject_req = req
-                continue
-            return False, ""
-
-        if wheel_version:
-            try:
-                if Version(wheel_version) in req.specifier:
-                    return False, ""
-            except InvalidVersion:
-                pass
-        reject_req = req
-
-    if not applicable or reject_req is None:
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if not is_excluded(canonical_name, wheel_version, get_current_platform(), python_version, exclude_requirements):
         return False, ""
-    return True, f"matches exclude rule: {reject_req}"
+    return True, f"matches exclude rule for {canonical_name}=={wheel_version}"
 
 
 def get_wheel_python_version(wheel_name: str) -> str | None:
@@ -977,34 +1026,17 @@ def get_wheel_python_version(wheel_name: str) -> str | None:
     Examples:
         - "pkg-1.0-cp311-cp311-linux.whl" -> "3.11"
         - "pkg-1.0-cp39-abi3-manylinux_2_31_armv7l.whl" -> "3.9"
+        - "pkg-1.0-cp314t-cp314t-linux_x86_64.whl" -> "3.14"
         - "pkg-1.0-py3-none-any.whl" -> None (universal)
     """
-    match = re.search(r"-cp(\d)(\d+)-", wheel_name)
+    match = re.search(r"-cp(\d)(\d+)(?:t)?-", wheel_name)
     if match:
         return f"{match.group(1)}.{match.group(2)}"
     return None
 
 
-# Wheel platform tag prefix/suffix -> sys_platform for PEP 508 marker evaluation
-_WHEEL_PLATFORM_TO_SYS = (
-    (("win_amd64", "win32"), "win32"),
-    (("manylinux", "linux_"), "linux"),  # manylinux_*, linux_*
-    (("macosx_",), "darwin"),
-)
-
-
-def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
-    """
-    Derive sys_platform value(s) from the wheel filename for marker evaluation.
-
-    Uses the wheel's platform tag(s) from parse_wheel_filename. For universal
-    wheels (platform tag "any"), returns all three so platform-specific
-    exclusions can be checked against every platform the wheel targets.
-
-    Returns:
-        List of sys_platform values ("win32", "linux", "darwin"), or None
-        if the filename cannot be parsed.
-    """
+def get_wheel_runner_platforms(wheel_name: str) -> list[str] | None:
+    """Map wheel platform tags to the concrete runner platforms they serve."""
     try:
         _name, _version, _build, tags = parse_wheel_filename(wheel_name)
     except InvalidWheelFilename:
@@ -1013,13 +1045,103 @@ def get_wheel_sys_platforms(wheel_name: str) -> list[str] | None:
     for tag in tags:
         pt = tag.platform
         if pt == "any":
-            platforms.update(("linux", "win32", "darwin"))
-            continue
-        for prefixes, sys_plat in _WHEEL_PLATFORM_TO_SYS:
-            if any(pt.startswith(p) for p in prefixes):
-                platforms.add(sys_plat)
-                break
+            platforms.update(("windows", *LINUX_ARCHS, *MACOS_ARCHS))
+        elif pt == "win32" or pt.startswith("win_"):
+            platforms.add("windows")
+        elif pt.startswith("macosx_"):
+            if pt.endswith(("universal2", "universal")):
+                platforms.update(MACOS_ARCHS)
+            else:
+                platforms.add("macos_arm64" if pt.endswith(("arm64", "arm64e")) else "macos_x86_64")
+        elif "armv7l" in pt:
+            platforms.add("linux_armv7")
+        elif "aarch64" in pt:
+            platforms.add("linux_arm64")
+        elif "x86_64" in pt or pt.startswith("linux_") or pt.startswith("manylinux"):
+            platforms.add("linux_x86_64")
     return list(platforms) if platforms else None
+
+
+def _python_version_key(version: str) -> tuple[int, int] | None:
+    """Return ``(major, minor)`` for a ``3.10``-style version string."""
+    parts = version.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _python_versions_wheel_serves(wheel_name: str, supported_python_versions: list[str] | None) -> list[str]:
+    """Python versions this wheel can be installed on, within the supported set.
+
+    ``py3-none-any`` serves every supported version. ``cpXY-abi3`` serves supported
+    versions at or above the tag. ``cpXY-cpXY`` serves only that version.
+    """
+    candidates = supported_python_versions or [f"{sys.version_info.major}.{sys.version_info.minor}"]
+    try:
+        _name, _version, _build, tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        tagged = get_wheel_python_version(wheel_name)
+        return [tagged] if tagged else list(candidates)
+
+    universal = False
+    floors: list[tuple[int, int]] = []
+    exact: list[tuple[int, int]] = []
+    for tag in tags:
+        if tag.abi == "none" and tag.interpreter.startswith("py"):
+            universal = True
+            continue
+        parsed = parse_cpython_interpreter_tag(tag.interpreter)
+        if parsed is None:
+            continue
+        if tag.abi == "abi3":
+            floors.append(parsed)
+        elif tag.abi == tag.interpreter or tag.abi == f"{tag.interpreter}t":
+            exact.append(parsed)
+    if universal or (not floors and not exact):
+        return list(candidates)
+
+    served = [
+        version
+        for version in candidates
+        if (key := _python_version_key(version)) is not None and (key in exact or any(key >= floor for floor in floors))
+    ]
+    if served:
+        return served
+    tagged = get_wheel_python_version(wheel_name)
+    return [tagged] if tagged else list(candidates)
+
+
+def _clears_versioned_upper_bound(specifier: SpecifierSet, version: str) -> bool:
+    """True when ``specifier`` is an upper bound that this version is past.
+
+    ``<2.35`` does not contain 2.41: the versioned rule already allows that release.
+    A sibling rule with no version is then a build skip, not an index deletion.
+    """
+    if not specifier or specifier.contains(version, prereleases=True):
+        return False
+    return any(item.operator in ("<", "<=") for item in specifier)
+
+
+def _excluded_for_index(
+    name: str,
+    version: str,
+    platform_name: str,
+    python_version: str,
+    rules: set,
+) -> bool:
+    """Index check: a version past a versioned upper bound ignores empty-specifier rules."""
+    from yaml_list_adapter import applicable_exclusion_rules
+
+    applicable = applicable_exclusion_rules(name, platform_name, python_version, rules)
+    if any(_clears_versioned_upper_bound(requirement.specifier, version) for requirement in applicable):
+        applicable = [requirement for requirement in applicable if requirement.specifier]
+    return any(
+        not requirement.specifier or requirement.specifier.contains(version, prereleases=True)
+        for requirement in applicable
+    )
 
 
 def should_exclude_wheel_s3(
@@ -1028,28 +1150,23 @@ def should_exclude_wheel_s3(
     supported_python_versions: list[str] | None = None,
 ) -> tuple[bool, str]:
     """
-    Check if a wheel should be excluded for S3 verification.
+    Check if a wheel on the index matches an exclude rule for every interpreter it serves.
 
-    Uses DIRECT exclusion logic (not inverted):
-    - If marker is True → exclusion applies → EXCLUDE
-    - If marker is False → exclusion doesn't apply → KEEP
-    - If version matches specifier → EXCLUDE
+    A universal wheel or ``abi3`` wheel is a violation only when every supported
+    Python it can be installed on, on each platform tag it carries, is excluded.
+    An exact ``cpXY`` wheel is checked for that Python only.
 
-    Derives the wheel's target platform from its filename (e.g. win_amd64
-    -> win32, manylinux_* -> linux) and evaluates sys_platform markers
-    against that instead of skipping them, so platform-only exclusions
-    in exclude_list.yaml are reported as S3 violations when applicable.
-
-    For universal wheels (no cpXY tag, e.g. py3-none-any), python_version
-    markers are evaluated against supported_python_versions when provided,
-    so exclusions that apply only to older supported versions are not missed.
+    An empty-specifier rule is ignored for this check when a versioned upper bound
+    for the same package and Python already allows the wheel version. That keeps a
+    binary wheel such as ``pydantic_core>=2.35`` on macOS/Windows 3.14, while the
+    build-time rule that skips the sdist stays in ``exclude_list.yaml``.
 
     Args:
         wheel_name: The wheel filename
-        exclude_requirements: Set of Requirement objects from YAMLListAdapter (exclude=False)
-        supported_python_versions: When the wheel has no cpXY tag, evaluate
-            python_version markers against these versions (e.g. ["3.8", "3.9", "3.10", ...]).
-            If None, falls back to the runner's Python (may miss version-specific exclusions).
+        exclude_requirements: Positive exclude requirements from ``load_exclude_rules``
+        supported_python_versions: Supported CPython versions. Universal and ``abi3``
+            wheels are judged against this list. If None, only the running interpreter
+            is considered.
 
     Returns:
         tuple: (should_exclude: bool, reason: str)
@@ -1059,59 +1176,20 @@ def should_exclude_wheel_s3(
         return False, ""
 
     canonical_name, wheel_version = parsed
-    wheel_python = get_wheel_python_version(wheel_name)
-    wheel_sys_platforms = get_wheel_sys_platforms(wheel_name)
-
-    # For universal wheels (no cpXY), evaluate python_version against these if provided
-    python_versions_to_try: list[str | None] = []
-    if wheel_python is not None:
-        python_versions_to_try.append(wheel_python)
-    elif supported_python_versions:
-        python_versions_to_try.extend(supported_python_versions)
-    else:
-        python_versions_to_try.append(None)
-
-    for req in exclude_requirements:
-        if canonicalize_name(req.name) != canonical_name:
-            continue
-
-        # Evaluate markers (including sys_platform) using wheel's target platform and Python
-        if req.marker:
-            if "sys_platform" in str(req.marker):
-                if not wheel_sys_platforms:
-                    continue  # Cannot derive platform from filename → skip rule
-                marker_matches = False
-                for sys_plat in wheel_sys_platforms:
-                    for pv in python_versions_to_try:
-                        env = {"sys_platform": sys_plat}
-                        if pv is not None:
-                            env["python_version"] = pv
-                        if req.marker.evaluate(environment=env):
-                            marker_matches = True
-                            break
-                    if marker_matches:
-                        break
-                if not marker_matches:
-                    continue  # Exclusion condition not met for this wheel's platform(s)
-            else:
-                marker_matches = False
-                for pv in python_versions_to_try:
-                    env = {"python_version": pv} if pv is not None else {}
-                    if req.marker.evaluate(environment=env if env else None):
-                        marker_matches = True
-                        break
-                if not marker_matches:
-                    continue  # Exclusion condition not met → keep
-
-        # If we get here, marker is True (or no marker)
-        # Check version specifier - if version matches, EXCLUDE
-        if req.specifier and wheel_version:
-            try:
-                if Version(wheel_version) not in req.specifier:
-                    continue  # Version doesn't match exclusion → keep
-            except Exception:
-                pass
-
-        return True, f"matches exclude rule: {req}"
-
-    return False, ""
+    wheel_platforms = get_wheel_runner_platforms(wheel_name) or [get_current_platform()]
+    python_versions = [
+        version for version in _python_versions_wheel_serves(wheel_name, supported_python_versions) if version
+    ]
+    if not python_versions:
+        return False, ""
+    for platform_name in wheel_platforms:
+        for python_version in python_versions:
+            if not _excluded_for_index(
+                canonical_name,
+                wheel_version,
+                platform_name,
+                python_version,
+                exclude_requirements,
+            ):
+                return False, ""
+    return True, f"matches exclude rule for {canonical_name}=={wheel_version}"

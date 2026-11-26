@@ -39,7 +39,6 @@ from packaging.utils import canonicalize_name
 
 from _helper_functions import EXCLUDE_LIST_PATH
 from _helper_functions import armv7_wheel_matches_forced_plat
-from _helper_functions import get_current_platform
 from _helper_functions import parse_wheel_name
 from _helper_functions import print_color
 from _helper_functions import should_exclude_wheel
@@ -47,7 +46,6 @@ from _helper_functions import wheel_archive_is_readable
 from native_import_guard import load_native_import_guard
 from native_import_guard import resolve_native_import_statements
 from native_import_probe import run_import_probes
-from yaml_list_adapter import YAMLListAdapter
 
 WHEELS_DIR = Path("./downloaded_wheels")
 
@@ -326,10 +324,10 @@ def main() -> int:
     print_color(f"---------- TEST WHEELS INSTALL (Python {python_version}) ----------")
     print(f"Platform: {sys.platform}\n")
 
-    # Load exclude list for current platform (exclude=True for runtime filtering)
-    exclude_requirements = YAMLListAdapter(
-        EXCLUDE_LIST_PATH, exclude=True, current_platform=get_current_platform()
-    ).requirements
+    # Evaluate the source rules directly; do not invert them into pip markers.
+    from yaml_list_adapter import load_exclude_rules
+
+    exclude_requirements = load_exclude_rules(EXCLUDE_LIST_PATH)
     print(f"Loaded {len(exclude_requirements)} exclude requirements from {EXCLUDE_LIST_PATH}\n")
 
     # Find compatible wheels

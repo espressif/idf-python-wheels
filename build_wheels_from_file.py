@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import argparse
-import os
+import json
 import platform
 
 from pathlib import Path
@@ -20,9 +20,11 @@ from _helper_functions import armv7_force_no_binary_package
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
+from _helper_functions import filter_requirements_by_pypi_requires_python
 from _helper_functions import find_links_wheel_build_skip
 from _helper_functions import force_interpreter_skip_package
 from _helper_functions import get_cryptography_macos_intel_pip_wheel_args
+from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import get_pip_wheel_extra_args
 from _helper_functions import is_linux_armv7_runner
@@ -30,9 +32,13 @@ from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_l
 from _helper_functions import print_color
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
+from build_wheels import retain_exact_pins
+from idf_branch_resolve import resolve_branch_subset
 from wheel_compat_policy import pip_wheel_or_mirror_success
 from wheel_compat_policy import prune_ci_macos_newer_than_pypi_mirror
 from wheel_compat_policy import run_pip_wheel
+from yaml_list_adapter import load_exclude_rules
+from yaml_list_adapter import wholly_excluded_names
 
 
 def _force_interpreter_no_binary_args(requirement_line: str) -> list[str]:
@@ -104,6 +110,47 @@ def _dependent_requirement_skip_line(requirement_line: str, *, force_interpreter
     return False
 
 
+def _load_stage2_requirements(requirements_dir: str) -> list[str]:
+    """Resolve deferred requirements with the branch constraints when available."""
+    requirements_path = Path(requirements_dir) / "dependent_requirements.txt"
+    try:
+        raw_lines = requirements_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Python version dependent requirements directory or file not found ({exc})") from exc
+
+    exclude_rules = load_exclude_rules("exclude_list.yaml", current_platform=get_current_platform())
+    blocked = wholly_excluded_names(exclude_rules)
+    deferred = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement:
+            deferred.append(line)
+            continue
+        if canonicalize_name(requirement.name) not in blocked:
+            deferred.append(str(requirement))
+
+    inputs_path = Path(requirements_dir) / "idf_inputs.json"
+    if not inputs_path.is_file():
+        if args.require_idf_inputs:
+            raise SystemExit(f"IDF branch inputs file not found: {inputs_path}")
+        return deferred
+
+    try:
+        inputs = json.loads(inputs_path.read_text(encoding="utf-8"))
+        branches = inputs["branches"]
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"Invalid IDF inputs file: {inputs_path} ({exc})") from exc
+
+    pins = resolve_branch_subset(branches, deferred, exclude_rules)
+    pins = retain_exact_pins(pins, exclude_rules, print_requirements=False)
+    pins = filter_requirements_by_pypi_requires_python(pins)
+    return sorted({str(pin) for pin in pins}, key=str.lower)
+
+
 parser = argparse.ArgumentParser(description="Process build arguments.")
 parser.add_argument(
     "requirements_path",
@@ -138,6 +185,11 @@ parser.add_argument(
         "Some packages are always skipped (e.g. cryptography, pydantic-core, argon2-cffi-bindings, PyNaCl, PyObjC)."
     ),
 )
+parser.add_argument(
+    "--require-idf-inputs",
+    action="store_true",
+    help="fail if the stage-1 IDF branch inputs artifact is missing",
+)
 
 args = parser.parse_args()
 
@@ -152,11 +204,7 @@ skipped_wheels = 0
 
 # Build wheels for requirements in file
 if requirements_dir:
-    try:
-        with open(f"{requirements_dir}{os.sep}dependent_requirements.txt", "r") as f:
-            requirements = f.readlines()
-    except FileNotFoundError as e:
-        raise SystemExit(f"Python version dependent requirements directory or file not found ({e})")
+    requirements = _load_stage2_requirements(requirements_dir)
 
     for requirement in requirements:
         requirement = requirement.strip()

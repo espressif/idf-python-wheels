@@ -11,14 +11,19 @@ import tempfile
 import unittest
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Dict
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from _helper_functions import _python_versions_wheel_serves
 from _helper_functions import armv7_pip_wheel_subprocess_env
 from _helper_functions import armv7_rebuild_instead_of_find_links_skip
 from _helper_functions import bounded_pin_without_find_links_skip
@@ -31,11 +36,31 @@ from _helper_functions import get_current_platform
 from _helper_functions import get_no_binary_args
 from _helper_functions import macos_intel_cryptography_rebuild_instead_of_find_links_skip
 from _helper_functions import merge_requirements
+from _helper_functions import parse_cpython_interpreter_tag
 from _helper_functions import pypi_requires_python_preflight_skip
 from _helper_functions import remove_find_links_wheels_for_package
 from build_wheels import _add_into_requirements
+from build_wheels import _download_branch_constraints
+from build_wheels import _pin_markers_for_other_interpreters
+from build_wheels import collect_idf_inputs
+from build_wheels import constraint_requirements_for_sdist
 from build_wheels import exclude_from_requirements
+from build_wheels import get_python_dependent_wheels
 from build_wheels import get_used_idf_branches
+from build_wheels import requirements_for_other_interpreters
+from build_wheels import retain_exact_pins
+from idf_branch_resolve import BranchResolveError
+from idf_branch_resolve import _constraints_without_excluded_pins
+from idf_branch_resolve import _pip_resolve_failure_detail
+from idf_branch_resolve import _requirements_for_resolution
+from idf_branch_resolve import _resolve_lines
+from idf_branch_resolve import _resolve_transient_failure
+from idf_branch_resolve import branch_targets_current_interpreter
+from idf_branch_resolve import pins_from_pip_report
+from idf_branch_resolve import pins_from_pip_report_for_branch
+from idf_branch_resolve import resolve_branch_subset
+from idf_branch_resolve import resolve_branches
+from idf_branch_resolve import union_pin_sets
 from wheel_compat_policy import _mirrored_manylinux228_version
 from wheel_compat_policy import get_macos_only_binary_args
 from wheel_compat_policy import mirror_pypi_manylinux228_wheel
@@ -47,7 +72,9 @@ from wheel_compat_policy import run_pip_wheel
 from wheel_compat_policy import should_skip_linux_auditwheel_for_pypi_mirror
 from wheel_compat_policy import should_skip_macos_delocate_for_pypi_mirror
 from wheel_compat_policy import without_only_binary_all
+from yaml_list_adapter import ExcludeRequirements
 from yaml_list_adapter import YAMLListAdapter
+from yaml_list_adapter import exclusion_constraint_alternatives
 
 
 class TestChangeSpecifierLogic(unittest.TestCase):
@@ -719,82 +746,129 @@ class TestParseWheelName(unittest.TestCase):
 
 
 class TestShouldExcludeWheel(unittest.TestCase):
-    """Test the should_exclude_wheel function from _helper_functions.py.
-
-    Note: The function expects requirements created with exclude=True from YAMLListAdapter,
-    which inverts the logic (e.g., ==1.5.0 becomes !=1.5.0).
-    """
+    """Test the direct exclusion-rule path used by the wheel pipeline."""
 
     def setUp(self):
         """Import the function to test."""
         from _helper_functions import should_exclude_wheel
+        from yaml_list_adapter import load_exclude_rules
 
         self.should_exclude_wheel = should_exclude_wheel
+        self.rules = load_exclude_rules("exclude_list.yaml")
 
     def test_exclude_by_package_name_only(self):
         """Test excluding a package by name only (no inversion needed)."""
-        # Package name only - same for both exclude=True and exclude=False
-        exclude_requirements = {Requirement("esptool")}
-        result, reason = self.should_exclude_wheel("esptool-4.0.0-py3-none-any.whl", exclude_requirements)
+        result, reason = self.should_exclude_wheel("esptool-4.0.0-py3-none-any.whl", self.rules)
         self.assertTrue(result)
         self.assertIn("esptool", reason)
 
-    def test_exclude_by_version(self):
-        """Test excluding a package by version constraint (inverted specifier)."""
-        # With exclude=True, ==1.5.0 becomes !=1.5.0
-        # So version 1.5.0 is NOT in !=1.5.0 -> should EXCLUDE
-        # And version 2.0.0 IS in !=1.5.0 -> should KEEP
-        exclude_requirements = {Requirement("gevent!=1.5.0")}
-        # Should exclude 1.5.0 (not in !=1.5.0)
-        result, _ = self.should_exclude_wheel("gevent-1.5.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+    @patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=11, micro=0))
+    @patch("_helper_functions.get_current_platform", return_value="windows")
+    def test_exclude_by_version(self, _platform):
+        result, _ = self.should_exclude_wheel("gevent-1.5.0-cp311-cp311-win_amd64.whl", self.rules)
         self.assertTrue(result)
-        # Should not exclude 2.0.0 (is in !=1.5.0)
-        result, _ = self.should_exclude_wheel("gevent-2.0.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        result, _ = self.should_exclude_wheel("gevent-2.0.0-cp311-cp311-win_amd64.whl", self.rules)
         self.assertFalse(result)
 
     def test_no_match_returns_false(self):
         """Test that non-matching packages return False."""
-        exclude_requirements = {Requirement("esptool")}
-        result, _ = self.should_exclude_wheel("numpy-1.24.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        result, _ = self.should_exclude_wheel("numpy-1.24.0-cp311-cp311-linux_x86_64.whl", self.rules)
         self.assertFalse(result)
 
-    def test_versioned_rule_for_other_python_does_not_drop_the_old_pin(self):
-        """A >=1.3 keep-rule for Python >=3.15 must not drop dbus-python 1.2.18 on 3.13."""
-        from packaging.markers import Marker
-
-        requirements = {
-            Requirement('dbus-python<1.3; python_version < "3.15"'),
-            Requirement('dbus-python>=1.3; python_version >= "3.15"'),
-        }
-        original = Marker.evaluate
-
-        def evaluate(self, environment=None, context=None):
-            env = {"python_version": "3.13", "sys_platform": "linux"}
-            return original(self, environment=env, context=context)
-
-        with patch("packaging.markers.Marker.evaluate", evaluate):
-            old_pin, _ = self.should_exclude_wheel(
-                "dbus_python-1.2.18-cp313-cp313-manylinux_2_34_x86_64.whl",
-                requirements,
-            )
-            new_pin, reason = self.should_exclude_wheel(
-                "dbus_python-1.5.1-cp313-cp313-manylinux_2_34_x86_64.whl",
-                requirements,
-            )
+    @patch("_helper_functions.get_current_platform", return_value="linux_x86_64")
+    def test_versioned_rule_only_matches_its_python_marker(self, _platform):
+        wheel = "dbus_python-1.2.18-cp38-abi3-manylinux_2_34_x86_64.whl"
+        with patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=13, micro=0)):
+            old_pin, _ = self.should_exclude_wheel(wheel, self.rules)
+        with patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=15, micro=0)):
+            excluded_pin, reason = self.should_exclude_wheel(wheel, self.rules)
         self.assertFalse(old_pin)
-        self.assertTrue(new_pin)
+        self.assertTrue(excluded_pin)
         self.assertIn("dbus-python", reason)
 
+    @patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=13, micro=0))
     def test_exclude_with_version_range(self):
-        """Test excluding a package with version range (inverted specifier)."""
-        # With exclude=True, ==9.5.0 becomes !=9.5.0
-        exclude_requirements = {Requirement("pillow!=9.5.0")}
-        # Should exclude 9.5.0 (not in !=9.5.0)
-        result, _ = self.should_exclude_wheel("Pillow-9.5.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        result, _ = self.should_exclude_wheel("Pillow-9.5.0-cp313-cp313-linux_x86_64.whl", self.rules)
         self.assertTrue(result)
-        # Should not exclude 10.0.0 (is in !=9.5.0)
-        result, _ = self.should_exclude_wheel("Pillow-10.0.0-cp311-cp311-linux_x86_64.whl", exclude_requirements)
+        result, _ = self.should_exclude_wheel("Pillow-10.0.0-cp313-cp313-linux_x86_64.whl", self.rules)
         self.assertFalse(result)
+
+    @patch("_helper_functions.get_current_platform", return_value="linux_armv7")
+    def test_abi3_wheel_uses_the_running_interpreter(self, _platform):
+        wheel = "tree_sitter_c-0.21.4-cp38-abi3-linux_armv7l.whl"
+        with patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=13, micro=0)):
+            on_newer, _ = self.should_exclude_wheel(wheel, self.rules)
+        with patch("_helper_functions.sys.version_info", SimpleNamespace(major=3, minor=8, micro=0)):
+            on_tagged, _ = self.should_exclude_wheel(wheel, self.rules)
+        self.assertFalse(on_newer)
+        self.assertTrue(on_tagged)
+
+    @patch("_helper_functions.get_current_platform", return_value="linux_x86_64")
+    def test_structured_rules_do_not_leak_armv7_exclusions(self, _platform):
+        from yaml_list_adapter import load_exclude_rules
+
+        rules = load_exclude_rules("exclude_list.yaml")
+        excluded, _ = self.should_exclude_wheel(
+            "cryptography-42.0.8-cp38-cp38-linux_x86_64.whl",
+            rules,
+        )
+        self.assertFalse(excluded)
+
+
+class TestShouldExcludeWheelS3(unittest.TestCase):
+    """Index violations are wheels that cannot be installed on any interpreter they serve."""
+
+    SUPPORTED = ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+
+    def setUp(self):
+        from _helper_functions import should_exclude_wheel_s3
+        from yaml_list_adapter import is_excluded
+        from yaml_list_adapter import load_exclude_rules
+
+        self.should_exclude_wheel_s3 = should_exclude_wheel_s3
+        self.is_excluded = is_excluded
+        self.rules = load_exclude_rules("exclude_list.yaml")
+
+    def _flagged(self, wheel_name: str) -> bool:
+        excluded, _reason = self.should_exclude_wheel_s3(
+            wheel_name,
+            self.rules,
+            supported_python_versions=self.SUPPORTED,
+        )
+        return bool(excluded)
+
+    def test_universal_wheel_kept_when_a_newer_python_is_allowed(self):
+        self.assertFalse(self._flagged("mcp-1.27.0-py3-none-any.whl"))
+        self.assertFalse(self._flagged("pytest_embedded_idf-2.6.0-py3-none-any.whl"))
+        self.assertFalse(self._flagged("pytest_embedded_serial_esp-1.18.2-py3-none-any.whl"))
+
+    def test_abi3_wheel_kept_when_a_newer_python_is_allowed(self):
+        self.assertFalse(self._flagged("tree_sitter_c-0.21.4-cp38-abi3-linux_armv7l.whl"))
+
+    def test_exact_cp38_armv7_tree_sitter_still_flagged(self):
+        self.assertTrue(self._flagged("tree_sitter_c-0.21.4-cp38-cp38-linux_armv7l.whl"))
+
+    def test_pydantic_core_binary_past_the_version_floor_kept(self):
+        self.assertFalse(self._flagged("pydantic_core-2.41.5-cp314-cp314-win_amd64.whl"))
+        self.assertFalse(self._flagged("pydantic_core-2.42.0-cp314-cp314-macosx_11_0_arm64.whl"))
+        self.assertFalse(self._flagged("pydantic_core-2.41.4-cp314-cp314-macosx_10_13_x86_64.whl"))
+
+    def test_pydantic_core_below_the_version_floor_still_flagged(self):
+        self.assertTrue(self._flagged("pydantic_core-2.27.2-cp314-cp314-win_amd64.whl"))
+
+    def test_build_rule_still_skips_pydantic_core_sdist_on_windows_314(self):
+        self.assertTrue(self.is_excluded("pydantic-core", "2.41.5", "windows", "3.14", self.rules))
+
+    def test_pygobject_linux_still_flagged(self):
+        self.assertTrue(self._flagged("pygobject-3.48.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"))
+        self.assertTrue(self._flagged("pygobject-3.48.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"))
+
+    def test_dbus_python_cp38_linux_still_flagged(self):
+        self.assertTrue(self._flagged("dbus_python-1.3.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"))
+        self.assertTrue(self._flagged("dbus_python-1.2.18-cp38-cp38-linux_armv7l.whl"))
+
+    def test_package_excluded_on_every_python_still_flagged(self):
+        self.assertTrue(self._flagged("esptool-4.8.0-py3-none-any.whl"))
 
 
 class TestGetUsedIdfBranches(unittest.TestCase):
@@ -879,6 +953,474 @@ class TestAddIntoRequirements(unittest.TestCase):
         lines = ["  numpy  ", "\tpandas\t"]
         result = _add_into_requirements(lines)
         self.assertEqual(len(result), 2)
+
+
+class TestResolvedPins(unittest.TestCase):
+    """The pip report is the wheel list. Constraint options are not packages."""
+
+    def test_report_becomes_exact_pins(self):
+        report = {
+            "install": [
+                {"metadata": {"name": "cryptography", "version": "44.0.3"}},
+                {"metadata": {"name": "cffi", "version": "1.17.1"}},
+            ]
+        }
+        pins = pins_from_pip_report(report)
+        self.assertEqual({str(pin) for pin in pins}, {"cryptography==44.0.3", "cffi==1.17.1"})
+
+    def test_union_keeps_both_versions_of_one_package(self):
+        older = pins_from_pip_report({"install": [{"metadata": {"name": "cffi", "version": "1.17.1"}}]})
+        newer = pins_from_pip_report({"install": [{"metadata": {"name": "cffi", "version": "2.0.0"}}]})
+        union = union_pin_sets([older, newer])
+        self.assertEqual({str(pin) for pin in union}, {"cffi==1.17.1", "cffi==2.0.0"})
+
+    def test_only_binary_is_not_a_pin(self):
+        parsed = _add_into_requirements(["--only-binary cryptography"])
+        self.assertEqual(parsed, set())
+        self.assertEqual(pins_from_pip_report({"install": []}), set())
+
+    def test_install_entry_without_version_fails(self):
+        with self.assertRaises(ValueError):
+            pins_from_pip_report({"install": [{"metadata": {"name": "cffi"}}]})
+
+    def test_incomplete_report_names_the_branch(self):
+        with self.assertRaises(BranchResolveError) as caught:
+            pins_from_pip_report_for_branch(
+                {"install": [{"metadata": {"version": "1.0"}}]},
+                "release/v5.4",
+            )
+        self.assertEqual(caught.exception.branch, "release/v5.4")
+
+
+class TestResolveBranches(unittest.TestCase):
+    def test_idf6_not_targeted_on_python_38(self):
+        with patch.object(sys, "version_info", MagicMock(major=3, minor=8, micro=18)):
+            self.assertFalse(branch_targets_current_interpreter("release/v6.0"))
+            self.assertFalse(branch_targets_current_interpreter("master"))
+            self.assertTrue(branch_targets_current_interpreter("release/v5.5"))
+            self.assertTrue(branch_targets_current_interpreter("esptool"))
+
+    def test_idf6_resolves_on_python_310(self):
+        with patch.object(sys, "version_info", MagicMock(major=3, minor=10, micro=0)):
+            self.assertTrue(branch_targets_current_interpreter("release/v6.0"))
+
+    def test_resolve_only_branches_for_this_interpreter(self):
+        branches = [
+            {"branch": "release/v5.5", "requirements": ["a"], "constraints": []},
+            {"branch": "release/v6.0", "requirements": ["b"], "constraints": []},
+        ]
+        with patch.object(sys, "version_info", MagicMock(major=3, minor=8, micro=18)):
+            with patch(
+                "idf_branch_resolve._resolve_lines", return_value={Requirement("requests==2.32.0")}
+            ) as mock_resolve:
+                pins = resolve_branches(branches)
+        mock_resolve.assert_called_once()
+        self.assertEqual(mock_resolve.call_args[0][2], "release/v5.5")
+        self.assertEqual({str(pin) for pin in pins}, {"requests==2.32.0"})
+
+    def test_resolve_failure_aborts(self):
+        with patch(
+            "idf_branch_resolve._resolve_lines", side_effect=BranchResolveError("release/v5.5", "ResolutionImpossible")
+        ):
+            with self.assertRaises(SystemExit):
+                resolve_branches([{"branch": "release/v5.5", "requirements": [], "constraints": []}])
+
+
+class TestResolveTransient(unittest.TestCase):
+    def test_resolution_impossible_is_not_transient(self):
+        self.assertFalse(_resolve_transient_failure("ERROR: ResolutionImpossible: idf-component-manager"))
+
+    def test_connection_reset_is_transient(self):
+        self.assertTrue(_resolve_transient_failure("Connection reset by peer while fetching simple/cryptography/"))
+
+
+class TestPipResolveFailureDetail(unittest.TestCase):
+    def test_extracts_conflict_block_from_pip_output(self):
+        sample = """
+Collecting idf-component-manager>=2.2
+ERROR: Cannot install idf-component-manager>=2.2 because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested idf-component-manager>=2.2
+    idf-component-manager 2.2.0 depends on requests>=2.31
+    esp-idf-pkg 0.1 depends on requests<2.20
+
+To fix this you could try to:
+1. loosen constraints
+ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/
+"""
+        detail = _pip_resolve_failure_detail(sample.encode(), b"")
+        self.assertIn("idf-component-manager>=2.2", detail)
+        self.assertIn("The conflict is caused by:", detail)
+        self.assertIn("requests<2.20", detail)
+        self.assertIn("ResolutionImpossible", detail)
+
+    def test_non_conflict_still_returns_tail(self):
+        detail = _pip_resolve_failure_detail(b"", b"ERROR: No matching distribution found for foo")
+        self.assertIn("No matching distribution", detail)
+
+    def test_keeps_conflict_explanation_that_precedes_the_error(self):
+        stdout = b"The conflict is caused by:\n    The user requested gdbgui==0.13.2.0\n"
+        stderr = b"ERROR: ResolutionImpossible: for help visit https://pip.pypa.io\n"
+        detail = _pip_resolve_failure_detail(stdout, stderr)
+        self.assertIn("The conflict is caused by:", detail)
+        self.assertIn("gdbgui==0.13.2.0", detail)
+        self.assertIn("ResolutionImpossible", detail)
+
+
+def _marker_env(python_version: str) -> Dict[str, str]:
+    env: Dict[str, str] = {}
+    for key, value in default_environment().items():
+        env[str(key)] = str(value)
+    env["python_version"] = python_version
+    return env
+
+
+class TestExcludedConstraintPins(unittest.TestCase):
+    def test_exact_constraint_pin_is_skipped_and_other_caps_remain(self):
+        rules = ExcludeRequirements({Requirement("gdbgui==0.13.2.0")})
+        requirements = _requirements_for_resolution(
+            ["gdbgui", "requests"],
+            "release/v5.5",
+            rules,
+            ["gdbgui==0.13.2.0", "requests<3"],
+        )
+        constraints = _constraints_without_excluded_pins(
+            ["gdbgui==0.13.2.0", "requests<3"],
+            "release/v5.5",
+            rules,
+        )
+        self.assertEqual(requirements, ["requests"])
+        self.assertEqual(constraints, ["requests<3"])
+
+
+class TestRangeExclusionAlternatives(unittest.TestCase):
+    def test_range_complement_is_solved_as_alternatives(self):
+        rules = ExcludeRequirements({Requirement("pkg>=1,<2")})
+        seen = []
+
+        def fake(_requirements, constraints, _branch):
+            seen.append(list(constraints))
+            if any(item.startswith("pkg<") for item in constraints):
+                return {Requirement("pkg==0.5")}
+            return {Requirement("pkg==3")}
+
+        with patch("idf_branch_resolve._resolve_lines", side_effect=fake):
+            pins = resolve_branches(
+                [{"branch": "release/v5.5", "requirements": ["pkg"], "constraints": []}],
+                rules,
+            )
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(any("pkg<1" in group for group in seen))
+        self.assertTrue(any("pkg>=2" in group for group in seen))
+        self.assertFalse(any("pkg<1" in group and "pkg>=2" in group for group in seen))
+        self.assertEqual({str(pin) for pin in pins}, {"pkg==0.5", "pkg==3"})
+
+    def test_single_bound_stays_one_constraint(self):
+        rules = ExcludeRequirements({Requirement("gdbgui==0.13.2.0"), Requirement("pkg>=1,<2")})
+        groups = exclusion_constraint_alternatives("linux_x86_64", "3.12", rules)
+        self.assertEqual(len(groups), 2)
+        for group in groups:
+            self.assertIn("gdbgui!=0.13.2.0", group)
+            self.assertEqual(len(group), 2)
+
+
+class TestRequirementsForOtherInterpreters(unittest.TestCase):
+    def test_solved_branch_forwards_only_markers_that_do_not_match(self):
+        branches = [
+            {
+                "branch": "release/v5.5",
+                "requirements": [
+                    "solved==1",
+                    'later>=1; python_version >= "99"',
+                    'here>=1; python_version >= "3.0"',
+                ],
+            },
+            {
+                "branch": "release/v6.0",
+                "requirements": ["idf6-only==1", 'also>=1; python_version >= "3.0"'],
+            },
+        ]
+        with patch(
+            "build_wheels.branch_targets_current_interpreter",
+            side_effect=lambda branch, idf_major=None: branch != "release/v6.0",
+        ):
+            lines = requirements_for_other_interpreters(branches)
+        self.assertIn('later>=1; python_version >= "99"', lines)
+        self.assertNotIn("solved==1", lines)
+        self.assertFalse(any(line.startswith("here>=") for line in lines))
+        self.assertIn("idf6-only==1", lines)
+        self.assertTrue(any(line.startswith("also>=") for line in lines))
+
+    def test_forwards_marker_bearing_constraints(self):
+        branches = [
+            {
+                "branch": "release/v5.5",
+                "requirements": ["pkg"],
+                "constraints": ['pkg<=2; python_version >= "99"', "other<=4"],
+            }
+        ]
+        with patch("build_wheels.branch_targets_current_interpreter", return_value=True):
+            lines = requirements_for_other_interpreters(branches)
+        self.assertIn('pkg<=2; python_version >= "99"', lines)
+        self.assertNotIn("other<=4", lines)
+
+    def test_does_not_forward_wholly_excluded_packages(self):
+        branches = [
+            {
+                "branch": "release/v6.0",
+                "idf_major": 6,
+                "requirements": ["esptool", "dbus-python", "requests"],
+                "constraints": ['esptool<=6; python_version >= "99"'],
+            }
+        ]
+        rules = ExcludeRequirements(
+            {
+                Requirement("esptool"),
+                Requirement('dbus-python; python_version == "3.8"'),
+            }
+        )
+        with patch("build_wheels.branch_targets_current_interpreter", return_value=False):
+            lines = requirements_for_other_interpreters(branches, rules)
+        self.assertNotIn("esptool", lines)
+        self.assertFalse(any(line.startswith("esptool") for line in lines))
+        self.assertIn("dbus-python", lines)
+        self.assertIn("requests", lines)
+
+    def test_inactive_requirement_marker_is_not_removed_by_exclusion(self):
+        rules = ExcludeRequirements({Requirement("pkg")})
+        with patch("idf_branch_resolve.get_current_platform", return_value="linux_x86_64"), patch(
+            "idf_branch_resolve._current_python", return_value="3.13"
+        ):
+            result = _requirements_for_resolution(
+                ['pkg==1; sys_platform == "win32"'],
+                "release/v5.5",
+                rules,
+                [],
+            )
+        self.assertEqual(result, ['pkg==1; sys_platform == "win32"'])
+
+    def test_subset_resolver_passes_branch_constraints(self):
+        captured = []
+
+        def fake_resolve(requirements, constraints, branch):
+            captured.append((requirements, constraints, branch))
+            return {Requirement("pkg==2"), Requirement("transitive==1")}
+
+        branches = [
+            {
+                "branch": "release/v6.0",
+                "idf_major": 6,
+                "requirements": ["pkg"],
+                "constraints": ["pkg<=2"],
+            },
+            {
+                "branch": "esptool",
+                "requirements": ["esptool-dep"],
+                "constraints": [],
+            },
+        ]
+        with patch("idf_branch_resolve.branch_targets_current_interpreter", return_value=True), patch(
+            "idf_branch_resolve._resolve_lines", side_effect=fake_resolve
+        ):
+            result = resolve_branch_subset(branches, ["pkg"], ExcludeRequirements(set()))
+        self.assertEqual(result, {Requirement("pkg==2")})
+        self.assertEqual(captured[0][1], ["pkg<=2"])
+        self.assertEqual([item[2] for item in captured], ["release/v6.0"])
+
+
+class TestDeferredPinPolicies(unittest.TestCase):
+    def test_pin_gets_newer_python_constraint_marker(self):
+        pins = {Requirement("pydantic-core==2.27.0")}
+        branches = [
+            {
+                "branch": "master",
+                "constraints": ['pydantic-core<=2.35; python_version < "3.14"'],
+            }
+        ]
+        marked = _pin_markers_for_other_interpreters(pins, branches)
+        self.assertEqual(
+            {str(pin) for pin in marked},
+            {'pydantic-core==2.27.0; python_version < "3.14"'},
+        )
+
+    def test_sdist_constraints_include_packages_not_in_requirements(self):
+        branches = [
+            {
+                "branch": "release/v6.0",
+                "constraints": ["constraint-only-package<=1.0", "esptool<=6"],
+            }
+        ]
+        result = constraint_requirements_for_sdist(branches, ExcludeRequirements({Requirement("esptool")}))
+        self.assertEqual({str(requirement) for requirement in result}, {"constraint-only-package<=1.0"})
+
+
+class TestFreeThreadedWheelTags(unittest.TestCase):
+    def test_free_threaded_tag_is_exactly_python_314(self):
+        self.assertEqual(parse_cpython_interpreter_tag("cp314t"), (3, 14))
+        self.assertEqual(
+            _python_versions_wheel_serves(
+                "pkg-1.0-cp314t-cp314t-win_amd64.whl",
+                ["3.8", "3.14", "3.15"],
+            ),
+            ["3.14"],
+        )
+
+
+class TestRetainExactPins(unittest.TestCase):
+    """Exclude filtering must not turn a solved pin into an open range."""
+
+    def _greenlet_exclude(self) -> set:
+        return {
+            Requirement('greenlet>3.0.0; python_version >= "3.13"'),
+            Requirement('greenlet; python_version < "3.13"'),
+        }
+
+    def test_python_313_drops_the_excluded_pin_and_keeps_the_exact_newer_one(self):
+        pins = {Requirement("greenlet==3.1.0"), Requirement("greenlet==3.0.0")}
+        kept = retain_exact_pins(pins, self._greenlet_exclude(), print_requirements=False, env=_marker_env("3.13"))
+        self.assertEqual({str(pin) for pin in kept}, {"greenlet==3.1.0"})
+
+    def test_older_python_keeps_both_exact_pins(self):
+        pins = {Requirement("greenlet==3.1.0"), Requirement("greenlet==3.0.0")}
+        kept = retain_exact_pins(pins, self._greenlet_exclude(), print_requirements=False, env=_marker_env("3.11"))
+        self.assertEqual({str(pin) for pin in kept}, {"greenlet==3.0.0", "greenlet==3.1.0"})
+
+    def test_unversioned_exclude_drops_the_pin(self):
+        kept = retain_exact_pins(
+            {Requirement("gdbgui==0.13.2.0")},
+            {Requirement("gdbgui")},
+            print_requirements=False,
+        )
+        self.assertEqual(kept, set())
+
+    def test_production_exclude_rules_keep_platform_scope(self):
+        from yaml_list_adapter import load_exclude_rules
+
+        rules = load_exclude_rules("exclude_list.yaml")
+        windows = retain_exact_pins(
+            {Requirement("pygobject==3.48.0")},
+            rules,
+            print_requirements=False,
+            env={"sys_platform": "win32", "python_version": "3.13"},
+        )
+        x86 = retain_exact_pins(
+            {Requirement("cryptography==42.0.8")},
+            rules,
+            print_requirements=False,
+            env={"sys_platform": "linux_x86_64", "python_version": "3.8"},
+        )
+        self.assertEqual(windows, set())
+        self.assertEqual({str(pin) for pin in x86}, {"cryptography==42.0.8"})
+
+
+class TestStripPipOptionsInBranchResolve(unittest.TestCase):
+    """Dry-run solves must keep UPPER BOUNDS caps but drop ``--only-binary`` flags."""
+
+    def test_resolve_lines_omits_only_binary_from_written_files(self):
+        captured = {}
+
+        def fake_run(cmd, stdout=None, stderr=None, **_kwargs):
+            req_idx = cmd.index("-r") + 1
+            cons_idx = cmd.index("-c") + 1
+            report_idx = cmd.index("--report") + 1
+            captured["req"] = Path(cmd[req_idx]).read_text(encoding="utf-8")
+            captured["cons"] = Path(cmd[cons_idx]).read_text(encoding="utf-8")
+            Path(cmd[report_idx]).write_text(
+                '{"install": [{"metadata": {"name": "cryptography", "version": "42.0.8"}}, '
+                '{"metadata": {"name": "gdbgui", "version": "0.13.2.0"}}]}',
+                encoding="utf-8",
+            )
+            return type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+
+        with patch("idf_branch_resolve.subprocess.run", side_effect=fake_run):
+            pins = _resolve_lines(
+                ["esp-idf-nvs-partition-gen", "--only-binary cryptography"],
+                ["cryptography>=2.1.4,<43", "--only-binary cryptography", 'pillow <=10.4.0; python_version < "3.9"'],
+                "release/v5.3",
+            )
+
+        self.assertNotIn("--only-binary", captured["req"])
+        self.assertNotIn("--only-binary", captured["cons"])
+        self.assertIn("cryptography<43,>=2.1.4", captured["cons"])
+        self.assertIn('pillow<=10.4.0; python_version < "3.9"', captured["cons"])
+        # Post-resolution exclusions drop gdbgui==0.13.2.0 and ARMv7 cryptography without pre-solve conflict
+        win_excludes = YAMLListAdapter("exclude_list.yaml", exclude=True, current_platform="windows").requirements
+        kept_win = retain_exact_pins(
+            pins,
+            win_excludes,
+            print_requirements=False,
+            env={"python_version": "3.8", "sys_platform": "win32"},
+        )
+        self.assertEqual({str(p) for p in kept_win}, {"cryptography==42.0.8"})
+
+        armv7_excludes = YAMLListAdapter("exclude_list.yaml", exclude=True, current_platform="linux_armv7").requirements
+        kept_armv7 = retain_exact_pins(
+            pins,
+            armv7_excludes,
+            print_requirements=False,
+            env={"python_version": "3.8", "sys_platform": "linux"},
+        )
+        self.assertEqual(kept_armv7, set())
+
+
+class TestConstraintDownloadAndCollect(unittest.TestCase):
+    def test_release_constraint_404_aborts(self):
+        response = type("Response", (), {"status_code": 404, "text": "missing", "content": b"missing"})()
+        with patch("build_wheels._requests_get", return_value=response):
+            with self.assertRaises(SystemExit):
+                _download_branch_constraints("https://example.invalid/c.txt", "release/v5.4", "v5.4")
+
+    def test_master_constraint_404_resolves_without_constraints(self):
+        response = type("Response", (), {"status_code": 404, "text": "missing", "content": b"missing"})()
+        with patch("build_wheels._requests_get", return_value=response):
+            lines = _download_branch_constraints("https://example.invalid/c.txt", "master", "None")
+        self.assertEqual(lines, [])
+
+    def test_esptool_is_one_group_and_caps_are_not_packages(self):
+        body = b'{"features": [{"name": "core", "requirement_path": "tools/requirements/requirements.core.txt"}]}'
+        response = type("Response", (), {"status_code": 200, "text": body.decode(), "content": body})()
+        with patch("build_wheels._requests_get", return_value=response), patch(
+            "build_wheels._download_branch_requirements", return_value=["esp-idf-req>=1"]
+        ), patch(
+            "build_wheels._download_branch_constraints",
+            return_value=["cffi<2.0", "--only-binary cryptography"],
+        ), patch("build_wheels._download_esptool_requirements", return_value=["esptool-dep>=1"]):
+            requirements, branches = collect_idf_inputs(["release/v5.4", "master"], ["v5.4", "v5.5"], False)
+        self.assertEqual([item["branch"] for item in branches], ["release/v5.4", "master", "esptool"])
+        self.assertEqual(branches[0]["requirements"], ["esp-idf-req>=1"])
+        self.assertEqual(branches[0]["constraints"], ["cffi<2.0", "--only-binary cryptography"])
+        self.assertNotIn("esptool-dep>=1", branches[0]["requirements"])
+        self.assertEqual(
+            branches[2],
+            {"branch": "esptool", "idf_major": None, "requirements": ["esptool-dep>=1"], "constraints": []},
+        )
+        names = {req.name for req in requirements}
+        self.assertIn("esp-idf-req", names)
+        self.assertIn("esptool-dep", names)
+        self.assertNotIn("cffi", names)
+
+
+class TestPythonDependentWheels(unittest.TestCase):
+    """Other Python versions rebuild cp wheels, not python_version markers."""
+
+    def test_python_version_marker_is_not_added(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "pillow-11.3.0-cp39-cp39-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            (links / "idna-3.10-py3-none-any.whl").write_bytes(b"")
+            requirements = {Requirement('pillow<=13; python_version >= "3.11"')}
+            result = get_python_dependent_wheels(tmp, requirements)
+            self.assertEqual({str(pin) for pin in result}, {"pillow==11.3.0"})
+            self.assertTrue(all(pin.marker is None for pin in result))
+
+    def test_stale_wheel_outside_the_pin_set_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "pillow-11.3.0-cp39-cp39-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            (links / "pillow-9.5.0-cp39-cp39-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            result = get_python_dependent_wheels(tmp, {Requirement("pillow==11.3.0")})
+            self.assertEqual({str(pin) for pin in result}, {"pillow==11.3.0"})
 
 
 class TestMergeRequirements(unittest.TestCase):
@@ -975,7 +1517,7 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
     def test_find_links_superseded_obsolete_cryptography_pin(self):
         with tempfile.TemporaryDirectory() as tmp:
             links = Path(tmp)
-            (links / "cryptography-48.0.0-cp313-abi3-linux_armv7l.whl").write_bytes(b"")
+            (links / "cryptography-48.0.0-cp38-abi3-linux_armv7l.whl").write_bytes(b"")
             req = Requirement("cryptography<43,>=2.1.4")
             skip, reason = find_links_wheel_build_skip(req, links)
             self.assertTrue(skip)
@@ -990,6 +1532,17 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             self.assertTrue(skip)
             self.assertIn("already has", reason)
             self.assertIn("42.0.8", reason)
+
+    @patch("_helper_functions.sys.version_info", MagicMock(major=3, minor=8))
+    def test_find_links_uses_pep425_cpython_versions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            links = Path(tmp)
+            (links / "pkg-1.0-cp38-cp38-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            (links / "pkg-1.1-cp39-abi3-manylinux_2_28_x86_64.whl").write_bytes(b"")
+            skip_exact, _ = find_links_wheel_build_skip(Requirement("pkg==1.0"), links)
+            skip_abi3, _ = find_links_wheel_build_skip(Requirement("pkg==1.1"), links)
+            self.assertTrue(skip_exact)
+            self.assertFalse(skip_abi3)
 
     def test_find_links_no_skip_without_wheels_in_find_links(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1007,15 +1560,15 @@ class TestForceInterpreterBinarySkip(unittest.TestCase):
             self.assertFalse(skip)
             self.assertEqual(reason, "")
 
-    def test_find_links_skip_superseded_exact_pin(self):
+    def test_find_links_keeps_older_exact_pin(self):
+        """Another release's exact pin is still built when a newer wheel is present."""
         with tempfile.TemporaryDirectory() as tmp:
             links = Path(tmp)
             (links / "cffi-2.1.0-cp314-cp314-manylinux2014_x86_64.whl").write_bytes(b"")
             req = Requirement("cffi==1.17.1")
             skip, reason = find_links_wheel_build_skip(req, links)
-            self.assertTrue(skip)
-            self.assertIn("newer than obsolete pin", reason)
-            self.assertIn("1.17.1", reason)
+            self.assertFalse(skip)
+            self.assertEqual(reason, "")
 
     @patch("_helper_functions.platform.system", return_value="Linux")
     def test_skip_bounded_pin_without_find_links_wheel(self, _mock_system):

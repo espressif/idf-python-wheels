@@ -6,10 +6,15 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+from packaging.requirements import Requirement
 
 # build_wheels_from_file parses argv at import time; load it with a minimal argv first.
 with patch.object(sys, "argv", ["build_wheels_from_file.py", "-r"]):
@@ -154,6 +159,43 @@ class TestDependentRequirementSkipLine(unittest.TestCase):
     def test_force_interpreter_no_binary_on_linux(self, _sys) -> None:
         self.assertTrue(bwf._apply_force_interpreter_binary(True))
         self.assertEqual(bwf._force_interpreter_no_binary_args("cffi>=1.15"), ["--no-binary", "cffi"])
+
+
+class TestStage2RequirementLoading(unittest.TestCase):
+    def test_required_idf_inputs_do_not_fall_back_to_unconstrained_lines(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            requirements_dir = Path(temp_dir)
+            (requirements_dir / "dependent_requirements.txt").write_text("requests\n", encoding="utf-8")
+            with patch.object(bwf.args, "require_idf_inputs", True):
+                with self.assertRaisesRegex(SystemExit, "IDF branch inputs file not found"):
+                    bwf._load_stage2_requirements(str(requirements_dir))
+
+    def test_resolves_deferred_lines_with_idf_inputs_and_drops_esptool(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            requirements_dir = Path(temp_dir)
+            (requirements_dir / "dependent_requirements.txt").write_text(
+                "esptool\ndbus-python\nrequests\n",
+                encoding="utf-8",
+            )
+            branches = [
+                {
+                    "branch": "release/v6.0",
+                    "idf_major": 6,
+                    "requirements": ["requests"],
+                    "constraints": ["requests<=3"],
+                }
+            ]
+            (requirements_dir / "idf_inputs.json").write_text(
+                json.dumps({"branches": branches}),
+                encoding="utf-8",
+            )
+            with patch.object(bwf, "resolve_branch_subset", return_value={Requirement("requests==2.0")}) as resolve:
+                with patch.object(bwf, "filter_requirements_by_pypi_requires_python", side_effect=lambda pins: pins):
+                    result = bwf._load_stage2_requirements(str(requirements_dir))
+
+        self.assertEqual(result, ["requests==2.0"])
+        resolve.assert_called_once()
+        self.assertEqual(resolve.call_args.args[1], ["dbus-python", "requests"])
 
 
 if __name__ == "__main__":
